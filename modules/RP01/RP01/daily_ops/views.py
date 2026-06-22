@@ -824,6 +824,31 @@ def _fetch_upcoming_vessels(report_date):
 
     return rows
 
+def _fetch_shift_wise_discharge(report_date):
+
+    target_date = report_date - timedelta(days=1)
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    cur.execute("""
+        SELECT
+            shift,
+            cargo_name,
+            COALESCE(SUM(quantity),0) AS qty
+        FROM lueu_lines
+        WHERE TO_DATE(entry_date,'YYYY-MM-DD') = %s
+        GROUP BY shift, cargo_name
+        ORDER BY shift, cargo_name
+    """, (target_date,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return rows
+
 
 def _fetch_discharging_mbcs(report_date):
 
@@ -2168,6 +2193,7 @@ def _build_excel_a4(
     rainfall_table=None,
     bf_table=None,
     rm_table=None,
+    cargo_handled=None,
 ):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -2622,9 +2648,400 @@ def _build_excel_a4(
 
     current_row += 2
 
+    # from openpyxl.styles import Font, Alignment
+    # from openpyxl.utils import get_column_letter
+
+    # --- NEW: explicit fonts for value cells (the data was using the default
+    # tiny font because no .font was ever assigned to these cells) ---
+    VALUE_FONT = Font(name="Calibri", size=21)
+    TOTAL_FONT = Font(name="Calibri", size=21, bold=True)
+
+    cargo_handled_start_row = current_row
+    # =================================================
+    # CARGO HANDLED
+    # =================================================
+
+    cargo_handled = _fetch_shift_wise_discharge(report_date)
+
+    cargo_names = [
+        'BRBF',
+        'Orissa Fines',
+        'Goa Fines',
+        'HBI',
+        'KDL CLO',
+        'Jimblebar Fines',
+        'Bacheli Fines',
+        'Goa Clo',
+        'Mabu',
+        'Illavara',
+        'Uval + Kestrel',
+        'MLV',
+        'PCI',
+        'Antracite',
+        'Limestone',
+        'Bentonite',
+        'Oliflux',
+        'Dolomite',
+        'Slag Loading/Unloading',
+        'Clinker'
+    ]
+
+    CH_START_COL = LABEL_START + UV_TOTAL + 1
+    CA_START_COL = CH_START_COL
+
+    # Title
+    last_ch_col = CH_START_COL + len(cargo_names) + 1
+
+    ws.merge_cells(
+        start_row=current_row,
+        start_column=CH_START_COL,
+        end_row=current_row,
+        end_column=last_ch_col
+    )
+
+    c = ws.cell(
+        current_row,
+        CH_START_COL,
+        "Cargo Handled"
+    )
+
+    c.font = _title_font()
+    c.fill = _fill("D9EAF7")
+    c.alignment = _ctr
+    c.border = thick_bdr
+
+    for cc in range(
+        CH_START_COL,
+        last_ch_col + 1
+    ):
+        ws.cell(
+            current_row,
+            cc
+        ).border = thick_bdr
+
+    # Header Row
+    hdr_row = current_row + 1
+
+    c = ws.cell(
+        hdr_row,
+        CH_START_COL,
+        "Shift"
+    )
+
+    c.font = _font()
+    c.fill = _fill("D9EAF7")
+    c.alignment = _ctr
+    c.border = thick_bdr
+
+    col = CH_START_COL + 1
+
+    for cargo in cargo_names:
+
+        c = ws.cell(
+            hdr_row,
+            col,
+            cargo
+        )
+
+        c.font = _font()
+        c.fill = _fill("D9EAF7")
+        c.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True
+        )
+        c.border = thick_bdr
+
+        col += 1
+
+    c = ws.cell(
+        hdr_row,
+        col,
+        "Grand Total"
+    )
+
+    c.font = _font()
+    c.fill = _fill("D9EAF7")
+    c.alignment = _ctr
+    c.border = thick_bdr
+
+    CH_TOTAL_COL = col
+
+    ws.row_dimensions[
+        hdr_row
+    ].height = 75
+
+    # Data Rows
+    data_row = hdr_row + 1
+
+    cargo_totals = {
+        cargo: 0
+        for cargo in cargo_names
+    }
+
+    grand_total = 0
+
+    for row_offset, shift in enumerate(
+        ['A', 'B', 'C']
+    ):
+
+        excel_row = (
+            data_row +
+            row_offset
+        )
+
+        c = ws.cell(
+            excel_row,
+            CH_START_COL,
+            shift
+        )
+
+        c.font = VALUE_FONT          # <-- was _font(), now bigger
+        c.border = thick_bdr
+        c.alignment = _ctr
+
+        row_total = 0
+
+        col = CH_START_COL + 1
+
+        for cargo in cargo_names:
+
+            qty = sum(
+                float(r.get('qty') or 0)
+                for r in cargo_handled
+                if (
+                    (r.get('shift') or '').strip()
+                    == shift
+                )
+                and (
+                    (r.get('cargo_name') or '').strip()
+                    == cargo
+                )
+            )
+
+            cell = ws.cell(
+                excel_row,
+                col,
+                qty
+            )
+
+            cell.font = VALUE_FONT   # <-- NEW: this was missing entirely
+            cell.border = thick_bdr
+            cell.alignment = _ctr
+
+            cargo_totals[cargo] += qty
+            row_total += qty
+
+            col += 1
+
+        total_cell = ws.cell(
+            excel_row,
+            CH_TOTAL_COL,
+            row_total
+        )
+
+        total_cell.font = TOTAL_FONT  # <-- NEW: this was missing entirely
+        total_cell.border = thick_bdr
+        total_cell.alignment = _ctr
+
+        grand_total += row_total
+
+    # Grand Total Row
+    grand_row = data_row + 3
+
+    c = ws.cell(
+        grand_row,
+        CH_START_COL,
+        "Grand Total"
+    )
+
+    c.font = TOTAL_FONT
+    c.border = thick_bdr
+    c.alignment = _ctr
+
+    col = CH_START_COL + 1
+
+    for cargo in cargo_names:
+
+        c = ws.cell(
+            grand_row,
+            col,
+            cargo_totals[cargo]
+        )
+
+        c.font = TOTAL_FONT
+        c.border = thick_bdr
+        c.alignment = _ctr
+
+        col += 1
+
+    c = ws.cell(
+        grand_row,
+        CH_TOTAL_COL,
+        grand_total
+    )
+
+    c.font = TOTAL_FONT
+    c.border = thick_bdr
+    c.alignment = _ctr
+
+    # Category Totals Row
+    category_row = grand_row + 1
+
+    ibrm_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'BRBF',
+            'Orissa Fines',
+            'Goa Fines',
+            'HBI',
+            'KDL CLO'
+        ]
+    )
+
+    cbrm_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'Jimblebar Fines',
+            'Bacheli Fines',
+            'Goa Clo',
+            'Mabu',
+            'Illavara',
+            'Uval + Kestrel',
+            'MLV',
+            'PCI',
+            'Antracite'
+        ]
+    )
+
+    flux_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'Limestone',
+            'Bentonite',
+            'Oliflux'
+        ]
+    )
+
+    ws.merge_cells(
+        start_row=category_row,
+        start_column=CH_START_COL + 1,
+        end_row=category_row,
+        end_column=CH_START_COL + 5
+    )
+
+    ws.merge_cells(
+        start_row=category_row,
+        start_column=CH_START_COL + 6,
+        end_row=category_row,
+        end_column=CH_START_COL + 14
+    )
+
+    ws.merge_cells(
+        start_row=category_row,
+        start_column=CH_START_COL + 15,
+        end_row=category_row,
+        end_column=CH_START_COL + 17
+    )
+
+    cell = ws.cell(
+        category_row,
+        CH_START_COL + 1,
+        f"IBRM : {ibrm_total:,.0f}"
+    )
+    cell.font = TOTAL_FONT  # <-- NEW
+
+    cell = ws.cell(
+        category_row,
+        CH_START_COL + 6,
+        f"CBRM : {cbrm_total:,.0f}"
+    )
+    cell.font = TOTAL_FONT  # <-- NEW
+
+    cell = ws.cell(
+        category_row,
+        CH_START_COL + 15,
+        f"FLUXES : {flux_total:,.0f}"
+    )
+    cell.font = TOTAL_FONT  # <-- NEW
+
+    cell = ws.cell(
+        category_row,
+        CH_TOTAL_COL,
+        grand_total
+    )
+    cell.font = TOTAL_FONT  # <-- NEW
+
+    for col in range(
+        CH_START_COL,
+        CH_TOTAL_COL + 1
+    ):
+        ws.cell(
+            category_row,
+            col
+        ).border = thick_bdr
+
+    # Move pointer for next section
+    current_row = category_row + 3
+
+    # =================================================
+    # CARGO HANDLED END
+    # =================================================
+
+    # Auto-fit columns
+    ws.column_dimensions[
+        get_column_letter(CH_START_COL)
+    ].width = 15
+
+    for idx, cargo in enumerate(
+        cargo_names,
+        start=CH_START_COL + 1
+    ):
+
+        ws.column_dimensions[
+            get_column_letter(idx)
+        ].width = max(
+            len(str(cargo)) + 4,
+            12
+        )
+
+    ws.column_dimensions[
+        get_column_letter(CH_TOTAL_COL)
+    ].width = 12
+
+    # Apply borders/alignment
+    # NOTE: this loop previously ran AFTER all the value-writing above and
+    # only set alignment+border, never font -- so it could not have been
+    # the cause of small fonts, but it's left here unchanged. It will not
+    # override the fonts we set above since it doesn't touch .font.
+    for rr in range(
+        hdr_row,
+        category_row + 1
+    ):
+        for cc in range(
+            CH_START_COL,
+            CH_TOTAL_COL + 1
+        ):
+
+            cell = ws.cell(rr, cc)
+
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True
+            )
+
+            cell.border = thick_bdr
+
+    # IMPORTANT
+    # Move all following sections below Cargo Handled
+    current_row = category_row + 4
+    
+
     # ── cargo availability ────────────────────────────────────────────
     cargo_availability = cargo_availability or []
     data_row = current_row
+    uv_section_start_row = current_row
 
     if cargo_availability:
         CA_START_COL   = LABEL_START + UV_TOTAL + 1
@@ -3576,7 +3993,7 @@ def _build_excel_a4(
             ws.cell(rr, cc).font   = _font()
 
     # ── upcoming MBCs ─────────────────────────────────────────────────
-    current_row = dashboard_row
+    current_row = cargo_handled_start_row
     upcoming_mbcs = upcoming_mbcs or []
     
 
@@ -4546,6 +4963,352 @@ def daily_ops_preview():
     </table>
     """
 
+    # =================================================
+    # CARGO HANDLED
+    # =================================================
+
+    cargo_handled = _fetch_shift_wise_discharge(report_date)
+
+    cargo_names = [
+    'BRBF',
+    'Orissa Fines',
+    'Goa Fines',
+    'HBI',
+    'KDL CLO',
+
+    'Jimblebar Fines',
+    'Bacheli Fines',
+    'Goa Clo',
+    'Mabu',
+    'Illavara',
+    'Uval + Kestrel',
+    'MLV',
+    'PCI',
+    'Antracite',
+
+    'Limestone',
+    'Bentonite',
+    'Oliflux',
+
+    'Dolomite',
+
+    'Slag Loading/Unloading',
+
+    'Clinker'
+]
+
+    html += """
+    <br><br>
+
+    <h3 style='margin-bottom:10px'>
+        Cargo Handled
+    </h3>
+
+    <div style="
+        width:100%;
+        overflow-x:auto;
+        overflow-y:hidden;
+        margin-bottom:15px;
+    ">
+
+    <table style="
+        border-collapse:collapse;
+        font-family:Arial;
+        font-size:13px;
+        width:max-content;
+        white-space:nowrap;
+    ">
+
+    <tr style="background:#4a90d9;color:white;">
+
+        <th style="
+            border:1px solid #ccc;
+            padding:8px;
+            position:sticky;
+            left:0;
+            background:#4a90d9;
+            z-index:2;
+        ">
+            Shift
+        </th>
+    """
+
+    for cargo in cargo_names:
+
+        html += f"""
+        <th style="
+            border:1px solid #ccc;
+            padding:8px;
+            min-width:90px;
+        ">
+            {cargo}
+        </th>
+        """
+
+    html += """
+        <th style="
+            border:1px solid #ccc;
+            padding:8px;
+            min-width:90px;
+        ">
+            Grand Total
+        </th>
+
+    </tr>
+    """
+
+    cargo_totals = {cargo: 0 for cargo in cargo_names}
+    grand_total = 0
+
+    for shift in ["A", "B", "C"]:
+
+        row_total = 0
+
+        html += f"""
+        <tr>
+
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:center;
+                font-weight:bold;
+                position:sticky;
+                left:0;
+                background:white;
+                font-size:21px;
+                z-index:1;
+            ">
+                {shift}
+            </td>
+        """
+
+        for cargo in cargo_names:
+
+            qty = sum(
+                float(r.get('qty') or 0)
+                for r in cargo_handled
+                if (r.get('shift') or '').strip() == shift
+                and (r.get('cargo_name') or '').strip() == cargo
+            )
+
+            row_total += qty
+            cargo_totals[cargo] += qty
+
+            html += f"""
+            <td style="
+                border:1px solid #ccc;
+                padding:16px;
+                text-align:center;
+                font-weight:bold;
+                font-size:28px;
+                position:sticky;
+                left:0;
+                background:white;
+                z-index:1;
+            ">
+                {shift}
+            </td>
+            """
+
+        grand_total += row_total
+
+        html += f"""
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+                font-weight:bold;
+                font-size:21px;
+                background:#f8f9fa;
+            ">
+                {row_total:,.0f}
+            </td>
+
+        </tr>
+        """
+
+    # ==========================================
+    # GRAND TOTAL ROW
+    # ==========================================
+
+    html += """
+    <tr style="
+        background:#e8f0fe;
+        font-weight:bold;
+    ">
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            position:sticky;
+            left:0;
+            background:#e8f0fe;
+            z-index:1;
+        ">
+            Grand Total
+        </td>
+    """
+
+    for cargo in cargo_names:
+
+        html += f"""
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:right;
+            font-size:21px;
+        ">
+            {cargo_totals[cargo]:,.0f}
+        </td>
+        """
+
+    html += f"""
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:right;
+            background:#dbeafe;
+        ">
+            {grand_total:,.0f}
+        </td>
+
+    </tr>
+    """
+
+    # ==========================================
+    # CATEGORY TOTALS ROW
+    # ==========================================
+
+    ibrm_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'BRBF',
+            'Orissa Fines',
+            'Goa Fines',
+            'HBI',
+            'KDL CLO'
+        ]
+    )
+
+    cbrm_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'Jimblebar Fines',
+            'Bacheli Fines',
+            'Goa Clo',
+            'Mabu',
+            'Illavara',
+            'Uval + Kestrel',
+            'MLV',
+            'PCI',
+            'Antracite'
+        ]
+    )
+
+    flux_total = sum(
+        cargo_totals.get(c, 0)
+        for c in [
+            'Limestone',
+            'Bentonite',
+            'Oliflux'
+        ]
+    )
+
+    dolomite_total = cargo_totals.get('Dolomite', 0)
+
+    slag_total = cargo_totals.get(
+        'Slag Loading/Unloading',
+        0
+    )
+
+    clinker_total = cargo_totals.get(
+        'Clinker',
+        0
+    )
+
+    html += f"""
+    <tr style="
+        background:#f2f2f2;
+        font-weight:bold;
+    ">
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            position:sticky;
+            left:0;
+            background:#f2f2f2;
+            z-index:1;
+        ">
+            Category Totals
+        </td>
+
+        <td colspan="5"
+            style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:center;
+            ">
+            IBRM : {ibrm_total:,.0f}
+        </td>
+
+        <td colspan="9"
+            style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:center;
+            ">
+            CBRM : {cbrm_total:,.0f}
+        </td>
+
+        <td colspan="3"
+            style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:center;
+            ">
+            FLUXES : {flux_total:,.0f}
+        </td>
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:center;
+        ">
+            {dolomite_total:,.0f}
+        </td>
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:center;
+        ">
+            {slag_total:,.0f}
+        </td>
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:center;
+        ">
+            {clinker_total:,.0f}
+        </td>
+
+        <td style="
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:center;
+            background:#dbeafe;
+        ">
+            {grand_total:,.0f}
+        </td>
+
+    </tr>
+
+    </table>
+
+    </div>
+    """
     html += """
 <br><br>
     <h3>Cargo Availability for the Day</h3>
@@ -6044,7 +6807,8 @@ def daily_ops_download():
         editable_table=editable_table,
         rainfall_table=rainfall_table,
         bf_table=bf_table,
-        rm_table=rm_table
+        rm_table=rm_table,
+        cargo_handled=_fetch_shift_wise_discharge
     )
 
     fname = f'DailyOps_{date_str}.xlsx'

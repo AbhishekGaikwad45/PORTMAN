@@ -852,6 +852,189 @@ function previewReport() {
         console.error(err);
     });
 }
+function buildCargoHandledTable(cargoHandledData) {
+
+    const shifts = ['A', 'B', 'C'];
+
+    const cargoNames = [
+        ...new Set(
+            cargoHandledData
+                .map(r => r.cargo_name)
+                .filter(Boolean)
+        )
+    ];
+
+    const header =
+        document.getElementById(
+            'cargoHandledHeader'
+        );
+
+    const body =
+        document.getElementById(
+            'cargoHandledBody'
+        );
+
+    const footer =
+        document.getElementById(
+            'cargoHandledFooter'
+        );
+
+    if (!header || !body || !footer) {
+        return;
+    }
+
+    // Reset table
+    header.innerHTML = `
+        <th style="
+            border:1px solid #ccc;
+            padding:8px;
+        ">
+            Shift
+        </th>
+    `;
+
+    body.innerHTML = '';
+    footer.innerHTML = '';
+
+    // Dynamic Cargo Headers
+    cargoNames.forEach(cargo => {
+
+        const th =
+            document.createElement('th');
+
+        th.style.border = '1px solid #ccc';
+        th.style.padding = '8px';
+        th.innerText = cargo;
+
+        header.appendChild(th);
+
+    });
+
+    const totalHeader =
+        document.createElement('th');
+
+    totalHeader.style.border = '1px solid #ccc';
+    totalHeader.style.padding = '8px';
+    totalHeader.innerText = 'Grand Total';
+
+    header.appendChild(totalHeader);
+
+    const cargoTotals = {};
+    let grandTotal = 0;
+
+    shifts.forEach(shift => {
+
+        let rowTotal = 0;
+
+        let rowHtml = `
+            <tr>
+                <td style="
+                    border:1px solid #ccc;
+                    padding:8px;
+                    text-align:center;
+                    font-weight:bold;
+                ">
+                    ${shift}
+                </td>
+        `;
+
+        cargoNames.forEach(cargo => {
+
+            const rec =
+                cargoHandledData.find(
+                    r =>
+                        r.shift === shift &&
+                        r.cargo_name === cargo
+                );
+
+            const qty =
+                rec
+                    ? Number(rec.qty || 0)
+                    : 0;
+
+            rowTotal += qty;
+
+            cargoTotals[cargo] =
+                (cargoTotals[cargo] || 0)
+                + qty;
+
+            rowHtml += `
+                <td style="
+                    border:1px solid #ccc;
+                    padding:8px;
+                    text-align:right;
+                ">
+                    ${qty > 0
+                        ? qty.toLocaleString()
+                        : ''}
+                </td>
+            `;
+        });
+
+        grandTotal += rowTotal;
+
+        rowHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+                font-weight:bold;
+                background:#f8f9fa;
+            ">
+                ${rowTotal > 0
+                    ? rowTotal.toLocaleString()
+                    : ''}
+            </td>
+        </tr>
+        `;
+
+        body.insertAdjacentHTML(
+            'beforeend',
+            rowHtml
+        );
+    });
+
+    let footerHtml = `
+        <tr style="
+            background:#e8f0fe;
+            font-weight:bold;
+        ">
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+            ">
+                Grand Total
+            </td>
+    `;
+
+    cargoNames.forEach(cargo => {
+
+        footerHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+            ">
+                ${(cargoTotals[cargo] || 0)
+                    .toLocaleString()}
+            </td>
+        `;
+    });
+
+    footerHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+                background:#dbeafe;
+            ">
+                ${grandTotal.toLocaleString()}
+            </td>
+        </tr>
+    `;
+
+    footer.innerHTML = footerHtml;
+}
 //     const grandIBRM =
 //         getNum("total_BRBF") +
 //         getNum("total_Orissa Fines") +
