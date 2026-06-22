@@ -198,11 +198,11 @@ def get_24_hours_report():
         # =================================================
         # MV WAITING
         # =================================================
+
         try:
 
             print("\n--- FETCHING MV WAITING ---")
 
-            # Use selected date directly
             selected_dt = datetime.strptime(
                 selected_date,
                 '%Y-%m-%d'
@@ -229,20 +229,33 @@ def get_24_hours_report():
 
             cur.execute("""
                 SELECT
-                    COALESCE(vcn_doc_num, '') || ' / ' ||
-                    COALESCE(vessel_name, '') AS vessel_name
-                FROM ldud_header
-                WHERE nor_accepted IS NOT NULL
-                AND discharge_commenced IS NULL
+                    COALESCE(h.vcn_doc_num, '') || ' / ' ||
+                    COALESCE(h.vessel_name, '') AS vessel_name
+
+                FROM ldud_header h
+
+                WHERE h.nor_accepted IS NOT NULL
+                AND h.discharge_commenced IS NULL
+
                 AND TO_TIMESTAMP(
-                        nor_accepted,
+                        h.nor_accepted,
                         'YYYY-MM-DD"T"HH24:MI'
                     ) >= %s
+
                 AND TO_TIMESTAMP(
-                        nor_accepted,
+                        h.nor_accepted,
                         'YYYY-MM-DD"T"HH24:MI'
                     ) < %s
+
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM ldud_anchorage a
+                    WHERE a.ldud_id = h.id
+                    AND a.discharge_started IS NOT NULL
+                )
+
                 ORDER BY vessel_name
+
             """, (window_start, window_end))
 
             mv_waiting_rows = cur.fetchall()
@@ -264,6 +277,7 @@ def get_24_hours_report():
                 mv_waiting_count = 0
 
             print("MV WAITING COUNT:", mv_waiting_count)
+            print("MV WAITING LIST:", mv_waiting_list)
 
         except Exception as e:
 
@@ -273,6 +287,7 @@ def get_24_hours_report():
 
             mv_waiting_list = []
             mv_waiting_count = 0
+
 
         # =================================================
         # MBC WAITING
@@ -403,6 +418,7 @@ def get_24_hours_report():
                     )
 
                 ORDER BY
+                    first_anchor.discharge_started ASC,
                     h.vessel_name
 
             """, (
@@ -741,10 +757,19 @@ def get_24_hours_report():
 
                     delay_name_mapping = {
                         'Different Type of Cargo': 'DTC',
+                        'Different Types of Cargo': 'DTC',
+                        'Different Type Cargo': 'DTC',
+
                         'Want of Barge': 'WOB',
+
                         'Bad Weather / Heavy Rain': 'Bad Weather',
                         'Bad Weather/ Rain': 'Bad Weather',
-                        'VTMS Permission': 'VTMS'
+
+                        'VTMS Permission': 'VTMS',
+
+                        'Cement Delay': 'CD',
+                        'Cement Loading Delay': 'CD',
+                        'Cement Cargo Delay': 'CD'
                     }
 
                     delay_name = (
@@ -1472,7 +1497,7 @@ def get_24_hours_report():
         print("JETTY CARGO LIST:", jetty_cargo_list)
 
         # =================================================
-        # RHMS, NO CARGO & MAINTENANCE DELAYS
+        # RHMS, NO CARGO, MAINTENANCE & CEMENT PLANT DELAYS
         # =================================================
 
         delay_rows = []
@@ -1480,6 +1505,7 @@ def get_24_hours_report():
         rhms_delay_hours = 0
         no_cargo_hours = 0
         maintenance_delay_hours = 0
+        cement_plant_delay_hours = 0
 
         try:
 
@@ -1491,16 +1517,12 @@ def get_24_hours_report():
                     l.delay_name,
                     l.from_time,
                     l.to_time
-
                 FROM lueu_lines l
-
                 LEFT JOIN port_delay_types d
                     ON d.name = l.delay_name
-
                 WHERE l.entry_date = %s
                 AND l.delay_name IS NOT NULL
                 AND l.delay_name != ''
-
             """, (fetch_date.strftime('%Y-%m-%d'),))
 
             rows = cur.fetchall()
@@ -1518,19 +1540,10 @@ def get_24_hours_report():
 
                 try:
 
-                    start = datetime.strptime(
-                        from_t,
-                        '%H:%M'
-                    )
+                    start = datetime.strptime(from_t, '%H:%M')
+                    end = datetime.strptime(to_t, '%H:%M')
 
-                    end = datetime.strptime(
-                        to_t,
-                        '%H:%M'
-                    )
-
-                    minutes = (
-                        end - start
-                    ).total_seconds() / 60
+                    minutes = (end - start).total_seconds() / 60
 
                     if minutes < 0:
                         minutes += (24 * 60)
@@ -1540,9 +1553,22 @@ def get_24_hours_report():
                 except Exception:
                     continue
 
+                print(
+                    "TYPE =", delay_type,
+                    "| NAME =", delay_name,
+                    "| HOURS =", hours
+                )
+
                 if delay_name == 'NO CARGO':
 
                     no_cargo_hours += hours
+
+                elif (
+                    delay_type.upper() == 'CEMENT PLANT DELAYS'
+                    or 'CEMENT' in delay_name
+                ):
+
+                    cement_plant_delay_hours += hours
 
                 elif delay_type == 'RMHS Delays':
 
@@ -1555,6 +1581,7 @@ def get_24_hours_report():
             rhms_delay_hours = round(rhms_delay_hours, 2)
             no_cargo_hours = round(no_cargo_hours, 2)
             maintenance_delay_hours = round(maintenance_delay_hours, 2)
+            cement_plant_delay_hours = round(cement_plant_delay_hours, 2)
 
             delay_rows = [
 
@@ -1571,12 +1598,18 @@ def get_24_hours_report():
                 {
                     'delay_name': 'Maintenance Delays',
                     'total_hours': maintenance_delay_hours
+                },
+
+                {
+                    'delay_name': 'Cement Plant Delays',
+                    'total_hours': cement_plant_delay_hours
                 }
             ]
 
             print("RHMS DELAYS:", rhms_delay_hours)
             print("NO CARGO:", no_cargo_hours)
             print("MAINTENANCE DELAYS:", maintenance_delay_hours)
+            print("CEMENT PLANT DELAYS:", cement_plant_delay_hours)
 
         except Exception as e:
 
@@ -1587,42 +1620,48 @@ def get_24_hours_report():
             rhms_delay_hours = 0
             no_cargo_hours = 0
             maintenance_delay_hours = 0
+            cement_plant_delay_hours = 0
 
         response = {
+        'success': True,
 
-            'success': True,
+        'selected_date': datetime.strptime(
+            selected_date,
+            '%Y-%m-%d'
+        ).strftime('%d/%m/%Y'),
 
-            'selected_date': datetime.strptime(
-                selected_date,
-                '%Y-%m-%d'
-            ).strftime('%d/%m/%Y'),
+        'fetch_date': fetch_date.strftime('%Y-%m-%d'),
 
-            'fetch_date': fetch_date.strftime('%Y-%m-%d'),
+        'mv_disch': str(mv_disch),
+        'mv_total_days': str(mv_total_days),
+        'mv_discharge_list': mv_discharge_list,
+        'mv_waiting_list': mv_waiting_list,
 
-            'mv_disch': str(mv_disch),
-            'mv_total_days': str(mv_total_days),
-            'mv_discharge_list': mv_discharge_list,
-            'mv_waiting_list': mv_waiting_list,
+        'barges_count': str(barges_count),
+        'cement_barges': cement_barges,
+        'steel_barges': steel_barges,
+        'cement_cargo': round(cement_cargo, 2),
+        'steel_cargo': round(steel_cargo, 2),
 
-            'barges_count': str(barges_count),
-            'cement_barges': cement_barges,
-            'steel_barges': steel_barges,
-            'cement_cargo': round(cement_cargo, 2),
-            'steel_cargo': round(steel_cargo, 2),
+        'mbc_waiting': mbc_waiting_rows,
+        'mbc_disch_total': str(mbc_disch_total),
 
-            'mbc_waiting': mbc_waiting_rows,
-            'mbc_disch_total': str(mbc_disch_total),
+        'jetty_today': str(jetty_today),
+        'jetty_mtd': str(jetty_mtd),
+        'jetty_ytd': str(jetty_ytd),
 
-            'jetty_today': str(jetty_today),
-            'jetty_mtd': str(jetty_mtd),
-            'jetty_ytd': str(jetty_ytd),
+        'jetty_cargo_list': jetty_cargo_list,
 
-            'jetty_cargo_list': jetty_cargo_list,
+        'rhms_delay_hours': rhms_delay_hours,
+        'maintenance_delay_hours': maintenance_delay_hours,
+        'no_cargo_hours': no_cargo_hours,
+        'cement_plant_delay_hours': cement_plant_delay_hours,
 
-            'rhms_delay_hours': rhms_delay_hours,
-            'maintenance_delay_hours': maintenance_delay_hours,
-            'no_cargo_hours': no_cargo_hours,
+        'delay_rows': delay_rows
+
+
         }
+
 
         print("\nRESPONSE CREATED SUCCESSFULLY")
 

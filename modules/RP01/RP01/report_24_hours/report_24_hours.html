@@ -372,9 +372,10 @@ function buildWhatsAppText(data) {
 
     // Delays
     lines.push(`*Delays / Detention*`);
-    lines.push(`  1. RHMS Delays         - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.`);
-    lines.push(`  2. Maintenance Delays  - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.`);
+    lines.push(`  1. Non Availability of RHMS System  - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.`);
+    lines.push(`  2. Non Availability of Jetty System  - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.`);
     lines.push(`  3. No Cargo            - ${Number(data.no_cargo_hours || 0).toFixed(2)} Hrs.`);
+    lines.push(`  4. Non Availability of Cement Plant System   - ${Number(data.cement_plant_delay_hours || 0).toFixed(2)} Hrs.`);
 
     return lines.join('\n');
 }
@@ -633,9 +634,10 @@ function render24HoursReport(data) {
             <b>Delays / Detention</b>
         </div>
         <ol class="report-list">
-            <li>RHMS Delays - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.</li>
-            <li>Maintenance Delays - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.</li>
+            <li>Non Availability of RHMS System - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.</li>
+            <li>Non Availability of Jetty System - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.</li>
             <li>No Cargo - ${Number(data.no_cargo_hours || 0).toFixed(2)} Hrs.</li>
+            <li>Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours || 0).toFixed(2)} Hrs.</li>
         </ol>
     `;
 
