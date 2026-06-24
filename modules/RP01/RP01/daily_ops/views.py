@@ -5112,11 +5112,46 @@ def daily_ops_preview():
 
         for cargo in cargo_names:
 
+            cargo_alias = {
+                'BRBF': ['BRBF', 'BRBF Fines'],
+                'Dhamra Fines': ['Dhamra Fines -LG'],
+                'Goa Fines': ['Goa Fines', 'Vizag Fines'],
+                'HBI': ['HBI'],
+                'KDL CLO': ['KDL CLO', 'CLO-KDL'],
+
+                'Jimblebar Fines': ['Jimblebar Fines'],
+                'Bacheli Fines': ['Bacheli Fines'],
+                'Goa Clo': ['Goa Clo'],
+                'Mabu': ['Mabu', 'Mabu Coal'],
+                'Illavara': ['Illavara', 'Illawara Coal'],
+                'Uval + Kestrel': ['Uval', 'Kestrel'],
+                'MLV': ['MLV'],
+                'PCI': ['PCI', 'LV PCI Coal'],
+                'Antracite': ['Antracite', 'Anthrcite Coal'],
+
+                'Limestone': ['Limestone', 'Limestone SMS'],
+                'Bentonite': ['Bentonite'],
+                'Oliflux': ['Oliflux'],
+
+                'Dolomite': [
+                    'Dolomite',
+                    'Dolomite Aggregate',
+                    'Dolomite SMS'
+                ],
+
+                'Slag Loading/Unloading': ['Slag'],
+
+                'Clinker': ['Clinker']
+            }
+
             qty = sum(
                 float(r.get('qty') or 0)
                 for r in cargo_handled
                 if (r.get('shift') or '').strip() == shift
-                and (r.get('cargo_name') or '').strip() == cargo
+                and any(
+                    alias.lower() in (r.get('cargo_name') or '').lower()
+                    for alias in cargo_alias.get(cargo, [cargo])
+                )
             )
 
             row_total += qty
