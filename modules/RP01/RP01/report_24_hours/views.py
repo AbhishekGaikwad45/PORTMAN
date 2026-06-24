@@ -856,6 +856,10 @@ def get_24_hours_report():
                         2
                     )
 
+                    # Skip zero-hour delays
+                    if total_delay_hrs <= 0:
+                        continue
+
                     print(
                         "FINAL DELAY:",
                         delay_name,
@@ -864,10 +868,12 @@ def get_24_hours_report():
                     )
 
                     delay_parts.append(
-                        f"{delay_name} - {total_delay_hrs} Hrs"
+                        f"{delay_name} - {total_delay_hrs:.2f} Hrs"
                     )
 
                 print("=====================================\n")
+                print("DELAY TOTALS =", delay_totals)
+                print("DELAY PARTS =", delay_parts)
 
                 delay_text = ", ".join(
                     delay_parts
@@ -1583,33 +1589,38 @@ def get_24_hours_report():
             maintenance_delay_hours = round(maintenance_delay_hours, 2)
             cement_plant_delay_hours = round(cement_plant_delay_hours, 2)
 
-            delay_rows = [
+            delay_rows = []
 
-                {
+            if rhms_delay_hours > 0:
+                delay_rows.append({
                     'delay_name': 'RHMS Delays',
                     'total_hours': rhms_delay_hours
-                },
+                })
 
-                {
+            if no_cargo_hours > 0:
+                delay_rows.append({
                     'delay_name': 'No Cargo',
                     'total_hours': no_cargo_hours
-                },
+                })
 
-                {
+            if maintenance_delay_hours > 0:
+                delay_rows.append({
                     'delay_name': 'Maintenance Delays',
                     'total_hours': maintenance_delay_hours
-                },
+                })
 
-                {
+            if cement_plant_delay_hours > 0:
+                delay_rows.append({
                     'delay_name': 'Cement Plant Delays',
                     'total_hours': cement_plant_delay_hours
-                }
-            ]
+                })
 
             print("RHMS DELAYS:", rhms_delay_hours)
             print("NO CARGO:", no_cargo_hours)
             print("MAINTENANCE DELAYS:", maintenance_delay_hours)
             print("CEMENT PLANT DELAYS:", cement_plant_delay_hours)
+            print("DELAY ROWS:", delay_rows)
+
 
         except Exception as e:
 
@@ -1652,10 +1663,10 @@ def get_24_hours_report():
 
         'jetty_cargo_list': jetty_cargo_list,
 
-        'rhms_delay_hours': rhms_delay_hours,
-        'maintenance_delay_hours': maintenance_delay_hours,
-        'no_cargo_hours': no_cargo_hours,
-        'cement_plant_delay_hours': cement_plant_delay_hours,
+        'rhms_delay_hours': rhms_delay_hours if rhms_delay_hours > 0 else None,
+        'maintenance_delay_hours': maintenance_delay_hours if maintenance_delay_hours > 0 else None,
+        'no_cargo_hours': no_cargo_hours if no_cargo_hours > 0 else None,
+        'cement_plant_delay_hours': cement_plant_delay_hours if cement_plant_delay_hours > 0 else None,
 
         'delay_rows': delay_rows
 

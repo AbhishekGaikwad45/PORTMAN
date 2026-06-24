@@ -316,26 +316,30 @@ function buildWhatsAppText(data) {
     // MV Discharge List
     const mvList = data.mv_discharge_list || [];
     if (mvList.length > 0) {
+
+        lines.push(`*MV's Discharging*`);
+        lines.push('');
+
         mvList.forEach((item, i) => {
 
-    let line = `${i + 1}. ${item.vessel_name} - ${item.cargo_name || ''}`;
-    line += ` - 24 Hrs Discharge: ${Number(item.discharge_24hrs || 0).toLocaleString()} MT`;
-    line += ` / Balance: ${Number(item.balance_qty || 0).toLocaleString()} MT`;
+            let line = `${i + 1}. ${item.vessel_name} - ${item.cargo_name || ''}`;
+            line += ` - 24 Hrs Discharge: ${Number(item.discharge_24hrs || 0).toLocaleString()} MT`;
+            line += ` / Balance: ${Number(item.balance_qty || 0).toLocaleString()} MT`;
 
-    if (item.delay_name) {
-        line += ` / ${item.delay_name}`;
-    }
+            if (item.delay_name) {
+                line += ` / ${item.delay_name}`;
+            }
 
-    if (item.discharge_start_date) {
-        line += ` / Discharge Started: ${item.discharge_start_date}`;
-    }
+            if (item.discharge_start_date) {
+                line += ` / Discharge Started: ${item.discharge_start_date}`;
+            }
 
-    if (item.discharge_end_date) {
-        line += ` / Discharge Completed: ${item.discharge_end_date}`;
-    }
+            if (item.discharge_end_date) {
+                line += ` / Discharge Completed: ${item.discharge_end_date}`;
+            }
 
-    lines.push(line + '\n');
-});
+            lines.push(line + '\n');
+        });
     }
 
     // MBC Discharging
@@ -344,16 +348,18 @@ function buildWhatsAppText(data) {
 
     // Barges
     lines.push(`*Barges in Mumbai Lighterage Operation* - ${data.barges_count} Nos.`);
+    lines.push('');
     lines.push(
-    `(Cement Barges - ${data.cement_barges || 0} Nos.) ` +
-    `(Steel Barges - ${data.steel_barges || 0} Nos.)`
-);
+        `(Cement Barges - ${data.cement_barges || 0} Nos.) ` +
+        `(Steel Barges - ${data.steel_barges || 0} Nos.)`
+    );
     lines.push(`  Cement Cargo  - ${Number(data.cement_cargo || 0).toLocaleString()} MT`);
     lines.push(`  Steel Cargo   - ${Number(data.steel_cargo || 0).toLocaleString()} MT`);
     lines.push('');
 
     // Jetty Handling
     lines.push(`*Jetty Handling:*`);
+    lines.push('');
     lines.push(`Today / MTD / YTD`);
     lines.push(
         `${Number(data.jetty_today || 0).toLocaleString()} MT / ` +
@@ -371,11 +377,34 @@ function buildWhatsAppText(data) {
     lines.push('');
 
     // Delays
-    lines.push(`*Delays / Detention*`);
-    lines.push(`  1. Non Availability of RHMS System  - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.`);
-    lines.push(`  2. Non Availability of Jetty System  - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.`);
-    lines.push(`  3. No Cargo            - ${Number(data.no_cargo_hours || 0).toFixed(2)} Hrs.`);
-    lines.push(`  4. Non Availability of Cement Plant System   - ${Number(data.cement_plant_delay_hours || 0).toFixed(2)} Hrs.`);
+lines.push(`*Delays / Detention*`);
+lines.push('');
+
+let delaySr = 1;
+
+if (Number(data.rhms_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of RHMS System - ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.maintenance_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of Jetty System - ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.no_cargo_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. No Cargo - ${Number(data.no_cargo_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.cement_plant_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.`
+    );
+}
 
     return lines.join('\n');
 }
@@ -544,41 +573,47 @@ function render24HoursReport(data) {
     // Vessel List
     if ((data.mv_discharge_list || []).length > 0) {
 
-        html += `<div style="margin-top:25px;"></div>`;
-        html += `<ol class="report-list">`;
+    html += `<div style="margin-top:25px;"></div>`;
 
-        data.mv_discharge_list.forEach(item => {
+    html += `
+        <div class="report-line">
+            <b>MV's Discharging</b>
+        </div>
+    `;
 
-            const startText = item.discharge_start_date
-                ? ` / Discharge Started: ${item.discharge_start_date}`
-                : '';
+    html += `<ol class="report-list">`;
 
-            const endText = item.discharge_end_date
-                ? ` / Discharge Completed: ${item.discharge_end_date}`
-                : '';
+    data.mv_discharge_list.forEach(item => {
 
-            html += `
-                <li>
-                    ${item.vessel_name}
-                    -
-                    ${item.cargo_name || ''}
-                    -
-                    24 Hrs Discharge:
-                    ${Number(item.discharge_24hrs || 0).toLocaleString()} MT
-                    /
-                    Balance:
-                    ${Number(item.balance_qty || 0).toLocaleString()} MT
-                    ${item.delay_name ? ` / ${item.delay_name}` : ''}
-                    ${startText}
-                    ${endText}
-                </li>
-            `;
-        });
+        const startText = item.discharge_start_date
+            ? ` / Discharge Started: ${item.discharge_start_date}`
+            : '';
 
-        html += `</ol>`;
-        html += `<div style="height:25px;"></div>`;
-    }
+        const endText = item.discharge_end_date
+            ? ` / Discharge Completed: ${item.discharge_end_date}`
+            : '';
 
+        html += `
+            <li>
+                ${item.vessel_name}
+                -
+                ${item.cargo_name || ''}
+                -
+                24 Hrs Discharge:
+                ${Number(item.discharge_24hrs || 0).toLocaleString()} MT
+                /
+                Balance:
+                ${Number(item.balance_qty || 0).toLocaleString()} MT
+                ${item.delay_name ? ` / ${item.delay_name}` : ''}
+                ${startText}
+                ${endText}
+            </li>
+        `;
+    });
+
+    html += `</ol>`;
+    html += `<div style="height:25px;"></div>`;
+}
     html += `
         <div class="report-line">
             <b>MBC's Discharging for Last 24 Hrs -</b>
@@ -630,17 +665,49 @@ function render24HoursReport(data) {
     }
 
     html += `
-        <div class="report-line">
-            <b>Delays / Detention</b>
-        </div>
-        <ol class="report-list">
-            <li>Non Availability of RHMS System - ${Number(data.rhms_delay_hours || 0).toFixed(2)} Hrs.</li>
-            <li>Non Availability of Jetty System - ${Number(data.maintenance_delay_hours || 0).toFixed(2)} Hrs.</li>
-            <li>No Cargo - ${Number(data.no_cargo_hours || 0).toFixed(2)} Hrs.</li>
-            <li>Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours || 0).toFixed(2)} Hrs.</li>
-        </ol>
-    `;
+    <div class="report-line">
+        <b>Delays / Detention</b>
+    </div>
+    <ol class="report-list">
+`;
 
+if (Number(data.rhms_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of RHMS System -
+            ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.maintenance_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of Jetty System -
+            ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.no_cargo_hours || 0) > 0) {
+    html += `
+        <li>
+            No Cargo -
+            ${Number(data.no_cargo_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.cement_plant_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of Cement Plant System -
+            ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+html += `</ol>`;
     html += `</div>`;
 
     $('#report-container')

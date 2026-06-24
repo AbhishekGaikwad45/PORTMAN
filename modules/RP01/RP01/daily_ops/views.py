@@ -2647,15 +2647,8 @@ def _build_excel_a4(
         current_row += 1
 
     current_row += 2
-
-    # from openpyxl.styles import Font, Alignment
-    # from openpyxl.utils import get_column_letter
-
-    # --- NEW: explicit fonts for value cells (the data was using the default
-    # tiny font because no .font was ever assigned to these cells) ---
     VALUE_FONT = Font(name="Calibri", size=21)
     TOTAL_FONT = Font(name="Calibri", size=21, bold=True)
-
     cargo_handled_start_row = current_row
     # =================================================
     # CARGO HANDLED
@@ -2796,7 +2789,7 @@ def _build_excel_a4(
             shift
         )
 
-        c.font = VALUE_FONT          # <-- was _font(), now bigger
+        c.font = _font()
         c.border = thick_bdr
         c.alignment = _ctr
 
@@ -2819,30 +2812,42 @@ def _build_excel_a4(
                 )
             )
 
-            cell = ws.cell(
+            ws.cell(
                 excel_row,
                 col,
                 qty
             )
 
-            cell.font = VALUE_FONT   # <-- NEW: this was missing entirely
-            cell.border = thick_bdr
-            cell.alignment = _ctr
+            ws.cell(
+                excel_row,
+                col
+            ).border = thick_bdr
+
+            ws.cell(
+                excel_row,
+                col
+            ).alignment = _ctr
 
             cargo_totals[cargo] += qty
             row_total += qty
 
             col += 1
 
-        total_cell = ws.cell(
+        ws.cell(
             excel_row,
             CH_TOTAL_COL,
             row_total
         )
 
-        total_cell.font = TOTAL_FONT  # <-- NEW: this was missing entirely
-        total_cell.border = thick_bdr
-        total_cell.alignment = _ctr
+        ws.cell(
+            excel_row,
+            CH_TOTAL_COL
+        ).border = thick_bdr
+
+        ws.cell(
+            excel_row,
+            CH_TOTAL_COL
+        ).alignment = _ctr
 
         grand_total += row_total
 
@@ -2855,7 +2860,7 @@ def _build_excel_a4(
         "Grand Total"
     )
 
-    c.font = TOTAL_FONT
+    c.font = _font()
     c.border = thick_bdr
     c.alignment = _ctr
 
@@ -2869,7 +2874,7 @@ def _build_excel_a4(
             cargo_totals[cargo]
         )
 
-        c.font = TOTAL_FONT
+        c.font = _font()
         c.border = thick_bdr
         c.alignment = _ctr
 
@@ -2881,7 +2886,7 @@ def _build_excel_a4(
         grand_total
     )
 
-    c.font = TOTAL_FONT
+    c.font = _font()
     c.border = thick_bdr
     c.alignment = _ctr
 
@@ -2944,33 +2949,29 @@ def _build_excel_a4(
         end_column=CH_START_COL + 17
     )
 
-    cell = ws.cell(
+    ws.cell(
         category_row,
         CH_START_COL + 1,
         f"IBRM : {ibrm_total:,.0f}"
     )
-    cell.font = TOTAL_FONT  # <-- NEW
 
-    cell = ws.cell(
+    ws.cell(
         category_row,
         CH_START_COL + 6,
         f"CBRM : {cbrm_total:,.0f}"
     )
-    cell.font = TOTAL_FONT  # <-- NEW
 
-    cell = ws.cell(
+    ws.cell(
         category_row,
         CH_START_COL + 15,
         f"FLUXES : {flux_total:,.0f}"
     )
-    cell.font = TOTAL_FONT  # <-- NEW
 
-    cell = ws.cell(
+    ws.cell(
         category_row,
         CH_TOTAL_COL,
         grand_total
     )
-    cell.font = TOTAL_FONT  # <-- NEW
 
     for col in range(
         CH_START_COL,
@@ -3010,10 +3011,6 @@ def _build_excel_a4(
     ].width = 12
 
     # Apply borders/alignment
-    # NOTE: this loop previously ran AFTER all the value-writing above and
-    # only set alignment+border, never font -- so it could not have been
-    # the cause of small fonts, but it's left here unchanged. It will not
-    # override the fonts we set above since it doesn't touch .font.
     for rr in range(
         hdr_row,
         category_row + 1
@@ -3036,6 +3033,7 @@ def _build_excel_a4(
     # IMPORTANT
     # Move all following sections below Cargo Handled
     current_row = category_row + 4
+
     
 
     # ── cargo availability ────────────────────────────────────────────
@@ -5075,7 +5073,6 @@ def daily_ops_preview():
                 position:sticky;
                 left:0;
                 background:white;
-                font-size:21px;
                 z-index:1;
             ">
                 {shift}
@@ -5097,16 +5094,10 @@ def daily_ops_preview():
             html += f"""
             <td style="
                 border:1px solid #ccc;
-                padding:16px;
-                text-align:center;
-                font-weight:bold;
-                font-size:28px;
-                position:sticky;
-                left:0;
-                background:white;
-                z-index:1;
+                padding:8px;
+                text-align:right;
             ">
-                {shift}
+                {qty:,.0f}
             </td>
             """
 
@@ -5118,7 +5109,6 @@ def daily_ops_preview():
                 padding:8px;
                 text-align:right;
                 font-weight:bold;
-                font-size:21px;
                 background:#f8f9fa;
             ">
                 {row_total:,.0f}
@@ -5156,7 +5146,6 @@ def daily_ops_preview():
             border:1px solid #ccc;
             padding:8px;
             text-align:right;
-            font-size:21px;
         ">
             {cargo_totals[cargo]:,.0f}
         </td>
