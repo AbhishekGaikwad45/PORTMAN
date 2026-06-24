@@ -1536,10 +1536,41 @@ def _fetch_mbc_cargo_handling(report_date):
     )
 
     # Financial Year To Date
-    year_rows = _period(
-        fy_start,
-        target_date
-    )
+    # Financial Year To Date
+
+    cur.execute("""
+        SELECT
+            'IBRM' AS cargo_type,
+            'OTHERS' AS owner,
+            COALESCE(SUM(qty), 0) AS qty
+        FROM (
+
+            SELECT
+                quantity AS qty
+            FROM rp01_historical_lueu
+            WHERE entry_date BETWEEN DATE '2026-04-01'
+                                AND DATE '2026-04-30'
+            AND (
+                source_display IS NULL
+                OR source_display NOT ILIKE '%%MV%%'
+            )
+
+            UNION ALL
+
+            SELECT
+                l.quantity AS qty
+            FROM lueu_lines l
+            WHERE l.is_deleted = false
+            AND l.source_type = 'MBC'
+            AND l.entry_date::date BETWEEN DATE '2026-05-01'
+                                    AND %s
+
+        ) x
+    """, (
+        target_date,
+    ))
+
+    year_rows = cur.fetchall()
 
     cur.close()
     conn.close()
