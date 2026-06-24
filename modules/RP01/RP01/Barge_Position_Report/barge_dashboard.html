@@ -1,0 +1,2423 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/css/bootstrap-multiselect.min.css">
+
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/js/bootstrap-multiselect.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+    /* High-Contrast Premium Light Palette */
+    :root {
+        --app-bg: #f8fafc;
+        --surface-bg: #ffffff;
+        --border-clr: #cbd5e1;
+        --text-primary: #0f172a;
+        --text-muted: #64748b;
+
+        /* Interactive Card Status Colors */
+        --state-waiting-bg: #fef08a;
+        --state-waiting-text: #713f12;
+        --state-waiting-border: #fde68a;
+
+        --state-discharging-bg: #bbf7d0;
+        --state-discharging-text: #14532d;
+        --state-discharging-border: #86efac;
+
+        --matrix-empty-bg: #f1f5f9;
+        --matrix-stripe-bg: #e2e8f0;
+    }
+
+    body {
+        background-color: var(--app-bg);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text-primary);
+        margin: 0;
+        min-height: 100vh;
+        box-sizing: border-box;
+    }
+
+    /* Top Metrics Ribbon Grid Area */
+    .metrics-ribbon-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+
+    .metric-card-tile {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .metric-card-tile .info-group label {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        margin-bottom: 6px;
+    }
+
+    .metric-card-tile .info-group span {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-primary);
+    }
+
+
+
+    /* Filters System Sub-Ribbon Area */
+    .filtering-toolbar-deck {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 14px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .filter-input-wrap {
+        position: relative;
+        flex: 1;
+    }
+
+    .filter-input-wrap input,
+    .filter-input-wrap select {
+        width: 100%;
+        background: var(--app-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-size: 13px;
+        color: var(--text-primary);
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .filter-input-wrap input:focus,
+    .filter-input-wrap select:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Master Board Canvas Viewport Layout Frame */
+    .dashboard-viewport {
+        display: grid;
+        grid-template-columns: 220px 1.4fr 1.4fr;
+        gap: 16px;
+        height: calc(100vh - 210px);
+        width: 100%;
+    }
+
+    .panel-frame {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .panel-header {
+        padding: 14px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--border-clr);
+        background: #f8fafc;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .panel-header span.title-tag {
+        color: #b45309;
+    }
+
+    .badge-count {
+        background: #e2e8f0;
+        color: #1e3a8a;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 700;
+    }
+
+    /* ==========================================================================
+       SECTION 1: LEFT SIDEBAR WAITING AREA FLOW
+       ========================================================================== */
+    .waiting-list-flow {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        background: #f8fafc;
+    }
+
+    .waiting-list-flow.drag-active {
+        background: #fef9c3;
+        border: 2px dashed #eab308;
+    }
+
+    .barge-pill-container {
+        background: var(--state-waiting-bg);
+        border: 1px solid var(--state-waiting-border);
+        border-radius: 6px;
+        padding: 14px;
+        cursor: grab;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        transition: transform 0.1s ease;
+    }
+
+    .barge-pill-container:active {
+        cursor: grabbing;
+        transform: scale(0.98);
+    }
+
+    .barge-pill-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        font-weight: 800;
+        color: var(--state-waiting-text);
+        text-transform: uppercase;
+    }
+
+    .barge-pill-cargo {
+        font-size: 12px;
+        color: var(--state-waiting-text);
+        font-weight: 600;
+        opacity: 0.9;
+    }
+
+    .barge-pill-metrics {
+        font-size: 12px;
+        color: var(--state-waiting-text);
+        font-weight: 700;
+        margin-top: 4px;
+    }
+
+    /* ==========================================================================
+       SECTION 2 & 3: CENTER TWO-COLUMN JETTY MATRICES
+       ========================================================================== */
+    .matrix-wrapper {
+        overflow-x: auto;
+        overflow-y: auto;
+    }
+
+
+    .vessel-panel-frame .matrix-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden;
+        width: 100%;
+    }
+
+
+
+    .matrix-table {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+    }
+
+    .matrix-table th {
+        position: sticky;
+        top: 0;
+        background: #f8fafc;
+        z-index: 10;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-muted);
+        padding: 12px 6px;
+        border-bottom: 1px solid var(--border-clr);
+        text-align: center;
+        letter-spacing: 0.5px;
+    }
+
+    .matrix-table th:first-child {
+        text-align: left;
+        padding-left: 16px;
+    }
+
+    .matrix-table tr:nth-child(even) .matrix-dropzone.empty-slot {
+        background: var(--matrix-stripe-bg);
+    }
+
+    .matrix-table td {
+        border-bottom: 1px solid var(--border-clr);
+        padding: 6px 4px;
+        text-align: center;
+        vertical-align: middle;
+    }
+
+    .jetty-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-primary);
+        text-align: left !important;
+        padding-left: 10px !important;
+        width: 85px;
+        min-width: 85px;
+        max-width: 85px;
+        letter-spacing: 0.2px;
+        line-height: 14px;
+    }
+
+    .matrix-dropzone {
+        width: 100%;
+        height: 110px;
+        min-height: 110px;
+        min-width: unset;
+        box-sizing: border-box;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 2px;
+        box-sizing: border-box;
+    }
+
+    .matrix-dropzone.empty-slot {
+        background: var(--matrix-empty-bg);
+        color: #94a3b8;
+        font-weight: 500;
+        font-size: 11px;
+    }
+
+    .matrix-dropzone.drag-active {
+        background: #dbeafe !important;
+        border: 1px dashed #3b82f6;
+    }
+
+    /* Discharging Matrix State Card Block */
+    .berth-allocated-card {
+        width: 100%;
+        border-radius: 10px;
+        min-width: 80px;
+        min-height: 105px;
+        padding: 8px;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    .berth-allocated-card.discharging {
+        background: #bbf7d0;
+        /* Green */
+    }
+
+    .berth-allocated-card.waiting-discharge {
+        background: #dbeafe;
+        /* Light Blue */
+    }
+
+    .berth-allocated-card.completed-discharge {
+        background: #e5e7eb;
+        /* Grey */
+    }
+
+    .berth-card-title {
+        font-size: 11px;
+        line-height: 14px;
+        word-break: break-word;
+    }
+
+    .berth-card-cargo {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--state-discharging-text);
+        opacity: 0.9;
+    }
+
+    .berth-card-metrics {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--state-discharging-text);
+        margin-top: 2px;
+    }
+
+    /* ==========================================================================
+       SECTION 4: RIGHT-SIDE SYSTEMS LOG DECK
+       ========================================================================== */
+    .sidebar-block {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-clr);
+    }
+
+    .sidebar-block:last-child {
+        border-bottom: none;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        margin-bottom: 10px;
+        font-weight: 600;
+    }
+
+    .color-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+    }
+
+    .instruction-text {
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.5;
+        margin-top: 12px;
+    }
+
+    .log-scroller {
+        flex: 1;
+        overflow-y: auto;
+        background: var(--matrix-empty-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+        padding: 12px;
+        margin-top: 10px;
+    }
+
+    .log-item {
+        font-size: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border-clr);
+        line-height: 1.4;
+    }
+
+    .log-item strong {
+        color: var(--text-primary);
+        text-transform: uppercase;
+    }
+
+    .log-item span {
+        color: var(--text-muted);
+        display: block;
+        font-size: 10px;
+        margin-top: 3px;
+    }
+
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+    }
+
+    /* ==========================================================================
+       NEW SECTION: SHIFT REPORT META BAR (Editable Date / Incharge / Shift)
+       ========================================================================== */
+    .shift-meta-bar {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 14px 16px;
+        margin-top: 16px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .meta-field-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        min-width: 150px;
+    }
+
+    .meta-field-group label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+        letter-spacing: 0.6px;
+    }
+
+    .meta-field-group input,
+    .meta-field-group select {
+        background: var(--app-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+        padding: 9px 10px;
+        font-size: 13px;
+        color: var(--text-primary);
+        font-weight: 600;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .meta-field-group input:focus,
+    .meta-field-group select:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    }
+
+    /* ==========================================================================
+       NEW SECTION: MOTHER VESSEL + TIDE TABLE
+       ========================================================================== */
+
+
+    .vessel-panel-frame,
+    .tide-panel-frame,
+    .notes-panel-frame {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .vessel-panel-frame {
+        width: 100%;
+        max-width: 100%;
+        margin-bottom: 15px;
+    }
+
+    .vessel-info-table {
+        width: 100%;
+        table-layout: fixed;
+    }
+
+    .vessel-info-table th,
+    .vessel-info-table td {
+        font-size: 11px;
+        padding: 8px;
+        word-break: break-word;
+    }
+
+    .tide-panel-frame {
+        width: 320px;
+        max-width: 320px;
+    }
+
+    .tide-table {
+        width: 100%;
+    }
+
+    .shift-meta-bar {
+        margin-top: 15px;
+        margin-bottom: 15px;
+    }
+
+    .meta-field-group {
+        min-width: 180px;
+    }
+
+    .add-row-btn {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        color: #1d4ed8;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        letter-spacing: 0.3px;
+        transition: background 0.15s;
+    }
+
+    .add-row-btn:hover {
+        background: #dbeafe;
+    }
+
+    .remove-row-btn {
+        background: none;
+        border: none;
+        color: #94a3b8;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: color 0.15s, background 0.15s;
+    }
+
+    .remove-row-btn:hover {
+        color: #dc2626;
+        background: #fef2f2;
+    }
+
+    .vessel-info-table,
+    .tide-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vessel-info-table th,
+    .tide-table th {
+        position: sticky;
+        top: 0;
+        background: #f8fafc;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text-muted);
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--border-clr);
+        text-align: left;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+    }
+
+    .vessel-info-table td,
+    .tide-table td {
+        border-bottom: 1px solid var(--border-clr);
+        padding: 10px 8px;
+        font-size: 12px;
+        color: var(--text-primary);
+        vertical-align: top;
+    }
+
+    .vessel-info-table td[contenteditable="true"]:hover,
+    .vessel-info-table td[contenteditable="true"]:focus,
+    .tide-table td[contenteditable="true"]:hover,
+    .tide-table td[contenteditable="true"]:focus {
+        background: #f8fafc;
+        outline: 1px dashed #93c5fd;
+        outline-offset: -2px;
+    }
+
+    .vessel-info-table td.vessel-name-cell {
+        font-weight: 700;
+    }
+
+    .vessel-info-table td.vessel-name-cell .vessel-cargo-line {
+        display: block;
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 11px;
+        margin-top: 2px;
+    }
+
+    .tide-type-tag {
+        font-size: 10px;
+        font-weight: 800;
+        padding: 2px 7px;
+        border-radius: 10px;
+        letter-spacing: 0.4px;
+    }
+
+    .tide-type-tag.lw {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .tide-type-tag.hw {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    /* ==========================================================================
+       NEW SECTION: JETTY BARGE POSITION NOTES
+       ========================================================================== */
+    .notes-log-list {
+        padding: 12px 16px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+
+    .note-entry-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 8px 10px;
+        background: #f8fafc;
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+    }
+
+    .note-index {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #e2e8f0;
+        color: #1e3a8a;
+        font-size: 11px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 1px;
+    }
+
+    .note-text {
+        flex: 1;
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: var(--text-primary);
+    }
+
+    .note-text:hover,
+    .note-text:focus {
+
+        background: #ffffff;
+    }
+
+    .secondary-panels-stack {
+        width: 100%;
+        display: block;
+        margin-top: 15px;
+        margin-bottom: 15px;
+    }
+
+    .vessel-panel-frame,
+    .tide-panel-frame,
+    .notes-panel-frame {
+        background: #fff;
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    /* Same spacing for Notes */
+    .notes-panel-frame {
+        margin-top: 15px;
+    }
+
+    .vessel-panel-frame {
+        margin-bottom: 0px;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+
+    .page-header {
+        margin-bottom: 15px;
+    }
+
+    .page-header h2 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .breadcrumb-wrapper {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 15px;
+    }
+
+    .breadcrumb-wrapper a {
+        color: #3b82f6;
+        text-decoration: none;
+    }
+
+    .badge-primary {
+        background: #3b82f6;
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        margin-left: 8px;
+    }
+
+
+
+
+    .filter-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        background: #fff;
+        border: 1px solid #d9e2ec;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+    }
+
+    .logs-toolbar {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .logs-toolbar .title {
+        font-size: 14px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .filter-group label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        color: #6b7280;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+    }
+
+    .filter-group input[type="datetime-local"] {
+        width: 190px;
+        height: 34px;
+        padding: 6px 10px;
+        border: 1px solid #d9e2ec;
+        border-radius: 4px;
+        background: #fff;
+        font-size: 13px;
+    }
+
+    .filter-btn {
+        height: 32px;
+        padding: 0 20px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .filter-btn.primary {
+        background: #4a90e2;
+        color: #fff;
+        height: 30px;
+        padding: 0 18px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .filter-btn.primary:hover {
+        background: #357abd;
+    }
+
+    .vessel-horizontal-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vessel-horizontal-table th {
+        background: #4d8ccd;
+        color: #fff;
+        padding: 10px;
+        min-width: 110px;
+        white-space: normal;
+        text-align: center;
+    }
+
+    .vessel-horizontal-table td {
+        padding: 8px;
+        border: 1px solid #d1d5db;
+        font-size: 12px;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .vessel-horizontal-table td:first-child {
+        font-weight: 700;
+        width: 220px;
+        background: #fafafa;
+    }
+
+    .logs-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, .45);
+        z-index: 9999;
+    }
+
+    .logs-modal-content {
+        width: 900px;
+        max-width: 95%;
+        height: 80vh;
+        margin: 40px auto;
+        background: #fff;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .logs-modal-header {
+        padding: 15px;
+        border-bottom: 1px solid #cbd5e1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-weight: 700;
+    }
+
+    .logs-modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+    }
+
+    .logs-modal-body .log-item {
+        padding: 10px 0;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .notes-tide-row {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 12px;
+        margin-top: 15px;
+    }
+
+    .notes-panel-frame {
+        width: 100%;
+        margin-top: 0;
+    }
+
+    .tide-panel-frame {
+        width: 320px;
+    }
+
+    .reset-btn {
+        background: #f8fafc;
+        color: #64748b;
+        border: 1px solid #d9e2ec;
+    }
+
+    .shift-discharge-panel {
+        margin-top: 15px;
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .shift-discharge-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+
+    .shift-discharge-table th {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        padding: 8px;
+        text-align: center;
+        font-weight: 700;
+    }
+
+    .shift-discharge-table td {
+        border: 1px solid #cbd5e1;
+        padding: 6px 8px;
+        height: 32px;
+    }
+
+    .total-row {
+        background: #f8fafc;
+        font-weight: 700;
+    }
+
+    .shift-summary-wrapper {
+        display: flex;
+        gap: 20px;
+        margin-top: 15px;
+        align-items: flex-start;
+    }
+
+    .shift-summary-table,
+    .slag-summary-table {
+        border-collapse: collapse;
+        background: #fff;
+    }
+
+    .shift-summary-table {
+        width: 420px;
+    }
+
+    .slag-summary-table {
+        width: 250px;
+    }
+
+    .slag-table {
+        border-collapse: collapse;
+        width: 140px;
+        background: #fff;
+    }
+
+    .slag-table td {
+        border: 1px solid #cbd5e1;
+        /* black border kadha */
+        padding: 8px 12px;
+        /* same as shift table */
+        height: 32px;
+        /* same row height */
+        font-size: 12px;
+        background: #fff;
+    }
+
+    .shift-summary-table,
+    .slag-table {
+        border-collapse: collapse;
+        background: #fff;
+    }
+
+    .shift-summary-table {
+        width: 420px;
+    }
+
+    .shift-summary-table th,
+    .shift-summary-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        height: 32px;
+        font-size: 12px;
+    }
+
+    .slag-table {
+        width: 140px;
+    }
+
+    .slag-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        height: 32px;
+        font-size: 12px;
+        color: #0f172a;
+        background: #fff;
+    }
+
+    .slag-table td:first-child {
+        width: 90px;
+    }
+
+    .slag-table td:last-child {
+        width: 50px;
+    }
+
+    .plan-input {
+        width: 100%;
+        border: none;
+        outline: none;
+        text-align: center;
+        font-size: 12px;
+    }
+</style>
+<div class="page-header">
+    <h2>
+        Daily Bage Position Report
+        <span class="badge badge-primary">RP01</span>
+    </h2>
+
+    <hr>
+
+    <div class="breadcrumb-wrapper">
+        <a href="/module/RP01/">Reports</a>&rsaquo;
+        <span>›</span>
+        <span>Daily Barge Position</span>
+    </div>
+</div>
+
+<div class="filter-bar">
+
+    <div class="filter-group">
+        <label for="report-date">DATE</label>
+        <input type="date" id="report-date"
+            style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;">
+    </div>
+
+    <div class="filter-group">
+        <label for="report-shift">SHIFT</label>
+        <select id="report-shift"
+            style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;font-weight:600;">
+            <option value="ALL" selected>All Shift</option>
+            <option value="A">A Shift </option>
+            <option value="B">B Shift </option>
+            <option value="C">C Shift </option>
+        </select>
+    </div>
+
+    <button type="button" class="filter-btn primary" onclick="applyDateRangeFilter()">
+        👁 Preview
+    </button>
+    <button type="button" class="filter-btn reset-btn">
+        Reset
+    </button>
+    <button type="button" class="filter-btn primary" onclick="downloadExcel()">
+        ↓ Download Excel
+    </button>
+
+    <div class="logs-toolbar">
+        <span class="title">Movement Logs</span>
+        <span class="badge-count" id="logCount">0</span>
+        <button type="button" class="add-row-btn" onclick="showMovementLogs()">View All</button>
+    </div>
+
+</div>
+<div id="logConsole" style="display:none;"></div>
+<!-- ==========================================================================
+     NEW: SHIFT REPORT META BAR — editable Date / Shift Incharge / Shift
+     ========================================================================== -->
+<div id="reportContent" style="display:none;">
+    <div class="shift-meta-bar">
+        <div class="meta-field-group">
+            <label>Shift Incharge</label>
+            <input type="text" id="shiftInchargeName" readonly placeholder="Select Shift Incharge">
+        </div>
+        <div class="meta-field-group">
+            <label>BPO/Portbird</label>
+            <input type="text" id="shiftBpoName" readonly placeholder="Select BPO/Portbird">
+        </div>
+        <div class="meta-field-group">
+            <label>Crane Operator</label>
+            <input type="text" id="shiftIportName" readonly placeholder="Select Crane Operator">
+        </div>
+    </div>
+
+    <div class="metrics-ribbon-grid">
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Total MBC & Barges In Port</label>
+                <span id="metricTotal">{{ total_barges }}</span>
+            </div>
+
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Waiting</label>
+                <span id="metricWaiting" style="color: #b45309">{{ waiting_count }}</span>
+            </div>
+
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Discharging</label>
+                <span id="metricDischarging" style="color: #166534">{{ discharging_count }}</span>
+            </div>
+
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Occupied Berths</label>
+                <span id="metricOccupied" style="color: #1d4ed8">{{ occupied_berths }}</span>
+            </div>
+
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Available Berths</label>
+                <span id="metricFree" style="color: var(--text-muted)">{{ available_berths }}</span>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="filtering-toolbar-deck">
+        <div class="filter-input-wrap">
+            <input type="text" id="searchBargeName" placeholder=" Search barge name..." oninput="triggerClientFilter()">
+        </div>
+        <div class="filter-input-wrap">
+            <input type="text" id="searchCargo" placeholder=" Search cargo..." oninput="triggerClientFilter()">
+        </div>
+        <div class="filter-input-wrap">
+            <select id="selectJettyFilter" onchange="triggerClientFilter()">
+                <option value="ALL">All Berth</option>
+
+                {% for num in berths %}
+                <option value="{{ num }}">{{ num }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-input-wrap">
+            <select id="selectStatusFilter" onchange="triggerClientFilter()">
+                <option value="ALL">All Status</option>
+                <option value="WAITING">Waiting</option>
+                <option value="DISCHARGING">Discharging</option>
+                <option value="COMPLETED">Completed</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="dashboard-viewport">
+
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span class="title-tag">Waiting Area</span>
+                <span class="badge-count" id="waitingCount">{{ waiting_count }}</span>
+            </div>
+            <div class="waiting-list-flow" id="waitingAreaZone" data-location="Waiting Area">
+                {% for barge in waiting %}
+                <div class="barge-pill-container draggable-node" draggable="true" data-id="{{ barge.id }}"
+                    data-name="{{ barge.barge_name }}" data-cargo="{{ barge.cargo }}" data-qty="{{ barge.qty }}">
+                    <div class="barge-pill-header">
+                        {{ barge.type }} - {{ barge.name }}
+                    </div>
+
+                    <div class="barge-pill-cargo">
+                        {{ barge.cargo }}
+                    </div>
+
+
+                    <div class="barge-pill-metrics">
+                        {{ barge.qty }} / {{ barge.qty }} MT
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span>OLD BERTH</span>
+                <span style="color: var(--text-muted); font-size: 11px;">6 BERTH</span>
+            </div>
+            <div class="matrix-wrapper">
+                <table class="matrix-table" id="leftMatrixTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 85px;">BERTH</th>
+                            <th>Alongside</th>
+                            <th>Double<br> Bank</th>
+                            <th>Triple <br>Bank</th>
+                            <th>Fourth<br> Bank</th>
+                            <th>Fifth<br> Bank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for num in berths[:6] %}
+                        <tr data-jetty-row="{{ num }}">
+                            <td class="jetty-label">{{ num }}</td>
+
+                            {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
+                            <td>
+                                <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
+                                    data-position="{{ pos }}">
+                                    —
+                                </div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span>NEW BERTHS</span>
+                <span style="color: var(--text-muted); font-size: 11px;">8 BERTH</span>
+            </div>
+            <div class="matrix-wrapper">
+                <table class="matrix-table" id="rightMatrixTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 85px;">BERTH</th>
+                            <th>Alongside</th>
+                            <th>Double<br> Bank</th>
+                            <th>Triple<br> Bank</th>
+                            <th>Fourth<br> Bank</th>
+                            <th>Fifth <br>Bank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for num in berths[6:] %}
+                        <tr data-jetty-row="{{ num }}">
+                            <td class="jetty-label">{{ num }}</td>
+
+                            {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
+                            <td>
+                                <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
+                                    data-position="{{ pos }}">
+                                    —
+                                </div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- ==========================================================================
+     NEW: MOTHER VESSEL TABLE + TIDE TABLE — editable
+     ========================================================================== -->
+    <div class="secondary-panels-stack ">
+
+        <div class="vessel-panel-frame">
+            <div class="panel-header">
+                <span style="color:#1d4ed8;">Mother Vessel</span>
+
+            </div>
+            <div class="matrix-wrapper">
+                <table class="vessel-horizontal-table">
+                    <thead id="motherVesselHead">
+                        <tr>
+                            <th>Parameter</th>
+
+                            {% for vessel in mother_vessels %}
+                            <th>
+                                Vessel {{ loop.index }}<br>
+                                {{ vessel.vessel_name }}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+
+                    <tbody id="motherVesselBody">
+
+                        <tr>
+                            <td><b>VSL DISCH COMMNACED</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td>{{ vessel.discharge_commenced }}</td>
+                            {% endfor %}
+                        </tr>
+
+                        <tr>
+                            <td><b>VSL DISCHARGE COMPLITED</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td>{{ vessel.discharge_completed }}</td>
+                            {% endfor %}
+                        </tr>
+
+                        <tr>
+                            <td><b>UNDER LOADING</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td>{{ vessel.under_loading }}</td>
+                            {% endfor %}
+                        </tr>
+
+                        <tr>
+                            <td><b>ETA TO DHARAMTAR</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td>{{ vessel.unloaded_till_date }}</td>
+                            {% endfor %}
+                        </tr>
+
+
+
+                        <tr>
+                            <td><b>WT @ R19</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td contenteditable="true"></td>
+                            {% endfor %}
+                        </tr>
+
+                        <tr>
+                            <td><b>ON THE WAY TO GULL</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td>{{ vessel.at_gull_loaded }}</td>
+                            {% endfor %}
+                        </tr>
+
+                        <tr>
+                            <td><b>MBC ETA</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td contenteditable="true">{{ vessel.disch_commenced }}</td>
+                            {% endfor %}
+                        </tr>
+
+
+
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+
+
+    </div>
+
+    <!-- ==========================================================================
+     NEW: JETTY BARGE POSITION NOTES — editable
+     ========================================================================== -->
+    <div class="notes-tide-row">
+        <div class="notes-panel-frame">
+            <div class="panel-header">
+                <span style="color:#1d4ed8;">Notes</span>
+                <button class="add-row-btn" onclick="addNoteRow()">+ Add Note</button>
+            </div>
+            <div class="notes-log-list" id="notesLogList">
+                <div class="note-entry-row">
+                    <span class="note-index">1</span>
+                    <div class="note-text" contenteditable="true">3B to 5A plug problem — informed electrical Mr. Koli.
+                    </div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">2</span>
+                    <div class="note-text" contenteditable="true">3A to 5B chute bypass causing frequent chute jamming.
+                    </div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">3</span>
+                    <div class="note-text" contenteditable="true">As per Swapnil Sir, no shift change available on both
+                        J1 and
+                        J5 — run only 01 loading point.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">4</span>
+                    <div class="note-text" contenteditable="true">G/Aarav to be cleaned for different cargo.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">5</span>
+                    <div class="note-text" contenteditable="true">All KDL clinker barges to be cleaned as per Pankaj
+                        Sir.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">6</span>
+                    <div class="note-text" contenteditable="true">Excavator maintenance work must be permitted as per
+                        the
+                        control room.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">7</span>
+                    <div class="note-text" contenteditable="true">CLO 10*25 (Hold 2) to discharge to plant; CLO 25*50
+                        (Hold 4)
+                        to discharge via LS route — unload both grades separately, as per Swapnil Sir.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">8</span>
+                    <div class="note-text" contenteditable="true">Old unloader VHF of the system to be kept in the
+                        control room.
+                    </div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">9</span>
+                    <div class="note-text" contenteditable="true">As per Swapnil Sir, charda to be cleaned for dry dock
+                        cargo.
+                    </div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">10</span>
+                    <div class="note-text" contenteditable="true">G/Aarav barges to be cleaned as per Swapnil Sir.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+                <div class="note-entry-row">
+                    <span class="note-index">11</span>
+                    <div class="note-text" contenteditable="true">All clinker barges to be cleaned and tarpaulin
+                        collected as
+                        per General Labour / Supervisor — without permission, charda not to be cleaned for different
+                        cargo.
+                    </div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+            </div>
+
+        </div>
+        <div class="tide-panel-frame">
+            <div class="panel-header"><span style="color:#1d4ed8;">Tide Table</span></div>
+            <div class="matrix-wrapper">
+                <table class="tide-table" id="tideTable">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Time</th>
+                            <th>Height (m)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tideTableBody">
+                        {% for tide in tide_data %}
+                        <tr>
+                            <td>
+                                <span class="tide-type-tag {{ tide.type|lower }}">
+                                    {{ tide.type }}
+                                </span>
+                            </td>
+                            <td>{{ tide.time }}</td>
+                            <td>{{ tide.height }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="shift-discharge-panel">
+        <div class="panel-header">
+            <span style="color:#1d4ed8;">Shift Wise Discharge Report</span>
+        </div>
+        <table class="shift-discharge-table" id="shiftDischargeTable">
+            <thead>
+                <tr>
+                    <th colspan="2">SHIFT JETTY DISCHARGE</th>
+                    <th colspan="6">BARGE DISCHARGE</th>
+                </tr>
+                <tr>
+                    <th>CARGO</th>
+                    <th>QTY</th>
+                    <th>BARGES AND MBC</th>
+                    <th>CARGO</th>
+                    <th>BL QTY</th>
+                    <th>ACTUAL DISCHARGE</th>
+                    <th>PAYLOADER CL</th>
+                    <th>LABOUR CLEANED</th>
+                </tr>
+            </thead>
+            <tbody id="shiftDischargeBody">
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">
+                        Select date and click Preview to load data
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="shift-summary-wrapper">
+
+        <table class="shift-summary-table">
+            <thead>
+                <tr>
+                    <th>SHIFT</th>
+                    <th>DISCHARGE</th>
+                    <th>PLAN</th>
+                    <th>DIFF</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                <tr>
+                    <td>A</td>
+                    <td id="aDischarge">0</td>
+                    <td>
+                        <input type="number" id="aPlan" class="plan-input" oninput="calculateShiftDiff()">
+                    </td>
+                    <td id="aDiff">0</td>
+                </tr>
+
+                <tr>
+                    <td>B</td>
+                    <td id="bDischarge">0</td>
+                    <td>
+                        <input type="number" id="bPlan" class="plan-input" oninput="calculateShiftDiff()">
+                    </td>
+                    <td id="bDiff">0</td>
+                </tr>
+
+                <tr>
+                    <td>C</td>
+                    <td id="cDischarge">0</td>
+                    <td>
+                        <input type="number" id="cPlan" class="plan-input" oninput="calculateShiftDiff()">
+                    </td>
+                    <td id="cDiff">0</td>
+                </tr>
+
+                <tr class="total-row">
+                    <td>TOTAL</td>
+                    <td id="totalDischarge">0</td>
+                    <td id="totalPlan">0</td>
+                    <td id="totalDiff">0</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <table class="slag-table">
+            <tbody>
+                <tr>
+                    <td>SLAG</td>
+                    <td id="slagQty">0</td>
+                </tr>
+                <tr>
+                    <td>CLINKER</td>
+                    <td id="clinkerQty">0</td>
+                </tr>
+                <tr>
+                    <td>TOTAL</td>
+                    <td id="totalQty">0</td>
+                </tr>
+                <tr>
+                    <td>STEEL PLANT</td>
+                    <td id="steelPlantQty">0</td>
+                </tr>
+
+            </tbody>
+        </table>
+
+    </div>
+</div>
+
+
+<div id="logsModal" class="logs-modal">
+    <div class="logs-modal-content">
+
+        <div class="logs-modal-header">
+            <span>Movement Logs</span>
+
+            <button class="remove-row-btn" onclick="closeMovementLogs()">
+                ✕
+            </button>
+        </div>
+
+        <div id="logsModalBody" class="logs-modal-body">
+        </div>
+
+    </div>
+</div>
+{% raw %}
+<script>
+
+    // ── Shift time windows ────────────────────────────────────────────────────────
+    const SHIFT_WINDOWS = {
+        ALL: { fromHour: 6, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
+        A: { fromHour: 6, fromMin: 0, toHour: 14, toMin: 0, nextDay: false },
+        B: { fromHour: 14, fromMin: 0, toHour: 22, toMin: 0, nextDay: false },
+        C: { fromHour: 22, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
+    };
+
+    function getShiftDateRange() {
+        const dateVal = document.getElementById('report-date').value;   // "YYYY-MM-DD"
+        const shiftKey = document.getElementById('report-shift').value;  // "A" / "B" / "C"
+
+        if (!dateVal) return null;
+
+        const win = SHIFT_WINDOWS[shiftKey];
+        const base = new Date(dateVal + 'T00:00:00');
+
+        const from = new Date(base);
+        from.setHours(win.fromHour, win.fromMin, 0, 0);
+
+        const toBase = win.nextDay ? new Date(base.getTime() + 86400000) : base;
+        const to = new Date(toBase);
+        to.setHours(win.toHour, win.toMin, 0, 0);
+
+        const fmt = d =>
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+        return { fromISO: fmt(from), toISO: fmt(to) };
+    }
+
+    // ── Main preview trigger ──────────────────────────────────────────────────────
+    function applyDateRangeFilter() {
+        const range = getShiftDateRange();
+        if (!range) {
+            alert('Please select a date.');
+            return;
+        }
+
+        document.getElementById("reportContent").style.display = "block";
+
+        loadBerthOccupancy(range.fromISO, range.toISO);
+        loadMotherVesselData(range.fromISO, range.toISO);
+        loadTideData(range.fromISO, range.toISO);
+        loadShiftWiseDischarge();
+        loadShiftSummary();
+    }
+
+    // ── Mother Vessel ─────────────────────────────────────────────────────────────
+    async function loadMotherVesselData(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const res = await fetch(`/api/module/RP01/mother-vessel-data?${params}`);
+        const vessels = await res.json();
+
+        const headRow = document.querySelector('#motherVesselHead tr');
+        const body = document.getElementById('motherVesselBody');
+
+        headRow.innerHTML = '<th>Parameter</th>';
+        vessels.forEach((v, i) => {
+            headRow.innerHTML += `<th>Vessel ${i + 1}<br>${v.vessel_name || ''}</th>`;
+        });
+
+        const rows = [
+            ['VSL DISCH COMMNACED', 'discharge_commenced'],
+            ['VSL DISCHARGE COMPLITED', 'discharge_completed'],
+            ['UNDER LOADING', 'under_loading'],
+            ['ETA TO DHARAMTAR', 'eta_to_dharamtar'],
+            ['WT @ R19', 'wt_r19'],
+            ['ON THE WAY TO GULL', 'at_gull_loaded'],
+            ['MBC ETA', 'mbc_eta'],
+        ];
+
+        body.innerHTML = '';
+        rows.forEach(([label, key]) => {
+            let rowHtml = `<tr><td><b>${label}</b></td>`;
+            vessels.forEach(v => { rowHtml += `<td contenteditable="true">${v[key] || ''}</td>`; });
+            rowHtml += '</tr>';
+            body.innerHTML += rowHtml;
+        });
+    }
+
+    // ── Tide ──────────────────────────────────────────────────────────────────────
+    async function loadTideData(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const tides = await (await fetch(`/api/module/RP01/tide-data?${params}`)).json();
+        const body = document.getElementById('tideTableBody');
+        body.innerHTML = '';
+        tides.forEach(t => {
+            body.innerHTML += `
+            <tr>
+                <td><span class="tide-type-tag ${(t.type || '').toLowerCase()}">${t.type || ''}</span></td>
+                <td>${t.time || ''}</td>
+                <td>${t.height ?? ''}</td>
+            </tr>`;
+        });
+    }
+
+    // ── Berth Occupancy ───────────────────────────────────────────────────────────
+    async function loadBerthOccupancy(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const items = await (await fetch(`/api/module/RP01/berth-occupancy?${params}`)).json();
+        renderBerthBoard(items);
+    }
+
+    // ── Render Berth Board ────────────────────────────────────────────────────────
+    function renderBerthBoard(items) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+
+        const waitingZoneEl = document.getElementById('waitingAreaZone');
+        waitingZoneEl.innerHTML = '';
+
+        (items || []).forEach(item => {
+            if (item.status === 'Completed') return;
+
+            if (item.status === 'Discharging' && item.berth) {
+                const berth = item.berth.toUpperCase();
+                const position = (item.position || 'A/S').toUpperCase();
+                const zone = document.querySelector(
+                    `.matrix-dropzone[data-berth="${berth}"][data-position="${position}"]`
+                );
+                if (!zone) return;
+                zone.classList.remove('empty-slot');
+                zone.innerHTML = buildBerthCard(item, parseFloat(item.balance_qty || 0));
+            } else {
+                const pill = document.createElement('div');
+                pill.className = 'barge-pill-container draggable-node';
+                if (item.type === 'BARGE' && item.status === 'Under Discharge') {
+                    pill.classList.add('under-discharge');
+                }
+                pill.setAttribute('draggable', 'true');
+                pill.dataset.id = item.id || '';
+                pill.dataset.name = item.name || '';
+                pill.dataset.cargo = item.cargo || '';
+                pill.dataset.qty = item.balance_qty || item.qty || 0;
+                pill.dataset.total = item.total_qty || item.qty || 0;
+                const dqty = parseFloat(item.discharge_qty || 0);
+                const bal = parseFloat(item.balance_qty || item.qty || 0);
+
+                pill.innerHTML = `
+                <div class="barge-pill-header">
+                    ${item.type || 'BARGE'} — ${item.name || ''}
+                </div>
+
+                <div class="barge-pill-cargo">
+                    ${item.cargo || ''}
+                </div>
+
+                <div class="barge-pill-metrics">
+                    Disch: ${dqty} MT
+                </div>
+
+                <div class="barge-pill-metrics" style="color:#b45309;">
+                    Bal: ${bal} MT
+                </div>`;
+                waitingZoneEl.appendChild(pill);
+            }
+        });
+
+        updateInterfaceMetrics();
+    }
+
+    function buildBerthCard(item, balance) {
+        const dqty = parseFloat(item.discharge_qty || 0);
+        const bal = parseFloat(balance || 0);
+
+        let cardClass = '';
+
+        if (bal <= 0) {
+            cardClass = 'completed-discharge';
+        }
+        else if (dqty > 0) {
+            cardClass = 'discharging';
+        }
+        else {
+            cardClass = 'waiting-discharge';
+        }
+
+        return `
+        <div class="berth-allocated-card discharging"
+             draggable="true"
+             data-id="${item.id || ''}"
+             data-name="${item.name || ''}"
+             data-cargo="${item.cargo || ''}"
+             data-qty="${item.total_qty || item.qty || 0}"
+             data-balance="${balance}"
+             data-discharge="${dqty}">
+            <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
+            <div class="berth-card-cargo">${item.cargo || ''}</div>
+            ${item.alongside_time ? `<div class="berth-card-metrics" style="font-size:10px;opacity:.8;">A/S: ${item.alongside_time}</div>` : ''}
+            <div class="berth-card-metrics">Disch: ${dqty} MT</div>
+            <div class="berth-card-metrics" style="color:#b45309;">Bal: ${balance} MT</div>
+        </div>`;
+    }
+
+    // ── Drag & Drop ───────────────────────────────────────────────────────────────
+    let activeDragData = null;
+    let sourceOriginElement = null;
+
+    document.addEventListener('dragstart', function (e) {
+        const node = e.target.closest('.draggable-node, .berth-allocated-card');
+        if (node) {
+            activeDragData = {
+                id: node.dataset.id,
+                name: node.dataset.name,
+                cargo: node.dataset.cargo,
+                qty: node.dataset.qty,
+                balance: node.dataset.balance || node.dataset.qty,
+                total: node.dataset.total || node.dataset.qty,
+                discharge: node.dataset.discharge || 0,
+            };
+            sourceOriginElement = node;
+        }
+    });
+
+    let autoScrollInterval = null;
+
+    document.addEventListener('dragover', function (e) {
+
+        const wrapper = document.elementFromPoint(
+            e.clientX,
+            e.clientY
+        )?.closest('.matrix-wrapper');
+
+        if (!wrapper) {
+            clearInterval(autoScrollInterval);
+            return;
+        }
+
+        const rect = wrapper.getBoundingClientRect();
+
+        const TOP_ZONE = 100;
+        const BOTTOM_ZONE = 100;
+        const SPEED = 15;
+
+        clearInterval(autoScrollInterval);
+
+        // Scroll UP
+        if (e.clientY < rect.top + TOP_ZONE) {
+
+            autoScrollInterval = setInterval(() => {
+                wrapper.scrollTop -= SPEED;
+            }, 15);
+
+        }
+
+        // Scroll DOWN
+        else if (e.clientY > rect.bottom - BOTTOM_ZONE) {
+
+            autoScrollInterval = setInterval(() => {
+                wrapper.scrollTop += SPEED;
+            }, 15);
+
+        }
+    });
+
+    document.addEventListener('dragend', () => {
+        clearInterval(autoScrollInterval);
+    });
+
+    document.addEventListener('drop', () => {
+        clearInterval(autoScrollInterval);
+    });
+
+    document.querySelectorAll('.matrix-dropzone').forEach(zone => {
+        zone.addEventListener('dragover', e => e.preventDefault());
+        zone.addEventListener('dragenter', function () { if (this.classList.contains('empty-slot')) this.classList.add('drag-active'); });
+        zone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+        zone.addEventListener('drop', function (e) {
+            e.preventDefault();
+            this.classList.remove('drag-active');
+            if (!activeDragData || !this.classList.contains('empty-slot')) return;
+
+            const berth = this.dataset.berth;
+            const position = this.dataset.position;
+            let fromLocation = 'WAITING AREA';
+            const oldZone = sourceOriginElement && sourceOriginElement.closest('.matrix-dropzone');
+            if (oldZone) fromLocation = `${oldZone.dataset.berth} ➜ ${oldZone.dataset.position}`;
+
+            cleanSourceOrigin();
+            this.classList.remove('empty-slot');
+
+            const balance = parseFloat(activeDragData.balance || activeDragData.qty || 0);
+            this.innerHTML = `
+            <div class="berth-allocated-card discharging"
+                 draggable="true"
+                 data-id="${activeDragData.id}"
+                 data-name="${activeDragData.name}"
+                 data-cargo="${activeDragData.cargo}"
+                 data-qty="${activeDragData.total || activeDragData.qty}"
+                 data-balance="${balance}"
+                 data-discharge="${activeDragData.discharge || 0}">
+                <div class="berth-card-title">⚓ ${activeDragData.name}</div>
+                <div class="berth-card-cargo">${activeDragData.cargo}</div>
+                <div class="berth-card-metrics">Disch: ${activeDragData.discharge || 0} MT</div>
+                <div class="berth-card-metrics" style="color:#b45309;">Bal: ${balance} MT</div>
+            </div>`;
+
+            writeLog(activeDragData.name, fromLocation, `${berth} ➜ ${position}`);
+            resetDragVariables();
+            updateInterfaceMetrics();
+        });
+    });
+
+    const waitingZone = document.getElementById('waitingAreaZone');
+    waitingZone.addEventListener('dragover', e => e.preventDefault());
+    waitingZone.addEventListener('dragenter', function () { this.classList.add('drag-active'); });
+    waitingZone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+    waitingZone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        this.classList.remove('drag-active');
+        if (!activeDragData) return;
+        if (sourceOriginElement && sourceOriginElement.classList.contains('draggable-node') && sourceOriginElement.parentElement === this) return;
+
+        let fromLocation = 'WAITING AREA';
+        const oldZone = sourceOriginElement && sourceOriginElement.closest('.matrix-dropzone');
+        if (oldZone) fromLocation = `${oldZone.dataset.berth} ➜ ${oldZone.dataset.position}`;
+
+        cleanSourceOrigin();
+        const pill = document.createElement('div');
+        pill.className = 'barge-pill-container draggable-node';
+        pill.setAttribute('draggable', 'true');
+        pill.dataset.id = activeDragData.id;
+        pill.dataset.name = activeDragData.name;
+        pill.dataset.cargo = activeDragData.cargo;
+        pill.dataset.qty = activeDragData.qty;
+        pill.dataset.balance = activeDragData.balance || activeDragData.qty;
+        pill.dataset.total = activeDragData.total || activeDragData.qty;
+        pill.innerHTML = `
+        <div class="barge-pill-header">
+            ⚓ ${activeDragData.name}
+        </div>
+
+        <div class="barge-pill-cargo">
+            ${activeDragData.cargo}
+        </div>
+
+        <div class="barge-pill-metrics">
+            Disch: ${activeDragData.discharge || 0} MT
+        </div>
+
+        <div class="barge-pill-metrics" style="color:#b45309;">
+            Bal: ${activeDragData.balance || activeDragData.qty || 0} MT
+        </div>`;
+        this.appendChild(pill);
+
+        writeLog(activeDragData.name, fromLocation, 'WAITING AREA');
+        resetDragVariables();
+        updateInterfaceMetrics();
+    });
+
+    function cleanSourceOrigin() {
+        if (!sourceOriginElement) return;
+        const pz = sourceOriginElement.closest('.matrix-dropzone');
+        if (pz) { pz.innerHTML = '—'; pz.classList.add('empty-slot'); }
+        else sourceOriginElement.remove();
+    }
+    function resetDragVariables() { activeDragData = null; sourceOriginElement = null; }
+
+    // ── Filter ────────────────────────────────────────────────────────────────────
+    function triggerClientFilter() {
+        const nameQuery = document.getElementById('searchBargeName').value.toLowerCase().trim();
+        const cargoQuery = document.getElementById('searchCargo').value.toLowerCase().trim();
+        const jettyFilter = document.getElementById('selectJettyFilter').value;
+        const statusFilter = document.getElementById('selectStatusFilter').value;
+
+        if (statusFilter === 'COMPLETED') { showCompletedPopup(); return; }
+
+        document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(card => {
+            const ok = card.dataset.name.toLowerCase().includes(nameQuery)
+                && card.dataset.cargo.toLowerCase().includes(cargoQuery)
+                && (statusFilter === 'ALL' || statusFilter === 'WAITING')
+                && jettyFilter === 'ALL';
+            card.style.display = ok ? 'flex' : 'none';
+        });
+
+        document.querySelectorAll('tr[data-jetty-row]').forEach(row => {
+            const jn = row.dataset.jettyRow;
+            const matchJetty = jettyFilter === 'ALL' || jettyFilter.toUpperCase() === jn.toUpperCase();
+            row.style.display = matchJetty ? '' : 'none';
+            row.querySelectorAll('.berth-allocated-card').forEach(card => {
+                const mn = card.dataset.name.toLowerCase().includes(nameQuery);
+                const mc = card.dataset.cargo.toLowerCase().includes(cargoQuery);
+                let ms = true;
+                if (statusFilter === 'WAITING') ms = false;
+                if (statusFilter === 'DISCHARGING') ms = parseFloat(card.dataset.balance || 0) > 0;
+                card.style.opacity = (mn && mc && ms) ? '1' : '0.15';
+                card.style.pointerEvents = (mn && mc && ms) ? 'auto' : 'none';
+            });
+        });
+    }
+
+    // ── Metrics ───────────────────────────────────────────────────────────────────
+    function updateInterfaceMetrics() {
+        const waitingCount = document.querySelectorAll('#waitingAreaZone .barge-pill-container').length;
+        const dischargingCount = document.querySelectorAll('.berth-allocated-card').length;
+        const occupiedBerths = new Set();
+        document.querySelectorAll('.berth-allocated-card').forEach(c => {
+            const z = c.closest('.matrix-dropzone');
+            if (z) occupiedBerths.add(z.dataset.berth);
+        });
+        const occ = occupiedBerths.size;
+        const totalBerths =
+            document.querySelectorAll("tr[data-jetty-row]").length;
+
+        const avail =
+            Math.max(0, totalBerths - occ);
+
+        document.getElementById('waitingCount').innerText = waitingCount;
+        document.getElementById('metricTotal').innerText = waitingCount + dischargingCount;
+        document.getElementById('metricWaiting').innerText = waitingCount;
+        document.getElementById('metricDischarging').innerText = dischargingCount;
+        document.getElementById('metricOccupied').innerText = occ;
+        document.getElementById('metricFree').innerText = avail;
+    }
+
+    // ── Logs ──────────────────────────────────────────────────────────────────────
+    function writeLog(name, from, to) {
+        const item = document.createElement('div');
+        item.className = 'log-item';
+        item.innerHTML = `<strong>${name}</strong> — Moved<br><span>${from} ➜ ${to} @ ${new Date().toLocaleTimeString()}</span>`;
+        const box = document.getElementById('logConsole');
+        box.prepend(item);
+        document.getElementById('logCount').innerText = box.querySelectorAll('.log-item').length;
+    }
+    function showMovementLogs() {
+        document.getElementById('logsModalBody').innerHTML =
+            document.getElementById('logConsole').innerHTML || '<div>No movement logs yet.</div>';
+        document.getElementById('logsModal').style.display = 'block';
+    }
+    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+    window.addEventListener('click', e => { const m = document.getElementById('logsModal'); if (e.target === m) m.style.display = 'none'; });
+
+    // ── Notes ─────────────────────────────────────────────────────────────────────
+    function addNoteRow() {
+        const list = document.getElementById('notesLogList');
+        const row = document.createElement('div');
+        row.className = 'note-entry-row';
+        row.innerHTML = `<span class="note-index">${list.children.length + 1}</span><div class="note-text" contenteditable="true">New note...</div><button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+        list.appendChild(row);
+    }
+    function removeNoteRow(btn) { btn.parentElement.remove(); renumberNotes(); }
+    function renumberNotes() {
+        Array.from(document.getElementById('notesLogList').children).forEach((r, i) => r.querySelector('.note-index').textContent = i + 1);
+    }
+
+    // ── Completed popup ───────────────────────────────────────────────────────────
+    async function showCompletedPopup() {
+
+        const reportDate =
+            document.getElementById('report-date').value;
+
+        const shift =
+            document.getElementById('report-shift').value;
+
+        const params = new URLSearchParams({
+            date: reportDate,
+            shift: shift
+        });
+
+        const items = await (
+            await fetch(
+                `/api/module/RP01/berth-occupancy?${params}`
+            )
+        ).json();
+
+        let html =
+            '<div style="font-size:16px;font-weight:700;margin-bottom:15px;">Completed Barges / MBC</div>';
+
+        const completedItems =
+            items.filter(
+                x => x.status === 'Completed'
+            );
+
+        if (!completedItems.length) {
+
+            html =
+                '<div style="padding:20px;text-align:center;">No Completed Barges / MBC Found</div>';
+
+        } else {
+
+            completedItems.forEach(item => {
+
+                html += `
+                <div class="log-item">
+                    <strong>
+                        ${item.type} - ${item.name}
+                    </strong>
+
+                    <br>
+
+                    <span>
+                        ${item.cargo || ''}
+                    </span>
+
+                    <br>
+
+                    <span>
+                        Completed :
+                        ${item.completed_date || ''}
+                    </span>
+
+                    <br>
+
+                    <span style="color:green;font-weight:600;">
+                        ✓ Completed
+                    </span>
+                </div>
+            `;
+            });
+        }
+
+        document.getElementById(
+            'logsModalBody'
+        ).innerHTML = html;
+
+        document.getElementById(
+            'logsModal'
+        ).style.display = 'block';
+    }
+
+    // ── Shift details + multi-select ──────────────────────────────────────────────
+    const PORTBIRD_LIST = ["Rajendra Mhatre", "Bhushan Patil", "Vinit Thale", "Kedar Patil", "Siddhesh Patil", "Vrutant Shirke", "Rhitik Adsule", "Nikit Mhatre"];
+    let SHIFT_INCHARGE_LIST = [];
+    let CRANE_OPERATOR_LIST = [];
+
+    async function loadShiftDetails() {
+        const data = await (await fetch("/api/module/RP01/shift-details")).json();
+        SHIFT_INCHARGE_LIST = data.shift_incharge_list || [];
+        CRANE_OPERATOR_LIST = data.crane_operator_list || [];
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        loadShiftDetails();
+
+        // Default date = today, auto-detect current shift
+        const dateInput = document.getElementById('report-date');
+        const shiftInput = document.getElementById('report-shift');
+        const today = new Date();
+        dateInput.value = today.toISOString().slice(0, 10);
+        shiftInput.value = 'ALL';
+
+        // Portbird / ShiftIncharge / CraneOp dropdowns
+        [
+            ['shiftBpoName', () => PORTBIRD_LIST],
+            ['shiftInchargeName', () => SHIFT_INCHARGE_LIST],
+            ['shiftIportName', () => CRANE_OPERATOR_LIST],
+        ].forEach(([id, getList]) => {
+            const inp = document.getElementById(id);
+            inp.addEventListener("click", function () {
+                makeMultiSelectEditor(getList())(
+                    { getValue: () => inp.value, getElement: () => inp },
+                    cb => cb(),
+                    val => { inp.value = val; },
+                    () => { }
+                );
+            });
+        });
+    });
+
+    document.querySelector('.reset-btn').addEventListener('click', function () {
+        document.getElementById('reportContent').style.display = 'none';
+    });
+
+    // ── Multi-select editor (unchanged) ──────────────────────────────────────────
+    function makeMultiSelectEditor(optionsList) {
+        return function (cell, onRendered, success, cancel) {
+            var cv = cell.getValue() || '';
+            var selected = cv ? cv.split(',').map(s => s.trim()).filter(Boolean) : [];
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+            wrapper.textContent = cv || 'Select...';
+
+            var dd = document.createElement('div');
+            dd.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.18);padding:8px;min-width:190px;max-height:280px;overflow-y:auto;display:none;';
+            var sb = document.createElement('input'); sb.type = 'text'; sb.placeholder = 'Search...';
+            sb.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
+            dd.appendChild(sb);
+            var lc = document.createElement('div'); dd.appendChild(lc);
+
+            function renderOptions(f) {
+                lc.innerHTML = '';
+                (optionsList || []).filter(i => !f || i.toLowerCase().includes(f.toLowerCase())).forEach(item => {
+                    var label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                    label.addEventListener('mouseenter', () => label.style.background = '#f1f5f9');
+                    label.addEventListener('mouseleave', () => label.style.background = 'none');
+                    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = item; cb.checked = selected.includes(item);
+                    cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;accent-color:#4a90d9;';
+                    cb.addEventListener('change', () => { if (cb.checked) { if (!selected.includes(item)) selected.push(item); } else { selected = selected.filter(s => s !== item); } });
+                    label.appendChild(cb); label.appendChild(document.createTextNode(item)); lc.appendChild(label);
+                });
+            }
+            renderOptions('');
+            sb.addEventListener('input', () => renderOptions(sb.value));
+
+            var br = document.createElement('div'); br.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+            var ab = document.createElement('button'); ab.textContent = 'Apply'; ab.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+            ab.addEventListener('click', e => { e.stopPropagation(); cleanup(); success(selected.join(', ')); });
+            var cb2 = document.createElement('button'); cb2.textContent = 'Cancel'; cb2.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+            cb2.addEventListener('click', e => { e.stopPropagation(); cleanup(); cancel(); });
+            br.appendChild(ab); br.appendChild(cb2); dd.appendChild(br);
+            document.body.appendChild(dd);
+
+            function cleanup() { if (dd.parentNode) dd.parentNode.removeChild(dd); document.removeEventListener('mousedown', oc); }
+            function oc(e) { if (!dd.contains(e.target) && !wrapper.contains(e.target)) { cleanup(); cancel(); } }
+            onRendered(function () { var r = cell.getElement().getBoundingClientRect(); dd.style.left = r.left + 'px'; dd.style.top = (r.bottom + 2) + 'px'; dd.style.display = 'block'; sb.focus(); setTimeout(() => document.addEventListener('mousedown', oc), 10); });
+            wrapper.addEventListener('keydown', e => { if (e.key === 'Escape') { cleanup(); cancel(); } if (e.key === 'Enter') { cleanup(); success(selected.join(', ')); } });
+            return wrapper;
+        };
+    }
+    async function loadShiftWiseDischarge() {
+    const reportDate = document.getElementById('report-date').value;
+    const shift = document.getElementById('report-shift').value;
+    if (!reportDate) return;
+
+    const params = new URLSearchParams({ date: reportDate, shift: shift });
+
+    let data;
+    try {
+        const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+        data = await res.json();
+    } catch (e) {
+        console.error('shift-wise-discharge error:', e);
+        return;
+    }
+
+    const tbody = document.getElementById('shiftDischargeBody');
+    tbody.innerHTML = '';
+
+    const jetty = data.jetty_discharge || [];
+    const barges = data.barge_discharge || [];
+    const mbcs = data.mbc_discharge || [];
+    const bargeRows = [...barges, ...mbcs];
+
+    const maxRows = Math.max(jetty.length, bargeRows.length, 1);
+
+    let jettyTotal = 0, blTotal = 0, actualTotal = 0;
+
+    for (let i = 0; i < maxRows; i++) {
+        const j = jetty[i];
+        const b = bargeRows[i];
+
+        if (j) jettyTotal += j.qty || 0;
+        if (b) blTotal += b.bl_qty || 0;
+        if (b) actualTotal += b.actual_discharge || 0;
+
+        const typeBadge = b ? `<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
+        background:${b.type === 'MBC' ? '#dbeafe' : '#fef9c3'};
+        color:${b.type === 'MBC' ? '#1e40af' : '#92400e'};">${b.type}</span>` : '';
+
+        tbody.innerHTML += `<tr>
+            <td>${j ? (j.cargo_name || '') : ''}</td>
+            <td style="text-align:right;">${j ? j.qty.toLocaleString() : ''}</td>
+            <td>${b ? typeBadge + ' ' + b.name : ''}</td>
+            <td>${b ? b.cargo : ''}</td>
+            <td style="text-align:right;">${b && b.bl_qty ? b.bl_qty.toLocaleString() : ''}</td>
+            <td style="text-align:right;font-weight:600;">${b && b.actual_discharge ? b.actual_discharge.toLocaleString() : ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${b ? b.payloader_cl : ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${b ? b.labour_cleaned : ''}</td>
+        </tr>`;
+    }
+
+    tbody.innerHTML += `<tr class="total-row">
+        <td><b>TOTAL</b></td>
+        <td style="text-align:right;"><b>${jettyTotal.toLocaleString()}</b></td>
+        <td></td><td></td>
+        <td style="text-align:right;"><b>${blTotal.toLocaleString()}</b></td>
+        <td style="text-align:right;"><b>${actualTotal.toLocaleString()}</b></td>
+        <td></td><td></td>
+    </tr>`;
+    // ✅ DO NOT call updateSlagClinkerSummary() here
+    // loadShiftSummary() will call it after totalDischarge is ready
+}
+
+async function loadShiftSummary() {
+    const reportDate = document.getElementById('report-date').value;
+
+    const shifts = ['A', 'B', 'C'];
+    const discharge = { A: 0, B: 0, C: 0 };
+
+    for (const shift of shifts) {
+        const params = new URLSearchParams({ date: reportDate, shift: shift });
+        const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+        const data = await res.json();
+
+        let total = 0;
+        [...(data.barge_discharge || []), ...(data.mbc_discharge || [])].forEach(row => {
+            total += Number(row.actual_discharge || 0);
+        });
+        discharge[shift] = total;
+    }
+
+    document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
+    document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
+    document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
+
+    calculateShiftDiff();
+
+    // ✅ totalDischarge is now written to DOM by calculateShiftDiff()
+    // Safe to calculate Steel Plant now
+    updateSlagClinkerSummary();
+}
+
+function updateSlagClinkerSummary() {
+    let slagQty = 0;
+    let clinkerQty = 0;
+
+    document.querySelectorAll("#shiftDischargeBody tr").forEach(row => {
+        // ✅ Skip the TOTAL footer row
+        if (row.classList.contains('total-row')) return;
+
+        const cargo = (row.cells[3]?.textContent || "").trim().toLowerCase();
+        const qty = parseFloat((row.cells[5]?.textContent || "0").replace(/,/g, "")) || 0;
+
+        // ✅ catches brbf fines, vizag fines, goa fines, or any "fines" variant
+        if (cargo.includes("slag")) {
+            slagQty += qty;
+        }
+
+        if (cargo === "clinker") {
+            clinkerQty += qty;
+        }
+    });
+
+    // ✅ Read totalDischarge AFTER calculateShiftDiff() has written it to DOM
+    const totalDischarge = parseFloat(
+        (document.getElementById("totalDischarge").textContent || "0").replace(/,/g, "")
+    ) || 0;
+
+    const slagClinkerTotal = slagQty + clinkerQty;
+
+    // ✅ STEEL PLANT = Total Discharge - (Slag + Clinker)
+    // e.g. 57,174 - 28,370 = 28,804
+    const steelPlant = totalDischarge - slagClinkerTotal;
+
+    document.getElementById("slagQty").textContent       = slagQty.toLocaleString();
+    document.getElementById("clinkerQty").textContent    = clinkerQty.toLocaleString();
+    document.getElementById("totalQty").textContent      = slagClinkerTotal.toLocaleString();
+    document.getElementById("steelPlantQty").textContent = steelPlant.toLocaleString();
+}
+
+    function getNumber(id) {
+        return parseFloat(
+            document.getElementById(id)
+                .textContent
+                .replace(/,/g, '')
+        ) || 0;
+    }
+    function formatNumber(value) {
+        return Number(value).toLocaleString('en-IN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
+    function calculateShiftDiff() {
+
+        const aDis = getNumber('aDischarge');
+        const bDis = getNumber('bDischarge');
+        const cDis = getNumber('cDischarge');
+
+        const aPlan = parseFloat(document.getElementById('aPlan').value) || 0;
+        const bPlan = parseFloat(document.getElementById('bPlan').value) || 0;
+        const cPlan = parseFloat(document.getElementById('cPlan').value) || 0;
+
+        document.getElementById('aDiff').textContent =
+            document.getElementById('aPlan').value
+                ? formatNumber(aPlan - aDis)
+                : '';
+
+        document.getElementById('bDiff').textContent =
+            document.getElementById('bPlan').value
+                ? formatNumber(bPlan - bDis)
+                : '';
+
+        document.getElementById('cDiff').textContent =
+            document.getElementById('cPlan').value
+                ? formatNumber(cPlan - cDis)
+                : '';
+
+        const totalDischarge = aDis + bDis + cDis;
+        const totalPlan = aPlan + bPlan + cPlan;
+        const totalDiff = totalPlan - totalDischarge;
+
+        document.getElementById('totalDischarge').textContent =
+            formatNumber(totalDischarge);
+
+        document.getElementById('totalPlan').textContent =
+            totalPlan > 0 ? formatNumber(totalPlan) : '';
+
+        document.getElementById('totalDiff').textContent =
+            totalPlan > 0 ? formatNumber(totalDiff) : '';
+    }
+
+    
+
+    
+    
+
+    
+    function downloadExcel() {
+        const reportDate = document.getElementById('report-date').value;
+        const shiftVal = document.getElementById('report-shift').value;
+        const shiftIncharge = encodeURIComponent(document.getElementById('shiftInchargeName').value || '');
+        const bpo = encodeURIComponent(document.getElementById('shiftBpoName').value || '');
+        const operator = encodeURIComponent(document.getElementById('shiftIportName').value || '');
+
+        window.location = `/api/module/RP01/download-barge-position-excel?date=${reportDate}&shift=${shiftVal}&shift_incharge=${shiftIncharge}&bpo=${bpo}&operator=${operator}`;
+    }
+</script>
+{% endraw %}
+
+{% endblock %}
