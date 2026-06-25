@@ -322,17 +322,17 @@
     }
 
     .berth-allocated-card.discharging {
-        background: #bbf7d0;
+        background: #32df6e;
         /* Green */
     }
 
     .berth-allocated-card.waiting-discharge {
-        background: #dbeafe;
+        background: #43e6f1;
         /* Light Blue */
     }
 
     .berth-allocated-card.completed-discharge {
-        background: #e5e7eb;
+        background: #75e67e;
         /* Grey */
     }
 
@@ -1040,6 +1040,92 @@
         text-align: center;
         font-size: 12px;
     }
+
+    .preview-loader {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, .75);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+        backdrop-filter: blur(2px);
+    }
+
+    .loader-box {
+        text-align: center;
+    }
+
+    .loader-spinner {
+        width: 60px;
+        height: 60px;
+        border: 6px solid #dbeafe;
+        border-top: 6px solid #2563eb;
+        border-radius: 50%;
+        animation: spin .8s linear infinite;
+        margin: auto;
+    }
+
+    .loader-text {
+        margin-top: 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #1e3a8a;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .excel-loader-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, .35);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 999999;
+    }
+
+    .excel-loader-box {
+        width: 220px;
+        background: #fff;
+        border-radius: 12px;
+        padding: 28px 20px;
+        text-align: center;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, .2);
+    }
+
+    .excel-loader-spinner {
+        width: 42px;
+        height: 42px;
+        margin: auto;
+        border: 4px solid #dbeafe;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: excelSpin .8s linear infinite;
+    }
+
+    .excel-loader-title {
+        margin-top: 18px;
+        font-size: 20px;
+        font-weight: 600;
+        color: #374151;
+    }
+
+    .excel-loader-subtitle {
+        margin-top: 8px;
+        font-size: 14px;
+        color: #6b7280;
+    }
+
+    @keyframes excelSpin {
+        100% {
+            transform: rotate(360deg);
+        }
+    }
 </style>
 <div class="page-header">
     <h2>
@@ -1197,7 +1283,11 @@
 
 
                     <div class="barge-pill-metrics">
-                        {{ barge.qty }} / {{ barge.qty }} MT
+                        <b>BL :</b> {{ "{:,.0f}".format(barge.total_qty or barge.qty or 0) }} MT
+                    </div>
+
+                    <div class="barge-pill-metrics" style="color:#b45309;">
+                        <b>Bal :</b> {{ "{:,.0f}".format(barge.balance_qty or barge.qty or 0) }} MT
                     </div>
                 </div>
                 {% endfor %}
@@ -1222,7 +1312,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for num in berths[:6] %}
+                        {% for num in old_berths %}
                         <tr data-jetty-row="{{ num }}">
                             <td class="jetty-label">{{ num }}</td>
 
@@ -1259,7 +1349,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for num in berths[6:] %}
+                        {% for num in new_berths %}
                         <tr data-jetty-row="{{ num }}">
                             <td class="jetty-label">{{ num }}</td>
 
@@ -1604,6 +1694,28 @@
 
     </div>
 </div>
+<div id="previewLoader" class="preview-loader" style="display:none;">
+    <div class="loader-box">
+        <div class="loader-spinner"></div>
+        <div class="loader-text">Loading Preview...</div>
+    </div>
+</div>
+<div id="excelLoader" style="display:none;">
+    <div class="excel-loader-overlay">
+        <div class="excel-loader-box">
+            <div class="excel-loader-spinner"></div>
+
+            <div class="excel-loader-title">
+                Preparing Download...
+            </div>
+
+            <div class="excel-loader-subtitle">
+                Fetching data...
+            </div>
+        </div>
+    </div>
+</div>
+<iframe id="downloadFrame" style="display:none;"></iframe>
 {% raw %}
 <script>
 
@@ -1638,20 +1750,34 @@
     }
 
     // ── Main preview trigger ──────────────────────────────────────────────────────
-    function applyDateRangeFilter() {
+    async function applyDateRangeFilter() {
+
         const range = getShiftDateRange();
+
         if (!range) {
-            alert('Please select a date.');
+            alert("Please select a date.");
             return;
         }
 
-        document.getElementById("reportContent").style.display = "block";
+        document.getElementById("previewLoader").style.display = "flex";
 
-        loadBerthOccupancy(range.fromISO, range.toISO);
-        loadMotherVesselData(range.fromISO, range.toISO);
-        loadTideData(range.fromISO, range.toISO);
-        loadShiftWiseDischarge();
-        loadShiftSummary();
+        try {
+
+            document.getElementById("reportContent").style.display = "block";
+
+            await Promise.all([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary()
+            ]);
+
+        } finally {
+
+            document.getElementById("previewLoader").style.display = "none";
+
+        }
     }
 
     // ── Mother Vessel ─────────────────────────────────────────────────────────────
@@ -1726,11 +1852,13 @@
             if (item.status === 'Discharging' && item.berth) {
                 const berth = item.berth.toUpperCase();
                 const position = (item.position || 'A/S').toUpperCase();
+
                 const zone = document.querySelector(
                     `.matrix-dropzone[data-berth="${berth}"][data-position="${position}"]`
                 );
                 if (!zone) return;
                 zone.classList.remove('empty-slot');
+  
                 zone.innerHTML = buildBerthCard(item, parseFloat(item.balance_qty || 0));
             } else {
                 const pill = document.createElement('div');
@@ -1744,8 +1872,10 @@
                 pill.dataset.cargo = item.cargo || '';
                 pill.dataset.qty = item.balance_qty || item.qty || 0;
                 pill.dataset.total = item.total_qty || item.qty || 0;
-                const dqty = parseFloat(item.discharge_qty || 0);
-                const bal = parseFloat(item.balance_qty || item.qty || 0);
+                pill.dataset.unloadingCommenced = item.unloading_commenced || '';
+                pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
+                const bl = parseFloat(item.total_qty || item.qty || 0);
+                const bal = parseFloat(item.balance_qty || bl);
 
                 pill.innerHTML = `
                 <div class="barge-pill-header">
@@ -1757,11 +1887,11 @@
                 </div>
 
                 <div class="barge-pill-metrics">
-                    Disch: ${dqty} MT
+                    <b>BL:</b> ${bl.toLocaleString()} MT
                 </div>
 
                 <div class="barge-pill-metrics" style="color:#b45309;">
-                    Bal: ${bal} MT
+                    <b>Bal:</b> ${bal.toLocaleString()} MT
                 </div>`;
                 waitingZoneEl.appendChild(pill);
             }
@@ -1771,36 +1901,54 @@
     }
 
     function buildBerthCard(item, balance) {
-        const dqty = parseFloat(item.discharge_qty || 0);
+
         const bal = parseFloat(balance || 0);
 
-        let cardClass = '';
+        const unloadStarted =
+            (item.unloading_commenced && String(item.unloading_commenced).trim() !== '') ||
+            (item.commence_discharge_berth && String(item.commence_discharge_berth).trim() !== '');
 
-        if (bal <= 0) {
-            cardClass = 'completed-discharge';
-        }
-        else if (dqty > 0) {
-            cardClass = 'discharging';
-        }
-        else {
-            cardClass = 'waiting-discharge';
-        }
-
+        let cardClass = unloadStarted
+            ? "discharging"          // Green
+            : "waiting-discharge";   // Sky Blue
         return `
-        <div class="berth-allocated-card discharging"
-             draggable="true"
-             data-id="${item.id || ''}"
-             data-name="${item.name || ''}"
-             data-cargo="${item.cargo || ''}"
-             data-qty="${item.total_qty || item.qty || 0}"
-             data-balance="${balance}"
-             data-discharge="${dqty}">
-            <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
-            <div class="berth-card-cargo">${item.cargo || ''}</div>
-            ${item.alongside_time ? `<div class="berth-card-metrics" style="font-size:10px;opacity:.8;">A/S: ${item.alongside_time}</div>` : ''}
-            <div class="berth-card-metrics">Disch: ${dqty} MT</div>
-            <div class="berth-card-metrics" style="color:#b45309;">Bal: ${balance} MT</div>
-        </div>`;
+        <div class="berth-allocated-card ${cardClass} draggable-node" 
+            draggable="true"
+            data-id="${item.id || ''}"
+            data-name="${item.name || ''}"
+            data-cargo="${item.cargo || ''}"
+            data-qty="${item.total_qty || item.qty || 0}"
+            data-balance="${balance}"
+            data-discharge="${item.discharge_qty || 0}"
+            data-unloading-commenced="${item.unloading_commenced || ''}"
+            data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
+
+    <div class="berth-card-title">
+        ⚓ ${item.type || 'BARGE'} — ${item.name || ''}
+    </div>
+
+    <div class="berth-card-cargo">
+        ${item.cargo || ''}
+    </div>
+
+    ${item.alongside_time
+                ? `<div class="berth-card-metrics" style="font-size:10px;opacity:.8;">
+              A/S: ${item.alongside_time}
+           </div>`
+                : ''
+            }
+
+        <div class="berth-card-metrics">
+            <b>BL :</b> ${Number(item.total_qty || item.qty || 0).toLocaleString()} MT
+        </div>
+
+        <div class="berth-card-metrics" style="color:#b45309;">
+            <b>Bal :</b> ${bal.toLocaleString()} MT
+        </div>
+
+
+
+    </div>`;
     }
 
     // ── Drag & Drop ───────────────────────────────────────────────────────────────
@@ -1810,15 +1958,17 @@
     document.addEventListener('dragstart', function (e) {
         const node = e.target.closest('.draggable-node, .berth-allocated-card');
         if (node) {
-            activeDragData = {
-                id: node.dataset.id,
-                name: node.dataset.name,
-                cargo: node.dataset.cargo,
-                qty: node.dataset.qty,
-                balance: node.dataset.balance || node.dataset.qty,
-                total: node.dataset.total || node.dataset.qty,
-                discharge: node.dataset.discharge || 0,
-            };
+        activeDragData = {
+            id: node.dataset.id,
+            name: node.dataset.name,
+            cargo: node.dataset.cargo,
+            qty: node.dataset.qty,
+            balance: node.dataset.balance || node.dataset.qty,
+            total: node.dataset.total || node.dataset.qty,
+            discharge: node.dataset.discharge || 0,
+            unloading_commenced: node.dataset.unloadingCommenced || "",
+            commence_discharge_berth: node.dataset.commencedischargeBerth || ""
+        };
             sourceOriginElement = node;
         }
     });
@@ -1890,21 +2040,45 @@
             cleanSourceOrigin();
             this.classList.remove('empty-slot');
 
-            const balance = parseFloat(activeDragData.balance || activeDragData.qty || 0);
+            const balance = Number(activeDragData.balance || activeDragData.qty || 0);
+            const discharge = Number(activeDragData.discharge || 0);
+            const bl = Number(activeDragData.total || activeDragData.qty || 0);
+            const bal = Number(activeDragData.balance || activeDragData.qty || 0);
+            const unloadStarted =
+                (activeDragData.unloading_commenced && String(activeDragData.unloading_commenced).trim() !== '') ||
+                (activeDragData.commence_discharge_berth && String(activeDragData.commence_discharge_berth).trim() !== '');
+
+            let cardClass = unloadStarted
+                ? "discharging"
+                : "waiting-discharge";
             this.innerHTML = `
-            <div class="berth-allocated-card discharging"
-                 draggable="true"
-                 data-id="${activeDragData.id}"
-                 data-name="${activeDragData.name}"
-                 data-cargo="${activeDragData.cargo}"
-                 data-qty="${activeDragData.total || activeDragData.qty}"
-                 data-balance="${balance}"
-                 data-discharge="${activeDragData.discharge || 0}">
-                <div class="berth-card-title">⚓ ${activeDragData.name}</div>
-                <div class="berth-card-cargo">${activeDragData.cargo}</div>
-                <div class="berth-card-metrics">Disch: ${activeDragData.discharge || 0} MT</div>
-                <div class="berth-card-metrics" style="color:#b45309;">Bal: ${balance} MT</div>
-            </div>`;
+           <div class="berth-allocated-card ${cardClass} draggable-node"
+            draggable="true"
+            data-id="${activeDragData.id}"
+            data-name="${activeDragData.name}"
+            data-cargo="${activeDragData.cargo}"
+            data-qty="${bl}"
+            data-total="${bl}"
+            data-balance="${balance}"
+            data-discharge="${discharge}">
+
+            <div class="berth-card-title">
+                ⚓ ${activeDragData.name}
+            </div>
+
+            <div class="berth-card-cargo">
+                ${activeDragData.cargo}
+            </div>
+
+            <div class="berth-card-metrics">
+                <b>BL :</b> ${bl.toLocaleString()} MT
+            </div>
+
+            <div class="berth-card-metrics" style="color:#b45309;">
+                <b>Bal :</b> ${balance.toLocaleString()} MT
+            </div>
+
+        </div>`;
 
             writeLog(activeDragData.name, fromLocation, `${berth} ➜ ${position}`);
             resetDragVariables();
@@ -2026,12 +2200,54 @@
 
     // ── Logs ──────────────────────────────────────────────────────────────────────
     function writeLog(name, from, to) {
-        const item = document.createElement('div');
-        item.className = 'log-item';
-        item.innerHTML = `<strong>${name}</strong> — Moved<br><span>${from} ➜ ${to} @ ${new Date().toLocaleTimeString()}</span>`;
-        const box = document.getElementById('logConsole');
+
+        const reportDate =
+            document.getElementById("report-date").value;
+
+        const shift =
+            document.getElementById("report-shift").value;
+
+        const shiftIncharge =
+            document.getElementById("shiftInchargeName").value || "-";
+
+        const now = new Date();
+
+        const time = now.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+
+        const item = document.createElement("div");
+        item.className = "log-item";
+
+        item.innerHTML = `
+        <strong>${name}</strong> — Moved
+        <br>
+
+        <span>
+            ${from} ➜ ${to}
+        </span>
+
+        <span>
+            📅 ${reportDate}
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            🕒 ${time}
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            Shift : ${shift}
+        </span>
+
+        <span>
+            Shift Incharge : ${shiftIncharge}
+        </span>
+    `;
+
+        const box = document.getElementById("logConsole");
+
         box.prepend(item);
-        document.getElementById('logCount').innerText = box.querySelectorAll('.log-item').length;
+
+        document.getElementById("logCount").innerText =
+            box.querySelectorAll(".log-item").length;
     }
     function showMovementLogs() {
         document.getElementById('logsModalBody').innerHTML =
@@ -2065,7 +2281,8 @@
 
         const params = new URLSearchParams({
             date: reportDate,
-            shift: shift
+            shift: shift,
+            completed: "1"
         });
 
         const items = await (
@@ -2220,58 +2437,66 @@
         };
     }
     async function loadShiftWiseDischarge() {
-    const reportDate = document.getElementById('report-date').value;
-    const shift = document.getElementById('report-shift').value;
-    if (!reportDate) return;
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+        if (!reportDate) return;
 
-    const params = new URLSearchParams({ date: reportDate, shift: shift });
+        const params = new URLSearchParams({ date: reportDate, shift: shift });
 
-    let data;
-    try {
-        const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
-        data = await res.json();
-    } catch (e) {
-        console.error('shift-wise-discharge error:', e);
-        return;
-    }
+        let data;
+        try {
+            const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+            data = await res.json();
+        } catch (e) {
+            console.error('shift-wise-discharge error:', e);
+            return;
+        }
 
-    const tbody = document.getElementById('shiftDischargeBody');
-    tbody.innerHTML = '';
+        const tbody = document.getElementById('shiftDischargeBody');
+        tbody.innerHTML = '';
 
-    const jetty = data.jetty_discharge || [];
-    const barges = data.barge_discharge || [];
-    const mbcs = data.mbc_discharge || [];
-    const bargeRows = [...barges, ...mbcs];
+        const jetty = data.jetty_discharge || [];
+        const barges = data.barge_discharge || [];
+        const mbcs = data.mbc_discharge || [];
+        const bargeRows = [...barges, ...mbcs];
 
-    const maxRows = Math.max(jetty.length, bargeRows.length, 1);
+        const maxRows = Math.max(jetty.length, bargeRows.length, 1);
 
-    let jettyTotal = 0, blTotal = 0, actualTotal = 0;
+        let jettyTotal = 0, blTotal = 0, actualTotal = 0;
 
-    for (let i = 0; i < maxRows; i++) {
-        const j = jetty[i];
-        const b = bargeRows[i];
+        const payloaderList = bargeRows
+            .filter(r => r.payloader_cl && r.payloader_cl.trim() !== "")
+            .map(r => r.payloader_cl);
 
-        if (j) jettyTotal += j.qty || 0;
-        if (b) blTotal += b.bl_qty || 0;
-        if (b) actualTotal += b.actual_discharge || 0;
+        const labourList = bargeRows
+            .filter(r => r.labour_cleaned && r.labour_cleaned.trim() !== "")
+            .map(r => r.labour_cleaned);
 
-        const typeBadge = b ? `<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
+        for (let i = 0; i < maxRows; i++) {
+            const j = jetty[i];
+            const b = bargeRows[i];
+
+            if (j) jettyTotal += j.qty || 0;
+            if (b) blTotal += b.bl_qty || 0;
+            if (b) actualTotal += b.actual_discharge || 0;
+
+            const typeBadge = b ? `<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
         background:${b.type === 'MBC' ? '#dbeafe' : '#fef9c3'};
         color:${b.type === 'MBC' ? '#1e40af' : '#92400e'};">${b.type}</span>` : '';
 
-        tbody.innerHTML += `<tr>
+            tbody.innerHTML += `<tr>
             <td>${j ? (j.cargo_name || '') : ''}</td>
             <td style="text-align:right;">${j ? j.qty.toLocaleString() : ''}</td>
             <td>${b ? typeBadge + ' ' + b.name : ''}</td>
             <td>${b ? b.cargo : ''}</td>
             <td style="text-align:right;">${b && b.bl_qty ? b.bl_qty.toLocaleString() : ''}</td>
             <td style="text-align:right;font-weight:600;">${b && b.actual_discharge ? b.actual_discharge.toLocaleString() : ''}</td>
-            <td style="font-size:11px;color:#6b7280;">${b ? b.payloader_cl : ''}</td>
-            <td style="font-size:11px;color:#6b7280;">${b ? b.labour_cleaned : ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${payloaderList[i] || ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${labourList[i] || ''}</td>
         </tr>`;
-    }
+        }
 
-    tbody.innerHTML += `<tr class="total-row">
+        tbody.innerHTML += `<tr class="total-row">
         <td><b>TOTAL</b></td>
         <td style="text-align:right;"><b>${jettyTotal.toLocaleString()}</b></td>
         <td></td><td></td>
@@ -2279,76 +2504,76 @@
         <td style="text-align:right;"><b>${actualTotal.toLocaleString()}</b></td>
         <td></td><td></td>
     </tr>`;
-    // ✅ DO NOT call updateSlagClinkerSummary() here
-    // loadShiftSummary() will call it after totalDischarge is ready
-}
-
-async function loadShiftSummary() {
-    const reportDate = document.getElementById('report-date').value;
-
-    const shifts = ['A', 'B', 'C'];
-    const discharge = { A: 0, B: 0, C: 0 };
-
-    for (const shift of shifts) {
-        const params = new URLSearchParams({ date: reportDate, shift: shift });
-        const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
-        const data = await res.json();
-
-        let total = 0;
-        [...(data.barge_discharge || []), ...(data.mbc_discharge || [])].forEach(row => {
-            total += Number(row.actual_discharge || 0);
-        });
-        discharge[shift] = total;
+        // ✅ DO NOT call updateSlagClinkerSummary() here
+        // loadShiftSummary() will call it after totalDischarge is ready
     }
 
-    document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
-    document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
-    document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
+    async function loadShiftSummary() {
+        const reportDate = document.getElementById('report-date').value;
 
-    calculateShiftDiff();
+        const shifts = ['A', 'B', 'C'];
+        const discharge = { A: 0, B: 0, C: 0 };
 
-    // ✅ totalDischarge is now written to DOM by calculateShiftDiff()
-    // Safe to calculate Steel Plant now
-    updateSlagClinkerSummary();
-}
+        for (const shift of shifts) {
+            const params = new URLSearchParams({ date: reportDate, shift: shift });
+            const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+            const data = await res.json();
 
-function updateSlagClinkerSummary() {
-    let slagQty = 0;
-    let clinkerQty = 0;
-
-    document.querySelectorAll("#shiftDischargeBody tr").forEach(row => {
-        // ✅ Skip the TOTAL footer row
-        if (row.classList.contains('total-row')) return;
-
-        const cargo = (row.cells[3]?.textContent || "").trim().toLowerCase();
-        const qty = parseFloat((row.cells[5]?.textContent || "0").replace(/,/g, "")) || 0;
-
-        // ✅ catches brbf fines, vizag fines, goa fines, or any "fines" variant
-        if (cargo.includes("slag")) {
-            slagQty += qty;
+            let total = 0;
+            [...(data.barge_discharge || []), ...(data.mbc_discharge || [])].forEach(row => {
+                total += Number(row.actual_discharge || 0);
+            });
+            discharge[shift] = total;
         }
 
-        if (cargo === "clinker") {
-            clinkerQty += qty;
-        }
-    });
+        document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
+        document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
+        document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
 
-    // ✅ Read totalDischarge AFTER calculateShiftDiff() has written it to DOM
-    const totalDischarge = parseFloat(
-        (document.getElementById("totalDischarge").textContent || "0").replace(/,/g, "")
-    ) || 0;
+        calculateShiftDiff();
 
-    const slagClinkerTotal = slagQty + clinkerQty;
+        // ✅ totalDischarge is now written to DOM by calculateShiftDiff()
+        // Safe to calculate Steel Plant now
+        updateSlagClinkerSummary();
+    }
 
-    // ✅ STEEL PLANT = Total Discharge - (Slag + Clinker)
-    // e.g. 57,174 - 28,370 = 28,804
-    const steelPlant = totalDischarge - slagClinkerTotal;
+    function updateSlagClinkerSummary() {
+        let slagQty = 0;
+        let clinkerQty = 0;
 
-    document.getElementById("slagQty").textContent       = slagQty.toLocaleString();
-    document.getElementById("clinkerQty").textContent    = clinkerQty.toLocaleString();
-    document.getElementById("totalQty").textContent      = slagClinkerTotal.toLocaleString();
-    document.getElementById("steelPlantQty").textContent = steelPlant.toLocaleString();
-}
+        document.querySelectorAll("#shiftDischargeBody tr").forEach(row => {
+            // ✅ Skip the TOTAL footer row
+            if (row.classList.contains('total-row')) return;
+
+            const cargo = (row.cells[3]?.textContent || "").trim().toLowerCase();
+            const qty = parseFloat((row.cells[5]?.textContent || "0").replace(/,/g, "")) || 0;
+
+            // ✅ catches brbf fines, vizag fines, goa fines, or any "fines" variant
+            if (cargo.includes("slag")) {
+                slagQty += qty;
+            }
+
+            if (cargo === "clinker") {
+                clinkerQty += qty;
+            }
+        });
+
+        // ✅ Read totalDischarge AFTER calculateShiftDiff() has written it to DOM
+        const totalDischarge = parseFloat(
+            (document.getElementById("totalDischarge").textContent || "0").replace(/,/g, "")
+        ) || 0;
+
+        const slagClinkerTotal = slagQty + clinkerQty;
+
+        // ✅ STEEL PLANT = Total Discharge - (Slag + Clinker)
+        // e.g. 57,174 - 28,370 = 28,804
+        const steelPlant = totalDischarge - slagClinkerTotal;
+
+        document.getElementById("slagQty").textContent = slagQty.toLocaleString();
+        document.getElementById("clinkerQty").textContent = clinkerQty.toLocaleString();
+        document.getElementById("totalQty").textContent = slagClinkerTotal.toLocaleString();
+        document.getElementById("steelPlantQty").textContent = steelPlant.toLocaleString();
+    }
 
     function getNumber(id) {
         return parseFloat(
@@ -2402,20 +2627,58 @@ function updateSlagClinkerSummary() {
             totalPlan > 0 ? formatNumber(totalDiff) : '';
     }
 
-    
 
-    
-    
+    async function downloadExcel() {
 
-    
-    function downloadExcel() {
         const reportDate = document.getElementById('report-date').value;
         const shiftVal = document.getElementById('report-shift').value;
         const shiftIncharge = encodeURIComponent(document.getElementById('shiftInchargeName').value || '');
         const bpo = encodeURIComponent(document.getElementById('shiftBpoName').value || '');
         const operator = encodeURIComponent(document.getElementById('shiftIportName').value || '');
 
-        window.location = `/api/module/RP01/download-barge-position-excel?date=${reportDate}&shift=${shiftVal}&shift_incharge=${shiftIncharge}&bpo=${bpo}&operator=${operator}`;
+        document.getElementById("excelLoader").style.display = "flex";
+
+        try {
+
+            const response = await fetch(
+                `/api/module/RP01/download-barge-position-excel?date=${reportDate}&shift=${shiftVal}&shift_incharge=${shiftIncharge}&bpo=${bpo}&operator=${operator}`
+            );
+
+            if (!response.ok) {
+                throw new Error("Download failed");
+            }
+
+            const blob = await response.blob();
+
+            const url = window.URL.createObjectURL(blob);
+
+            const a = document.createElement("a");
+            a.href = url;
+
+            const disposition = response.headers.get("Content-Disposition");
+            let filename = "Daily_Barge_Position_Report.xlsx";
+
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+
+            a.download = filename;
+
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+
+            window.URL.revokeObjectURL(url);
+
+        } catch (err) {
+            console.error(err);
+            alert("Excel download failed.");
+        } finally {
+
+            document.getElementById("excelLoader").style.display = "none";
+
+        }
     }
 </script>
 {% endraw %}

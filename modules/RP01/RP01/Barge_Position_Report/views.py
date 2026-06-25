@@ -235,31 +235,46 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
     return vessels
 
 
+
 def _fetch_tide_data(from_datetime, to_datetime):
-    from_str = from_datetime.strftime('%Y-%m-%dT%H:%M')
-    to_str   = to_datetime.strftime('%Y-%m-%dT%H:%M')
 
     conn = get_db()
-    cur  = get_cursor(conn)
-    cur.execute(
-        "SELECT tide_datetime, tide_meters FROM tide_master "
-        "WHERE tide_datetime BETWEEN %s AND %s ORDER BY tide_datetime",
-        (from_str, to_str)
-    )
+    cur = get_cursor(conn)
+
+    cur.execute("""
+        SELECT
+            tide_datetime,
+            tide_meters
+        FROM tide_master
+        WHERE
+            tide_datetime IS NOT NULL
+            AND TRIM(tide_datetime) <> ''
+            AND NULLIF(TRIM(tide_datetime), '')::timestamp >= %s
+        ORDER BY NULLIF(TRIM(tide_datetime), '')::timestamp
+        LIMIT 6
+    """, (from_datetime,))
+
     rows = [dict(r) for r in cur.fetchall()]
+
     cur.close()
     conn.close()
 
     types = _classify_tide_types(rows)
+
     tide_data = []
-    for row, t in zip(rows, types):
-        dt = _parse_dt(row.get('tide_datetime'))
+
+    for row, tide_type in zip(rows, types):
+        dt = _parse_dt(row["tide_datetime"])
+
         tide_data.append({
-            'type':   t,
-            'time':   dt.strftime('%d/%H:%M') if dt else '',
-            'height': row.get('tide_meters'),
+            "type": tide_type,
+            "time": dt.strftime("%d/%m %H:%M") if dt else "",
+            "height": row["tide_meters"],
         })
+
     return tide_data
+
+
 
 
 def get_shift_code(dt):
@@ -390,6 +405,8 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "balance_qty": float(row.get("balance_qty", 0) or 0),
             "berth":          berth,
             "status":         status,
+            "commence_discharge_berth": str(row.get("commence_discharge_berth") or "").strip(),
+            "unloading_commenced":      "",   # barges use commence_discharge_berth
         })
 
     cur.execute("""
@@ -487,8 +504,10 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "discharge_qty": bl_qty,
             "total_qty": bl_qty,
             "balance_qty": balance_qty,
-            "berth": berth,
+            "berth": "",
             "status": status,
+            "unloading_commenced":      str(row.get("unloading_commenced") or "").strip(),
+            "commence_discharge_berth": "",   # MBCs use unloading_commenced
         })
 
         if status == "Discharging" and berth:
@@ -557,13 +576,34 @@ def barge_position_dashboard():
     conn = get_db()
     cur = get_cursor(conn)
 
+
+
     cur.execute("""
-        SELECT berth_name
-        FROM port_berth_master
-        ORDER BY berth_sequence, id
+    SELECT berth_name
+    FROM port_berth_master
     """)
 
     berths = [r["berth_name"].upper() for r in cur.fetchall()]
+
+    old_berths = [
+        "BERTH 1",
+        "BERTH 2",
+        "BERTH 3",
+        "BERTH 4",
+        "BERTH 5",
+        "BERTH 5A",
+    ]
+
+    new_berths = [
+        "BERTH 6",
+        "BERTH 7",
+        "BERTH 8",
+        "BERTH 8A",
+        "BERTH 9",
+        "BERTH 10",
+        "BERTH 11",
+        "BERTH 12",
+    ]
 
     cur.close()
     conn.close()
@@ -577,7 +617,8 @@ def barge_position_dashboard():
         all_barges=barges,
         mother_vessels=mother_vessels,
         tide_data=tide_data,
-         berths=berths,
+        old_berths=old_berths,
+        new_berths=new_berths,
         from_date=from_date_str,
         from_time=from_time_str,
         to_date=to_date_str,
@@ -652,11 +693,101 @@ def tide_data_api():
 @bp.route('/api/module/RP01/berth-occupancy')
 @login_required
 def berth_occupancy():
+    completed = request.args.get("completed") == "1"
     selected_date  = request.args.get('date')
     selected_shift = request.args.get('shift')
-    items, _       = _fetch_all_barges(selected_date, selected_shift)
-    return jsonify(items)
 
+    items, _ = _fetch_all_barges(selected_date, selected_shift)
+    
+
+    # If popup requests completed data
+    if completed:
+
+        completed = []
+
+        conn = get_db()
+        cur = get_cursor(conn)
+
+        # ---------------- COMPLETED BARGES ----------------
+        cur.execute("""
+            SELECT
+                l.id,
+                l.barge_name,
+                l.cargo_name,
+                COALESCE(l.discharge_quantity,0) AS qty,
+                l.cast_off_port,
+                l.completed_discharge_berth
+            FROM ldud_barge_lines l
+            WHERE
+                l.cast_off_port IS NOT NULL
+                OR l.completed_discharge_berth IS NOT NULL
+        """)
+
+        for row in cur.fetchall():
+            row = dict(row)
+
+            completed_dt = _parse_dt(
+                row["cast_off_port"] or row["completed_discharge_berth"]
+            )
+
+            if completed_dt and completed_dt.date() == datetime.strptime(
+                selected_date, "%Y-%m-%d"
+            ).date():
+
+                completed.append({
+                    "type": "BARGE",
+                    "name": row["barge_name"],
+                    "cargo": row["cargo_name"] or "",
+                    "qty": float(row["qty"] or 0),
+                    "status": "Completed",
+                    "completed_date": _fmt_dt(completed_dt)
+                })
+
+        # ---------------- COMPLETED MBC ----------------
+        cur.execute("""
+            SELECT
+                h.id,
+                h.mbc_name,
+                h.cargo_name,
+                COALESCE(h.bl_quantity,0) AS qty,
+                p.unloading_completed,
+                p.vessel_cast_off
+            FROM mbc_header h
+            JOIN mbc_discharge_port_lines p
+                ON p.mbc_id=h.id
+            WHERE
+                p.unloading_completed IS NOT NULL
+                OR p.vessel_cast_off IS NOT NULL
+        """)
+
+        for row in cur.fetchall():
+            row = dict(row)
+
+            completed_dt = (
+                _parse_dt(row["vessel_cast_off"])
+                or _parse_dt(row["unloading_completed"])
+            )
+
+            if completed_dt and completed_dt.date() == datetime.strptime(
+                selected_date, "%Y-%m-%d"
+            ).date():
+
+                completed.append({
+                    "type": "MBC",
+                    "name": row["mbc_name"],
+                    "cargo": row["cargo_name"] or "",
+                    "qty": float(row["qty"] or 0),
+                    "status": "Completed",
+                    "completed_date": _fmt_dt(completed_dt)
+                })
+
+        cur.close()
+        conn.close()
+
+        return jsonify(completed)
+
+    # Existing berth/waiting response remains unchanged
+    return jsonify(items)
 @bp.route('/api/module/RP01/berths')
 @login_required
 def get_berths():
@@ -882,34 +1013,49 @@ def _shift_wise_discharge_inner():
         if is_all:
             cur.execute("""
                 SELECT
-                    source_id AS id,
-                    barge_name AS mbc_name,
-                    cargo_name,
-                    SUM(COALESCE(quantity,0)) AS actual_discharge
-                FROM lueu_lines
-                WHERE source_type = 'MBC'
-                AND is_deleted IS NOT TRUE
-                AND entry_date = %s
-                AND TRIM(COALESCE(barge_name,'')) <> ''
-                GROUP BY source_id, barge_name, cargo_name
-                HAVING SUM(COALESCE(quantity,0)) > 0
-                ORDER BY barge_name
+                    l.source_id AS id,
+                    l.barge_name AS mbc_name,
+                    l.cargo_name,
+                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    SUM(COALESCE(l.quantity,0)) AS actual_discharge
+                FROM lueu_lines l
+                LEFT JOIN mbc_header h
+                    ON h.id = l.source_id
+                WHERE l.source_type = 'MBC'
+                AND l.is_deleted IS NOT TRUE
+                AND l.entry_date = %s
+                AND TRIM(COALESCE(l.barge_name,'')) <> ''
+                GROUP BY
+                    l.source_id,
+                    l.barge_name,
+                    l.cargo_name,
+                    h.bl_quantity
+                HAVING SUM(COALESCE(l.quantity,0)) > 0
+                ORDER BY l.barge_name
             """, (selected_date,))
         else:
             cur.execute("""
                 SELECT
-                    source_id AS id,
-                    barge_name AS mbc_name,
-                    cargo_name,
-                    SUM(COALESCE(quantity,0)) AS actual_discharge
-                FROM lueu_lines
-                WHERE source_type = 'MBC'
-                AND is_deleted IS NOT TRUE
-                AND entry_date = %s
-                AND shift = %s
-                AND TRIM(COALESCE(barge_name,'')) <> ''
-                GROUP BY source_id, barge_name, cargo_name
-                ORDER BY barge_name
+                    l.source_id AS id,
+                    l.barge_name AS mbc_name,
+                    l.cargo_name,
+                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    SUM(COALESCE(l.quantity,0)) AS actual_discharge
+                FROM lueu_lines l
+                LEFT JOIN mbc_header h
+                    ON h.id = l.source_id
+                WHERE l.source_type = 'MBC'
+                AND l.is_deleted IS NOT TRUE
+                AND l.entry_date = %s
+                AND l.shift = %s
+                AND TRIM(COALESCE(l.barge_name,'')) <> ''
+                GROUP BY
+                    l.source_id,
+                    l.barge_name,
+                    l.cargo_name,
+                    h.bl_quantity
+                HAVING SUM(COALESCE(l.quantity,0)) > 0
+                ORDER BY l.barge_name
             """, (selected_date, shift))
 
     mbc_discharge = []
@@ -926,7 +1072,7 @@ def _shift_wise_discharge_inner():
             'type': 'MBC',
             'name': row['mbc_name'],
             'cargo': row.get('cargo_name') or '',
-            'bl_qty': 0,
+            'bl_qty': float(row['bl_qty'] or 0),
             'actual_discharge': float(row['actual_discharge'] or 0),
             'status': 'Discharging',
             'payloader_cl': row['mbc_name'] if delays['payloader'] else '',
@@ -941,6 +1087,12 @@ def _shift_wise_discharge_inner():
         'barge_discharge': barge_discharge,
         'mbc_discharge': mbc_discharge,
     })
+    
+    
+    
+
+
+    
 @bp.route('/api/module/RP01/download-barge-position-excel')
 @login_required
 def download_barge_position_excel():
