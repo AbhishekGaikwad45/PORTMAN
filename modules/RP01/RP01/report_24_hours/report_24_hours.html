@@ -1,0 +1,727 @@
+{% extends "base.html" %}
+
+{% block title %}24 Hours Report - RP01{% endblock %}
+
+{% block head %}
+
+<style>
+
+/* ─────────────────────────────────────────────
+   PAGE HEADER
+───────────────────────────────────────────── */
+
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.page-header h2 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--text-primary);
+}
+
+.module-badge {
+    background: #4a90d9;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.breadcrumb {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.breadcrumb a {
+    color: #4a90d9;
+    text-decoration: none;
+}
+
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+/* ─────────────────────────────────────────────
+   FILTER SECTION
+───────────────────────────────────────────── */
+
+.filter-card {
+    background: #f8f9fb;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    padding: 18px;
+    margin-bottom: 20px;
+}
+
+.filter-row {
+    display: flex;
+    gap: 14px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.filter-group label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #667085;
+    text-transform: uppercase;
+}
+
+.filter-group input {
+    width: 180px;
+    height: 38px;
+    border: 1px solid #d0d5dd;
+    border-radius: 6px;
+    padding: 0 12px;
+    font-size: 14px;
+    background: #ffffff;
+}
+
+.filter-btn {
+    height: 38px;
+    min-width: 90px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.filter-btn.apply {
+    background: #4a90d9;
+    color: white;
+}
+
+.filter-btn.reset {
+    background: #ffffff;
+    color: #667085;
+    border: 1px solid #d0d5dd;
+}
+
+/* ─────────────────────────────────────────────
+   WHATSAPP BUTTON
+───────────────────────────────────────────── */
+
+.whatsapp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 16px;
+    background: #25D366;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.whatsapp-btn:hover {
+    background: #1ebe5d;
+    color: #ffffff;
+}
+
+.whatsapp-btn svg {
+    flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────
+   REPORT CARD
+───────────────────────────────────────────── */
+
+.report-card {
+    background: #ffffff;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.report-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #d9dee7;
+    background: #f8f9fb;
+    font-size: 16px;
+    font-weight: 700;
+    color: #344054;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.report-body {
+    padding: 20px;
+}
+
+.report-section {
+    margin-bottom: 24px;
+}
+
+.report-section h4 {
+    margin-bottom: 12px;
+    color: #344054;
+    font-size: 15px;
+}
+
+.report-line {
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #344054;
+}
+
+.report-list {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.report-list li {
+    margin-bottom: 8px;
+    color: #344054;
+    font-size: 14px;
+}
+
+.highlight {
+    font-weight: 700;
+    color: #1d2939;
+}
+
+.nil-text {
+    color: #98a2b3;
+    font-style: italic;
+}
+
+</style>
+
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <h2>24 Hours Report</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a>
+    &rsaquo;
+    24 Hours Report
+</div>
+
+<!-- FILTER SECTION -->
+
+<div class="filter-card">
+
+    <div class="filter-row">
+
+        <div class="filter-group">
+
+            <label>Report Date</label>
+
+            <input
+                type="date"
+                id="report-date">
+
+        </div>
+
+        <button
+            id="apply-filter-btn"
+            class="filter-btn apply">
+
+            Apply
+
+        </button>
+
+        <button
+            id="reset-filter-btn"
+            class="filter-btn reset">
+
+            Reset
+
+        </button>
+
+    </div>
+
+</div>
+
+<!-- REPORT -->
+
+<div
+    id="report-container"
+    class="report-card"
+    style="display:none;">
+
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<script>
+
+// ─────────────────────────────────────────────
+// BUILD PLAIN-TEXT VERSION OF REPORT
+// (for WhatsApp)
+// ─────────────────────────────────────────────
+
+function buildWhatsAppText(data) {
+
+    let lines = [];
+
+    lines.push(`*24 Hrs M.V. Disch for ${data.selected_date}*`);
+    lines.push('');
+    lines.push(`MV Disch: ${Number(data.mv_disch).toLocaleString()} MT`);
+    lines.push(`From: ${data.mv_total_days} Days`);
+    lines.push('');
+
+    // MV Waiting
+    const mvWaiting = data.mv_waiting_list || [];
+    lines.push(`*Note:* MV's Waiting for Discharge - ${mvWaiting.length > 0 ? mvWaiting.length + ' Nos.' : 'Nil'}`);
+
+    if (mvWaiting.length > 0) {
+        mvWaiting.forEach((item, i) => {
+            lines.push(`  ${i + 1}. ${item.vessel_name}`);
+        });
+    }
+
+    lines.push('');
+
+    // MBC Waiting
+    const mbcWaiting = data.mbc_waiting || [];
+    lines.push(`*Note:* MBC Waiting for Discharge at Gull - ${mbcWaiting.length} Nos.`);
+
+    if (mbcWaiting.length > 0) {
+        mbcWaiting.forEach((item, i) => {
+            lines.push(`  ${i + 1}. ${item.mbc_name} - ${item.cargo_name}`);
+        });
+    }
+
+    lines.push('');
+
+    // MV Discharge List
+    const mvList = data.mv_discharge_list || [];
+    if (mvList.length > 0) {
+
+        lines.push(`*MV's Discharging*`);
+        lines.push('');
+
+        mvList.forEach((item, i) => {
+
+            let line = `${i + 1}. ${item.vessel_name} - ${item.cargo_name || ''}`;
+            line += ` - 24 Hrs Discharge: ${Number(item.discharge_24hrs || 0).toLocaleString()} MT`;
+            line += ` / Balance: ${Number(item.balance_qty || 0).toLocaleString()} MT`;
+
+            if (item.delay_name) {
+                line += ` / ${item.delay_name}`;
+            }
+
+            if (item.discharge_start_date) {
+                line += ` / Discharge Started: ${item.discharge_start_date}`;
+            }
+
+            if (item.discharge_end_date) {
+                line += ` / Discharge Completed: ${item.discharge_end_date}`;
+            }
+
+            lines.push(line + '\n');
+        });
+    }
+
+    // MBC Discharging
+    lines.push(`*MBC's Discharging for Last 24 Hrs* - ${Number(data.mbc_disch_total).toLocaleString()} MT`);
+    lines.push('');
+
+    // Barges
+    lines.push(`*Barges in Mumbai Lighterage Operation* - ${data.barges_count} Nos.`);
+    lines.push('');
+    lines.push(
+        `(Cement Barges - ${data.cement_barges || 0} Nos.) ` +
+        `(Steel Barges - ${data.steel_barges || 0} Nos.)`
+    );
+    lines.push(`  Cement Cargo  - ${Number(data.cement_cargo || 0).toLocaleString()} MT`);
+    lines.push(`  Steel Cargo   - ${Number(data.steel_cargo || 0).toLocaleString()} MT`);
+    lines.push('');
+
+    // Jetty Handling
+    lines.push(`*Jetty Handling:*`);
+    lines.push('');
+    lines.push(`Today / MTD / YTD`);
+    lines.push(
+        `${Number(data.jetty_today || 0).toLocaleString()} MT / ` +
+        `${Number(data.jetty_mtd || 0).toLocaleString()} MT / ` +
+        `${Number(data.jetty_ytd || 0).toLocaleString()} MT`
+    );
+
+    const cargoList = data.jetty_cargo_list || [];
+    if (cargoList.length > 0) {
+        cargoList.forEach((item, i) => {
+            lines.push(`  ${i + 1}. ${item.cargo_name} - ${Number(item.quantity || 0).toLocaleString()} MT`);
+        });
+    }
+
+    lines.push('');
+
+    // Delays
+lines.push(`*Delays / Detention*`);
+lines.push('');
+
+let delaySr = 1;
+
+if (Number(data.rhms_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of RHMS System - ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.maintenance_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of Jetty System - ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.no_cargo_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. No Cargo - ${Number(data.no_cargo_hours).toFixed(2)} Hrs.`
+    );
+}
+
+if (Number(data.cement_plant_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
+    return lines.join('\n');
+}
+
+
+// ─────────────────────────────────────────────
+// SEND TO WHATSAPP
+// ─────────────────────────────────────────────
+
+function sendToWhatsApp(data) {
+
+    const text = buildWhatsAppText(data);
+    const encoded = encodeURIComponent(text);
+
+    // Opens WhatsApp Web / App with pre-filled message.
+    // User selects the TAJ group and hits Send.
+    const url = `https://wa.me/?text=${encoded}`;
+
+    window.open(url, '_blank');
+}
+
+
+// ─────────────────────────────────────────────
+// APPLY FILTER
+// ─────────────────────────────────────────────
+
+let lastReportData = null;
+
+$('#apply-filter-btn').on('click', async function () {
+
+    const reportDate = $('#report-date').val();
+
+    if (!reportDate) {
+        alert('Please select report date');
+        return;
+    }
+
+    try {
+
+        const response = await fetch(
+            `/module/RP01/api/report_24_hours?report_date=${reportDate}`
+        );
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        console.log(result);
+
+        if (!result.success) {
+            alert(result.message);
+            return;
+        }
+
+        lastReportData = result;
+
+        render24HoursReport(result);
+
+    } catch (error) {
+
+        console.error(error);
+        alert('Failed to fetch report');
+
+    }
+
+});
+
+
+$('#reset-filter-btn').on('click', function () {
+
+    $('#report-date').val('');
+    lastReportData = null;
+
+    $('#report-container')
+        .hide()
+        .html('');
+
+});
+
+
+// ─────────────────────────────────────────────
+// RENDER REPORT
+// ─────────────────────────────────────────────
+
+function render24HoursReport(data) {
+
+    // WhatsApp icon SVG
+    const waIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="white">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15
+            -.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075
+            -.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059
+            -.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52
+            .149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52
+            -.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51
+            -.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372
+            -.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074
+            .149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625
+            .712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413
+            .248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+        <path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.528 5.855L.057 23.25
+            a.75.75 0 0 0 .916.95l5.593-1.463A11.942 11.942 0 0 0 12 24
+            c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.75
+            a9.699 9.699 0 0 1-4.953-1.355l-.355-.212-3.68.963.981-3.585
+            -.232-.368A9.699 9.699 0 0 1 2.25 12C2.25 6.615 6.615 2.25 12 2.25
+            S21.75 6.615 21.75 12 17.385 21.75 12 21.75z"/>
+    </svg>`;
+
+    let html = `
+        <div class="report-header">
+            <span>24 Hrs M.V. Disch for ${data.selected_date}</span>
+            <button class="whatsapp-btn" id="wa-send-btn">
+                ${waIcon}
+                Send to WhatsApp Group
+            </button>
+        </div>
+
+        <div class="report-body">
+    `;
+
+    html += `
+        <div class="report-line">
+            24 Hrs M.V. Disch for ${data.selected_date}.
+            <p>
+            MV Disch: ${Number(data.mv_disch).toLocaleString()} MT.
+            <p>
+            From: ${data.mv_total_days} Days.
+        </div>
+    `;
+
+    // MV Waiting
+    html += `
+        <div class="report-line">
+            <b>Note:</b> MV's Waiting for Discharge -
+            ${(data.mv_waiting_list || []).length > 0
+                ? (data.mv_waiting_list || []).length + ' Nos.'
+                : 'Nil'}
+        </div>
+    `;
+
+    if ((data.mv_waiting_list || []).length > 0) {
+        html += `<ol class="report-list">`;
+        data.mv_waiting_list.forEach(item => {
+            html += `<li>${item.vessel_name}</li>`;
+        });
+        html += `</ol>`;
+    }
+
+    // MBC Waiting
+    html += `
+        <div class="report-line">
+            <b>Note:</b> MBC Waiting for Discharge at Gull -
+            ${(data.mbc_waiting || []).length} Nos.
+        </div>
+    `;
+
+    if ((data.mbc_waiting || []).length > 0) {
+        html += `<ol class="report-list">`;
+        data.mbc_waiting.forEach(item => {
+            html += `<li>${item.mbc_name} - ${item.cargo_name}</li>`;
+        });
+        html += `</ol>`;
+    }
+
+    // Vessel List
+    if ((data.mv_discharge_list || []).length > 0) {
+
+    html += `<div style="margin-top:25px;"></div>`;
+
+    html += `
+        <div class="report-line">
+            <b>MV's Discharging</b>
+        </div>
+    `;
+
+    html += `<ol class="report-list">`;
+
+    data.mv_discharge_list.forEach(item => {
+
+        const startText = item.discharge_start_date
+            ? ` / Discharge Started: ${item.discharge_start_date}`
+            : '';
+
+        const endText = item.discharge_end_date
+            ? ` / Discharge Completed: ${item.discharge_end_date}`
+            : '';
+
+        html += `
+            <li>
+                ${item.vessel_name}
+                -
+                ${item.cargo_name || ''}
+                -
+                24 Hrs Discharge:
+                ${Number(item.discharge_24hrs || 0).toLocaleString()} MT
+                /
+                Balance:
+                ${Number(item.balance_qty || 0).toLocaleString()} MT
+                ${item.delay_name ? ` / ${item.delay_name}` : ''}
+                ${startText}
+                ${endText}
+            </li>
+        `;
+    });
+
+    html += `</ol>`;
+    html += `<div style="height:25px;"></div>`;
+}
+    html += `
+        <div class="report-line">
+            <b>MBC's Discharging for Last 24 Hrs -</b>
+            ${Number(data.mbc_disch_total).toLocaleString()} MT.
+        </div>
+
+        <div class="report-line">
+    <b>Barges in Mumbai Lighterage Operation -</b>
+    ${data.barges_count} Nos.
+    <br>
+    <span style="margin-left:20px;">
+        (Cement Barges - ${data.cement_barges || 0} Nos.)
+        (Steel Barges - ${data.steel_barges || 0} Nos.)
+    </span>
+    <br>
+    <span style="margin-left:20px;">
+        Cement Cargo - ${Number(data.cement_cargo || 0).toLocaleString()} MT
+    </span>
+    <br>
+    <span style="margin-left:20px;">
+        Steel Cargo - ${Number(data.steel_cargo || 0).toLocaleString()} MT
+    </span>
+</div>
+
+        <div class="report-line">
+            <b>Jetty Handling :</b>
+            <br>
+            Today / MTD / YTD
+            <br>
+            ${Number(data.jetty_today || 0).toLocaleString()} MT /
+            ${Number(data.jetty_mtd || 0).toLocaleString()} MT /
+            ${Number(data.jetty_ytd || 0).toLocaleString()} MT
+        </div>
+    `;
+
+    if ((data.jetty_cargo_list || []).length > 0) {
+        html += `<div class="report-line" style="margin-left:20px;">`;
+        data.jetty_cargo_list.forEach((item, index) => {
+            html += `
+                <div>
+                    ${index + 1}.
+                    ${item.cargo_name}
+                    -
+                    ${Number(item.quantity || 0).toLocaleString()} MT
+                </div>
+            `;
+        });
+        html += `</div>`;
+    }
+
+    html += `
+    <div class="report-line">
+        <b>Delays / Detention</b>
+    </div>
+    <ol class="report-list">
+`;
+
+if (Number(data.rhms_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of RHMS System -
+            ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.maintenance_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of Jetty System -
+            ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.no_cargo_hours || 0) > 0) {
+    html += `
+        <li>
+            No Cargo -
+            ${Number(data.no_cargo_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.cement_plant_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Non Availability of Cement Plant System -
+            ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+html += `</ol>`;
+    html += `</div>`;
+
+    $('#report-container')
+        .html(html)
+        .show();
+
+    // Bind WhatsApp button after render
+    $('#wa-send-btn').on('click', function () {
+        if (lastReportData) {
+            sendToWhatsApp(lastReportData);
+        }
+    });
+}
+
+</script>
+
+{% endblock %}

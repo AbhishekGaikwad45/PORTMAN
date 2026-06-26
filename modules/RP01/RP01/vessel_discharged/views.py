@@ -432,14 +432,20 @@ def _write_vessel_sheet(ws, data):
         # PLA
         if "PLA" in anch_name:
 
-            if pla_date is None or anchored_dt < pla_date:
-                pla_date = anchored_dt
+            if pla_date is None or anchored < pla_date:
+                pla_date = anchored
 
-        # MFL (X3, J3 etc.)
+        elif (
+            "ALFA" in anch_name
+            or "END OF SEA PASSAGE" in anch_name
+            or "EOSP" in anch_name
+        ):
+            continue
+
         else:
 
-            if mfl_date is None or anchored_dt < mfl_date:
-                mfl_date = anchored_dt
+            if mfl_date is None or anchored < mfl_date:
+                mfl_date = anchored
 
     arrived_pla = pla_date.strftime("%d-%m-%Y %H:%M") if pla_date else "-"
 
@@ -1502,7 +1508,13 @@ def vessel_discharged_preview(ldud_id):
             if pla_date is None or anchored < pla_date:
                 pla_date = anchored
 
-        # MFL (X3, J3 etc.)
+        elif (
+            "ALFA" in anch_name
+            or "END OF SEA PASSAGE" in anch_name
+            or "EOSP" in anch_name
+        ):
+            continue
+
         else:
 
             if mfl_date is None or anchored < mfl_date:

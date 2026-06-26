@@ -871,12 +871,8 @@
 <!-- Filter bar -->
 <div class="filter-bar">
     <div class="filter-group">
-        <label for="filter-from">From Date</label>
-        <input type="date" id="filter-from" title="From Date" value="">
-    </div>
-    <div class="filter-group">
-        <label for="filter-to">To Date</label>
-        <input type="date" id="filter-to" title="To Date" value="">
+        <label for="filter-date">Date</label>
+        <input type="date" id="filter-date" title="Date" value="">
     </div>
     <div class="filter-group">
         <label for="filter-month">Month</label>
@@ -1116,8 +1112,7 @@
     /* ── filters ─────────────────────────────────────────── */
     function applyFilters(isPageLoad = false) {
 
-        const fromDate = document.getElementById('filter-from').value;
-        const toDate = document.getElementById('filter-to').value;
+        const selectedDate = document.getElementById('filter-date').value;;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
 
@@ -1125,29 +1120,27 @@
 
         if (
             !isPageLoad &&
-            (
-                (fromDate && fromDate < cutoffDate) ||
-                (toDate && toDate < cutoffDate)
-            )
+            selectedDate &&
+            selectedDate < cutoffDate
         ) {
             Swal.fire({
                 icon: 'warning',
-                iconColor: '#44B5E6',   // Blue icon
+                iconColor: '#44B5E6',
                 title: 'Report Not Available',
                 html: `
-                <b>Cutoff Date:</b> 01-May-2026<br><br>
-                Reports before this date are not available.
-            `,
+            <b>Cutoff Date:</b> 01-May-2026<br><br>
+            Reports before this date are not available.
+        `,
                 confirmButtonText: 'OK',
                 confirmButtonColor: '#3085d6'
             });
 
             return;
         }
-
         const params = new URLSearchParams();
-        if (fromDate) params.set('from_date', fromDate);
-        if (toDate) params.set('to_date', toDate);
+        if (selectedDate) {
+            params.set('selected_date', selectedDate);
+        }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
 
@@ -1177,8 +1170,7 @@
     }
 
     function resetFilters() {
-        document.getElementById('filter-from').value = '';
-        document.getElementById('filter-to').value = '';
+        document.getElementById('filter-date').value = '';
         document.getElementById('filter-month').value = '';
         document.getElementById('filter-fy').value = '';
         applyFilters();
@@ -1203,14 +1195,14 @@
     }
 
     function loadTatSummary() {
-        const fromDate = document.getElementById('filter-from').value;
-        const toDate = document.getElementById('filter-to').value;
+        const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
 
         const params = new URLSearchParams();
-        if (fromDate) params.set('from_date', fromDate);
-        if (toDate) params.set('to_date', toDate);
+        if (selectedDate) {
+            params.set('selected_date', selectedDate);
+        }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
 
@@ -1227,57 +1219,84 @@
     }
 
     function buildTatTable(d) {
+
         const styleClass = {
             data: 'row-data',
             section_total: 'row-section-total',
             main_total: 'row-main-total',
-            tat: 'row-tat',
+            tat: 'row-tat'
         };
+
         function fmtVal(v) {
-            if (!v || v === '—') return '<span style="color:#bbb">—</span>';
+            if (!v || v === '—') {
+                return '<span style="color:#bbb">—</span>';
+            }
             return v;
         }
+
         let html = `
-    <table class="tat-table"><tbody>
-      <tr class="hdr-period">
-        <td></td>
-        <td class="col-date">${d.date_label}</td>
- 
-      </tr>
-      <tr class="hdr-cols">
+    <table class="tat-table">
+    <tbody>
+
+    <tr class="hdr-period">
+        <td colspan="3"></td>
+        <td class="col-mtd">${d.mtd_label}</td>
+        <td class="col-ytd">${d.ytd_label}</td>
+    </tr>
+
+    <tr class="hdr-cols">
         <td>Activity</td>
+        <td>Target (Hrs)</td>
         <td>${d.date_label}</td>
+        <td>MTD</td>
+        <td>YTD</td>
+    </tr>
 
-      </tr>
-      <tr class="row-trips">
+    <tr class="row-trips">
         <td>Trips</td>
+        <td></td>
         <td>${d.date_trips}</td>
+        <td>${d.mtd_trips}</td>
+        <td>${d.ytd_trips}</td>
+    </tr>
+    `;
 
-      </tr>`;
         for (const row of d.rows) {
             const cls = styleClass[row.style] || 'row-data';
-            html += `<tr class="${cls}">
-          <td>${row.label}</td>
-          <td>${fmtVal(row.date_val)}</td>
 
+            html += `
+        <tr class="${cls}">
+            <td>${row.label}</td>
+            <td>${row.target || ''}</td>
+            <td>${fmtVal(row.date_val)}</td>
+            <td>${fmtVal(row.mtd_val)}</td>
+            <td>${fmtVal(row.ytd_val)}</td>
         </tr>`;
         }
-        html += `<tr class="row-footnote"><td colspan="4">
-        *Unloading time includes the shifting time after partial discharge of MBC &amp; discharge kept on hold to give priority for other MBC.<br>
-        *Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.
-    </td></tr></tbody></table>`;
+
+        html += `
+    <tr class="row-footnote">
+        <td colspan="5">
+            *Unloading time includes the shifting time after partial discharge of MBC & discharge kept on hold to give priority for other MBC.<br>
+            *Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.
+        </td>
+    </tr>
+
+    </tbody>
+    </table>`;
+
         return html;
     }
 
     /* ── DPPL TAT tab ────────────────────────────────────── */
     function loadDpplTat() {
         const params = new URLSearchParams();
-        const fromDate = document.getElementById('filter-from').value;
-        const toDate = document.getElementById('filter-to').value;
+        const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        if (fromDate) params.set('from_date', fromDate);
-        if (toDate) params.set('to_date', toDate);
+        if (selectedDate) {
+            params.set('selected_date', selectedDate);
+        }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
 
@@ -1359,12 +1378,12 @@
     /* ── MBC Wise tab ────────────────────────────────────── */
     function loadMbcWise() {
         const params = new URLSearchParams();
-        const fromDate = document.getElementById('filter-from').value;
-        const toDate = document.getElementById('filter-to').value;
+        const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        if (fromDate) params.set('from_date', fromDate);
-        if (toDate) params.set('to_date', toDate);
+        if (selectedDate) {
+            params.set('selected_date', selectedDate);
+        };
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
 
@@ -1448,15 +1467,15 @@
     /* ── download ────────────────────────────────────────── */
     function downloadExcel() {
 
-        const fromDate = document.getElementById('filter-from').value;
-        const toDate = document.getElementById('filter-to').value;
+        const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
 
         const params = new URLSearchParams();
 
-        if (fromDate) params.set('from_date', fromDate);
-        if (toDate) params.set('to_date', toDate);
+        if (selectedDate) {
+            params.set('selected_date', selectedDate);
+        }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
 
@@ -1552,11 +1571,7 @@
         const day = String(now.getDate()).padStart(2, '0');
 
         // First day of current month
-        document.getElementById('filter-from').value =
-            `${year}-${month}-01`;
-
-        // Today's date
-        document.getElementById('filter-to').value =
+        document.getElementById('filter-date').value =
             `${year}-${month}-${day}`;
 
         applyFilters(true);

@@ -661,30 +661,53 @@
             rmTable
         );
 
+        // =====================================
+// VESSEL EDITABLE DATA
+// =====================================
+
+const vesselEdits = [];
+
+document.querySelectorAll('[data-vessel]').forEach(el => {
+
+    vesselEdits.push({
+        vessel_id: el.dataset.vessel || '',
+        field: el.dataset.field || '',
+        value: (el.innerText || '').trim()
+    });
+
+});
+
+console.log('VESSEL EDITS =', vesselEdits);
+
         const downloadUrl =
-            '/api/module/RP01/daily-ops/download?' +
-            'report_date=' +
-            encodeURIComponent(reportDate) +
+    '/api/module/RP01/daily-ops/download?' +
+    'report_date=' +
+    encodeURIComponent(reportDate) +
 
-            '&editable_table=' +
-            encodeURIComponent(
-                JSON.stringify(editableTable)
-            ) +
+    '&editable_table=' +
+    encodeURIComponent(
+        JSON.stringify(editableTable)
+    ) +
 
-            '&rainfall_table=' +
-            encodeURIComponent(
-                JSON.stringify(rainfallTable)
-            ) +
+    '&rainfall_table=' +
+    encodeURIComponent(
+        JSON.stringify(rainfallTable)
+    ) +
 
-            '&bf_table=' +
-            encodeURIComponent(
-                JSON.stringify(bfTable)
-            ) +
+    '&bf_table=' +
+    encodeURIComponent(
+        JSON.stringify(bfTable)
+    ) +
 
-            '&rm_table=' +
-            encodeURIComponent(
-                JSON.stringify(rmTable)
-            );
+    '&rm_table=' +
+    encodeURIComponent(
+        JSON.stringify(rmTable)
+    ) +
+
+    '&vessel_edits=' +
+    encodeURIComponent(
+        JSON.stringify(vesselEdits)
+    );
 
         fetch(downloadUrl)
             .then(response => {
@@ -723,109 +746,569 @@
                 console.error(err);
             });
     }
-    function previewReport() {
+    
+function previewReport() {
 
-        const reportDate =
-            document.getElementById('report-date').value;
+    const reportDate =
+        document.getElementById('report-date').value;
 
-        if (!reportDate) {
+    if (!reportDate) {
 
-            Swal.fire({
-                icon: 'warning',
-                title: 'Select Report Date',
-                text: 'Please select a report date.',
-                confirmButtonColor: '#4a90d9'
-            });
+        Swal.fire({
+            icon: 'warning',
+            title: 'Select Report Date',
+            text: 'Please select a report date.',
+            confirmButtonColor: '#4a90d9'
+        });
 
-            return;
-        }
-
-        if (new Date(reportDate) < new Date('2026-05-01')) {
-
-            Swal.fire({
-                icon: 'info',
-                title: 'Report Not Available',
-                html: `
-                <b>Cutoff Date:</b> 01-May-2026<br><br>
-                Reports before this date are not available.
-            `,
-                confirmButtonText: 'OK',
-                confirmButtonColor: '#4a90d9'
-            });
-
-            return;
-        }
-
-        fetch(`/api/module/RP01/daily-ops/preview?report_date=${reportDate}`)
-            .then(r => r.text())
-            .then(html => {
-
-                document.getElementById(
-                    'preview-content'
-                ).innerHTML = html;
-
-                document.getElementById(
-                    'preview-container'
-                ).style.display = 'block';
-            })
-            .catch(err => {
-                alert(err);
-            });
+        return;
     }
-    const grandIBRM =
-        getNum("total_BRBF") +
-        getNum("total_Orissa Fines") +
-        getNum("total_Goa Fines") +
-        getNum("total_HBI") +
-        getNum("total_KDL CLO");
 
-    const grandCBRM =
-        getNum("total_Jimblebar Fines") +
-        getNum("total_Bacheli Fines") +
-        getNum("total_Goa Clo") +
-        getNum("total_Mabu") +
-        getNum("total_Illavara") +
-        getNum("total_Uval + Kestrel") +
-        getNum("total_MLV") +
-        getNum("total_PCI") +
-        getNum("total_Antracite") +
-        getNum("total_Limestone");
+    fetch(
+        `/api/module/RP01/daily-ops/preview?report_date=${reportDate}`
+    )
+    .then(r => r.text())
+    .then(html => {
 
-    const grandFluxes =
-        getNum("total_Bentonite") +
-        getNum("total_Oliflux") +
-        getNum("total_Dolomite");
+        document.getElementById(
+            'preview-content'
+        ).innerHTML = html;
 
-    const grandSlag =
-        getNum("total_Slag Loading/Unloading");
+        setTimeout(() => {
 
-    const grandClinker =
-        getNum("total_Clinker");
+    const cargoTable =
+        document.getElementById(
+            'cargo-availability-table'
+        );
 
-    document.getElementById("grand_ibrm").innerText =
-        grandIBRM.toLocaleString();
+    if (!cargoTable) return;
 
-    document.getElementById("grand_cbrm").innerText =
-        grandCBRM.toLocaleString();
+    cargoTable.addEventListener(
+        'input',
+        calculateCargoAvailability
+    );
 
-    document.getElementById("grand_fluxes").innerText =
-        grandFluxes.toLocaleString();
+    calculateCargoAvailability();
 
-    document.getElementById("grand_slag").innerText =
-        grandSlag.toLocaleString();
+}, 200);
 
-    document.getElementById("grand_clinker").innerText =
-        grandClinker.toLocaleString();
+        document.getElementById(
+            'preview-container'
+        ).style.display = 'block';
 
-    document.getElementById("grand_total").innerText =
+        setTimeout(() => {
+
+    [
+        'rm_ibrm',
+        'rm_cbrm',
+        'rm_fluxes'
+    ].forEach(id => {
+
+        const cell =
+            document.getElementById(id);
+
+        if (!cell) return;
+
+        cell.addEventListener(
+            'input',
+            calculateRMStockTotal
+        );
+
+        cell.addEventListener(
+            'keyup',
+            calculateRMStockTotal
+        );
+    });
+
+    calculateRMStockTotal();
+
+}, 300);
+
+        setTimeout(() => {
+
+            const cargoTable =
+                document.getElementById(
+                    'cargo-availability-table'
+                );
+
+            if (!cargoTable) {
+                console.log(
+                    'cargo-availability-table not found'
+                );
+                return;
+            }
+
+            cargoTable.addEventListener(
+                'input',
+                calculateCargoAvailability
+            );
+
+            calculateCargoAvailability();
+
+        }, 300);
+
+    })
+    .catch(err => {
+        console.error(err);
+    });
+}
+function buildCargoHandledTable(cargoHandledData) {
+
+    const shifts = ['A', 'B', 'C'];
+
+    const cargoNames = [
+        ...new Set(
+            cargoHandledData
+                .map(r => r.cargo_name)
+                .filter(Boolean)
+        )
+    ];
+
+    const header =
+        document.getElementById(
+            'cargoHandledHeader'
+        );
+
+    const body =
+        document.getElementById(
+            'cargoHandledBody'
+        );
+
+    const footer =
+        document.getElementById(
+            'cargoHandledFooter'
+        );
+
+    if (!header || !body || !footer) {
+        return;
+    }
+
+    // Reset table
+    header.innerHTML = `
+        <th style="
+            border:1px solid #ccc;
+            padding:8px;
+        ">
+            Shift
+        </th>
+    `;
+
+    body.innerHTML = '';
+    footer.innerHTML = '';
+
+    // Dynamic Cargo Headers
+    cargoNames.forEach(cargo => {
+
+        const th =
+            document.createElement('th');
+
+        th.style.border = '1px solid #ccc';
+        th.style.padding = '8px';
+        th.innerText = cargo;
+
+        header.appendChild(th);
+
+    });
+
+    const totalHeader =
+        document.createElement('th');
+
+    totalHeader.style.border = '1px solid #ccc';
+    totalHeader.style.padding = '8px';
+    totalHeader.innerText = 'Grand Total';
+
+    header.appendChild(totalHeader);
+
+    const cargoTotals = {};
+    let grandTotal = 0;
+
+    shifts.forEach(shift => {
+
+        let rowTotal = 0;
+
+        let rowHtml = `
+            <tr>
+                <td style="
+                    border:1px solid #ccc;
+                    padding:8px;
+                    text-align:center;
+                    font-weight:bold;
+                ">
+                    ${shift}
+                </td>
+        `;
+
+        cargoNames.forEach(cargo => {
+
+            const rec =
+                cargoHandledData.find(
+                    r =>
+                        r.shift === shift &&
+                        r.cargo_name === cargo
+                );
+
+            const qty =
+                rec
+                    ? Number(rec.qty || 0)
+                    : 0;
+
+            rowTotal += qty;
+
+            cargoTotals[cargo] =
+                (cargoTotals[cargo] || 0)
+                + qty;
+
+            rowHtml += `
+                <td style="
+                    border:1px solid #ccc;
+                    padding:8px;
+                    text-align:right;
+                ">
+                    ${qty > 0
+                        ? qty.toLocaleString()
+                        : ''}
+                </td>
+            `;
+        });
+
+        grandTotal += rowTotal;
+
+        rowHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+                font-weight:bold;
+                background:#f8f9fa;
+            ">
+                ${rowTotal > 0
+                    ? rowTotal.toLocaleString()
+                    : ''}
+            </td>
+        </tr>
+        `;
+
+        body.insertAdjacentHTML(
+            'beforeend',
+            rowHtml
+        );
+    });
+
+    let footerHtml = `
+        <tr style="
+            background:#e8f0fe;
+            font-weight:bold;
+        ">
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+            ">
+                Grand Total
+            </td>
+    `;
+
+    cargoNames.forEach(cargo => {
+
+        footerHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+            ">
+                ${(cargoTotals[cargo] || 0)
+                    .toLocaleString()}
+            </td>
+        `;
+    });
+
+    footerHtml += `
+            <td style="
+                border:1px solid #ccc;
+                padding:8px;
+                text-align:right;
+                background:#dbeafe;
+            ">
+                ${grandTotal.toLocaleString()}
+            </td>
+        </tr>
+    `;
+
+    footer.innerHTML = footerHtml;
+}
+//     const grandIBRM =
+//         getNum("total_BRBF") +
+//         getNum("total_Orissa Fines") +
+//         getNum("total_Goa Fines") +
+//         getNum("total_HBI") +
+//         getNum("total_KDL CLO");
+
+//     const grandCBRM =
+//         getNum("total_Jimblebar Fines") +
+//         getNum("total_Bacheli Fines") +
+//         getNum("total_Goa Clo") +
+//         getNum("total_Mabu") +
+//         getNum("total_Illavara") +
+//         getNum("total_Uval + Kestrel") +
+//         getNum("total_MLV") +
+//         getNum("total_PCI") +
+//         getNum("total_Antracite") +
+//         getNum("total_Limestone");
+
+//     const grandFluxes =
+//         getNum("total_Bentonite") +
+//         getNum("total_Oliflux") +
+//         getNum("total_Dolomite");
+
+//     const grandSlag =
+//         getNum("total_Slag Loading/Unloading");
+
+//     const grandClinker =
+//         getNum("total_Clinker");
+
+//     document.getElementById("grand_ibrm").innerText =
+//         grandIBRM.toLocaleString();
+
+//     document.getElementById("grand_cbrm").innerText =
+//         grandCBRM.toLocaleString();
+
+//     document.getElementById("grand_fluxes").innerText =
+//         grandFluxes.toLocaleString();
+
+//     document.getElementById("grand_slag").innerText =
+//         grandSlag.toLocaleString();
+
+//     document.getElementById("grand_clinker").innerText =
+//         grandClinker.toLocaleString();
+
+//     document.getElementById("grand_total").innerText =
+//         (
+//             grandIBRM +
+//             grandCBRM +
+//             grandFluxes +
+//             grandSlag +
+//             grandClinker
+//         ).toLocaleString();
+//         const cargoTable =
+//     document.getElementById(
+//         'cargo-availability-table'
+//     );
+
+// if (cargoTable) {
+
+//     cargoTable.addEventListener(
+//         'input',
+//         calculateCargoAvailability
+//     );
+
+//     calculateCargoAvailability();
+// }
+
+function calculateCargoAvailability() {
+
+    const table = document.getElementById(
+        'cargo-availability-table'
+    );
+
+    if (!table) return;
+
+    const totalColIndex =
+        table.rows[0].cells.length - 1;
+
+    let grandTotal = 0;
+
+    // ==========================
+    // ROW TOTALS
+    // ==========================
+
+    for (let row = 1; row <= 3; row++) {
+
+        let rowTotal = 0;
+
+        for (
+            let col = 1;
+            col < totalColIndex;
+            col++
+        ) {
+
+            const cell =
+                table.rows[row].cells[col];
+
+            if (!cell) continue;
+
+            const val =
+                parseFloat(
+                    (cell.innerText || '0')
+                        .replace(/,/g, '')
+                        .trim()
+                ) || 0;
+
+            rowTotal += val;
+        }
+
+        const totalCell =
+            document.getElementById(
+                `row${row}_total`
+            );
+
+        if (totalCell) {
+            totalCell.innerText =
+                rowTotal.toLocaleString('en-IN');
+        }
+    }
+
+    // ==========================
+    // COLUMN TOTALS
+    // ==========================
+
+    for (
+        let col = 1;
+        col < totalColIndex;
+        col++
+    ) {
+
+        let colTotal = 0;
+
+        for (
+            let row = 1;
+            row <= 3;
+            row++
+        ) {
+
+            const cell =
+                table.rows[row].cells[col];
+
+            if (!cell) continue;
+
+            const val =
+                parseFloat(
+                    (cell.innerText || '0')
+                        .replace(/,/g, '')
+                        .trim()
+                ) || 0;
+
+            colTotal += val;
+        }
+
+        table.rows[4].cells[col].innerText =
+            colTotal.toLocaleString('en-IN');
+
+        grandTotal += colTotal;
+    }
+
+    // ==========================
+    // TOTAL ROW GRAND TOTAL
+    // ==========================
+
+    const totalGrandCell =
+        table.querySelector(
+            '[data-key="total_grand"]'
+        );
+
+    if (totalGrandCell) {
+
+        totalGrandCell.innerText =
+            grandTotal.toLocaleString('en-IN');
+    }
+
+    // ==========================
+    // BOTTOM GRAND TOTAL
+    // ==========================
+
+    const grandTotalCell =
+        document.getElementById(
+            'grand_total'
+        );
+
+    if (grandTotalCell) {
+
+        grandTotalCell.innerText =
+            grandTotal.toLocaleString('en-IN');
+    }
+
+    // ==========================
+    // CATEGORY TOTALS
+    // ==========================
+
+    const get = key => {
+
+        const el =
+            table.querySelector(
+                `[data-key="${key}"]`
+            );
+
+        return parseFloat(
+            (el?.innerText || '0')
+                .replace(/,/g, '')
+        ) || 0;
+    };
+
+    document.getElementById('grand_ibrm').innerText =
         (
-            grandIBRM +
-            grandCBRM +
-            grandFluxes +
-            grandSlag +
-            grandClinker
-        ).toLocaleString();
+            get('total_BRBF') +
+            get('total_Orissa Fines') +
+            get('total_Goa Fines') +
+            get('total_HBI') +
+            get('total_KDL CLO')
+        ).toLocaleString('en-IN');
 
+    document.getElementById('grand_cbrm').innerText =
+        (
+            get('total_Jimblebar Fines') +
+            get('total_Bacheli Fines') +
+            get('total_Goa Clo') +
+            get('total_Mabu') +
+            get('total_Illavara') +
+            get('total_Uval + Kestrel') +
+            get('total_MLV') +
+            get('total_PCI') +
+            get('total_Antracite') +
+            get('total_Limestone')
+        ).toLocaleString('en-IN');
+
+    document.getElementById('grand_fluxes').innerText =
+        (
+            get('total_Bentonite') +
+            get('total_Oliflux') +
+            get('total_Dolomite')
+        ).toLocaleString('en-IN');
+
+    document.getElementById('grand_slag').innerText =
+        get('total_Slag Loading/Unloading')
+            .toLocaleString('en-IN');
+
+    document.getElementById('grand_clinker').innerText =
+        get('total_Clinker')
+            .toLocaleString('en-IN');
+
+    console.log(
+        'GRAND TOTAL =',
+        grandTotal
+    );
+}
+
+function calculateRMStockTotal() {
+
+    const getValue = (id) => {
+
+        const el = document.getElementById(id);
+
+        return parseFloat(
+            (el?.innerText || '0')
+                .replace(/,/g, '')
+                .trim()
+        ) || 0;
+    };
+
+    const total =
+        getValue('rm_ibrm') +
+        getValue('rm_cbrm') +
+        getValue('rm_fluxes');
+
+    document.getElementById(
+        'rm_total'
+    ).innerText =
+        total.toLocaleString('en-IN');
+}
     /* ── Cutoff Modal ──────────────────────────────────────────────────────── */
 
     function loadCutoffStatus() {

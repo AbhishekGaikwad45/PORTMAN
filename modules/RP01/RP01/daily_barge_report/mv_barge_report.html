@@ -590,16 +590,17 @@
 
         font-size: 13px;
     }
-    /* Full row hover effect */
-#vd-table .tabulator-row:hover {
-    background-color: #eedfed !important;
-    cursor: pointer;
-}
 
-/* Frozen columns also change color */
-#vd-table .tabulator-row:hover .tabulator-cell {
-    background-color: #eedfed !important;
-}
+    /* Full row hover effect */
+    #vd-table .tabulator-row:hover {
+        background-color: #eedfed !important;
+        cursor: pointer;
+    }
+
+    /* Frozen columns also change color */
+    #vd-table .tabulator-row:hover .tabulator-cell {
+        background-color: #eedfed !important;
+    }
 </style>
 {% endblock %}
 
@@ -813,6 +814,146 @@
 </div>
 <div id="error-box" style="display:none;"></div>
 <script>
+    /* ── Multi-select dropdown editor (same as MBC01) ───────────────────── */
+    function makeMultiSelectEditor(optionsList) {
+        return function(cell, onRendered, success, cancel) {
+            var currentVal = cell.getValue() || '';
+            var selected   = currentVal
+                ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+            wrapper.textContent = currentVal || 'Select...';
+
+            var dropdown = document.createElement('div');
+            dropdown.style.cssText = [
+                'position:fixed','z-index:99999',
+                'background:white',
+                'border:1px solid #cbd5e0',
+                'border-radius:6px',
+                'box-shadow:0 4px 12px rgba(0,0,0,0.18)',
+                'padding:8px',
+                'min-width:190px',
+                'max-height:280px',
+                'overflow-y:auto',
+                'display:none'
+            ].join(';');
+
+            // Search box inside dropdown
+            var searchBox = document.createElement('input');
+            searchBox.type        = 'text';
+            searchBox.placeholder = 'Search...';
+            searchBox.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
+            dropdown.appendChild(searchBox);
+
+            var listContainer = document.createElement('div');
+            dropdown.appendChild(listContainer);
+
+            function renderOptions(filter) {
+                listContainer.innerHTML = '';
+                (optionsList || [])
+                    .filter(item => !filter || item.toLowerCase().includes(filter.toLowerCase()))
+                    .forEach(function(item) {
+                        var label = document.createElement('label');
+                        label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                        label.addEventListener('mouseenter', function() { label.style.background = '#f1f5f9'; });
+                        label.addEventListener('mouseleave', function() { label.style.background = 'none'; });
+
+                        var cb = document.createElement('input');
+                        cb.type    = 'checkbox';
+                        cb.value   = item;
+                        cb.checked = selected.includes(item);
+                        cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;accent-color:#4a90d9;';
+                        cb.addEventListener('change', function() {
+                            if (cb.checked) {
+                                if (!selected.includes(item)) selected.push(item);
+                            } else {
+                                selected = selected.filter(s => s !== item);
+                            }
+                        });
+
+                        label.appendChild(cb);
+                        label.appendChild(document.createTextNode(item));
+                        listContainer.appendChild(label);
+                    });
+            }
+
+            renderOptions('');
+            searchBox.addEventListener('input', function() { renderOptions(searchBox.value); });
+
+            // Apply / Cancel buttons
+            var btnRow = document.createElement('div');
+            btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+
+            var applyBtn = document.createElement('button');
+            applyBtn.textContent = 'Apply';
+            applyBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+            applyBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                cleanup();
+                success(selected.join(', '));
+            });
+
+            var cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+            cancelBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                cleanup();
+                cancel();
+            });
+
+            btnRow.appendChild(applyBtn);
+            btnRow.appendChild(cancelBtn);
+            dropdown.appendChild(btnRow);
+            document.body.appendChild(dropdown);
+
+            function cleanup() {
+                if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown);
+                document.removeEventListener('mousedown', outsideClick);
+            }
+
+            function outsideClick(e) {
+                if (!dropdown.contains(e.target) && !wrapper.contains(e.target)) {
+                    cleanup();
+                    cancel();
+                }
+            }
+
+            onRendered(function() {
+                var rect = cell.getElement().getBoundingClientRect();
+                dropdown.style.left    = rect.left + 'px';
+                dropdown.style.top     = (rect.bottom + 2) + 'px';
+                dropdown.style.display = 'block';
+                searchBox.focus();
+                setTimeout(function() {
+                    document.addEventListener('mousedown', outsideClick);
+                }, 10);
+            });
+
+            wrapper.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') { cleanup(); cancel(); }
+                if (e.key === 'Enter')  { cleanup(); success(selected.join(', ')); }
+            });
+
+            return wrapper;
+        };
+    }
+
+    // Renders comma-separated values as coloured badge pills
+    function multiBadgeFormatter(color) {
+        return function(cell) {
+            var val = cell.getValue();
+            if (!val) return '<span style="color:var(--text-secondary)">—</span>';
+            return val.split(',')
+                .map(v => v.trim()).filter(Boolean)
+                .map(v =>
+                    `<span style="background:${color};color:white;padding:1px 7px;` +
+                    `border-radius:3px;font-size:10px;margin-right:3px;display:inline-block;">${v}</span>`
+                ).join('');
+        };
+    }
     /* ── Formatters ──────────────────────────────────────── */
     function dtFormatter(cell) {
 
@@ -836,7 +977,70 @@
     function downloadBtnFormatter() {
         return '<button class="dl-btn">&#8595; Excel</button>';
     }
+    function dateTimeEditor(cell, onRendered, success, cancel) {
 
+        const input = document.createElement("input");
+
+        input.type = "text";
+        input.placeholder = "DD-MM-YYYY HH:MM";
+
+        input.style.width = "100%";
+        input.style.height = "100%";
+        input.style.border = "none";
+        input.style.padding = "4px";
+
+        input.value = cell.getValue() || "";
+
+        input.addEventListener("input", function () {
+
+            let v = input.value.replace(/\D/g, "");
+
+            if (v.length > 12) {
+                v = v.substring(0, 12);
+            }
+
+            let formatted = "";
+
+            if (v.length > 0)
+                formatted += v.substring(0, 2);
+
+            if (v.length > 2)
+                formatted += "-" + v.substring(2, 4);
+
+            if (v.length > 4)
+                formatted += "-" + v.substring(4, 8);
+
+            if (v.length > 8)
+                formatted += " " + v.substring(8, 10);
+
+            if (v.length > 10)
+                formatted += ":" + v.substring(10, 12);
+
+            input.value = formatted;
+        });
+
+        onRendered(function () {
+            input.focus();
+            input.select();
+        });
+
+        input.addEventListener("blur", function () {
+            success(input.value);
+        });
+
+        input.addEventListener("keydown", function (e) {
+
+            if (e.key === "Enter") {
+                success(input.value);
+            }
+
+            if (e.key === "Escape") {
+                cancel();
+            }
+        });
+
+        return input;
+    }
     /* ── Column definitions ──────────────────────────────── */
     function buildColumns() {
         return [
@@ -999,44 +1203,57 @@
             {
                 title: 'Alongside Berth',
                 field: 'along_side_berth',
-                width: 145,
-                headerHozAlign: 'center',
+                width: 170,
                 formatter: dtFormatter,
+                editor: dateTimeEditor
             },
             {
                 title: 'Discharge Start (Berth)',
                 field: 'commence_discharge_berth',
                 width: 155,
                 headerHozAlign: 'center',
+
                 formatter: dtFormatter,
+                editor: dateTimeEditor
             },
             {
                 title: 'Discharge End (Berth)',
                 field: 'completed_discharge_berth',
                 width: 155,
                 headerHozAlign: 'center',
+
                 formatter: dtFormatter,
+                editor: dateTimeEditor
             },
             {
                 title: 'Cast Off Berth NT',
                 field: 'cast_off_berth_nt',
                 width: 145,
                 headerHozAlign: 'center',
+
                 formatter: dtFormatter,
+                editor: dateTimeEditor
             },
             {
                 title: 'Cast Off Port',
                 field: 'cast_off_port',
                 width: 145,
                 headerHozAlign: 'center',
+
                 formatter: dtFormatter,
+                editor: dateTimeEditor
             },
-            {
+{
                 title: 'Unloaded By',
                 field: 'unloaded_by',
-                width: 140,
+                width: 220,
                 headerHozAlign: 'center',
+                editor: function(cell, onRendered, success, cancel) {
+                    return makeMultiSelectEditor(EQUIPMENT_LIST)(cell, onRendered, success, cancel);
+                },
+                formatter: multiBadgeFormatter('#3182ce'),
             },
+
             {
                 title: 'TAT',
                 field: 'tat',
@@ -1063,12 +1280,12 @@
 
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yy = String(d.getFullYear()).slice(-2);
+        const yyyy = d.getFullYear();
 
         const hh = String(d.getHours()).padStart(2, '0');
         const min = String(d.getMinutes()).padStart(2, '0');
 
-        return `${dd}-${mm}-${yy} ${hh}:${min}`;
+        return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
     }
     function buildMbcColumns() {
 
@@ -1087,7 +1304,7 @@
             {
                 title: 'MBC Name',
                 field: 'mbc_name',
-                width: 180,
+                width: 230,
                 frozen: true
             },
 
@@ -1119,15 +1336,33 @@
             { title: 'Cast Off Load Port', field: 'cast_off_mv', width: 170, formatter: mbcDateFormatter },
             { title: 'Arrival Gull Island', field: 'arrival_gull_island', width: 170, formatter: mbcDateFormatter },
             { title: 'Departure Gull Island', field: 'departure_gull_island', width: 170, formatter: mbcDateFormatter },
-            { title: 'MBC Arrival Port', field: 'mbc_arrival_port', width: 170, formatter: mbcDateFormatter },
-            { title: 'MBC AMF At Unloading Berth', field: 'mbc_amf_unloading_berth', width: 190, formatter: mbcDateFormatter },
-            { title: 'Unloading Commenced', field: 'unloading_commenced', width: 170, formatter: mbcDateFormatter },
-            { title: 'Cleaning Commenced', field: 'cleaning_commenced', width: 170, formatter: mbcDateFormatter },
-            { title: 'Unloading Completed', field: 'unloading_completed', width: 170, formatter: mbcDateFormatter },
-            { title: 'MBC Cast Off', field: 'mbc_cast_off', width: 160, formatter: mbcDateFormatter },
-            { title: 'Sailed Out Load Port', field: 'sailed_out_load_port', width: 170, formatter: mbcDateFormatter },
-            { title: 'Unloaded By', field: 'vessel_unloaded_by', width: 150 },
-            { title: 'Unloaded Berth', field: 'unloaded_berth', width: 150 },
+            { title: 'MBC Arrival Port', field: 'mbc_arrival_port', width: 170, formatter: mbcDateFormatter,editor: dateTimeEditor },
+            { title: 'MBC AMF At Unloading Berth', field: 'mbc_amf_unloading_berth', width: 190, formatter: mbcDateFormatter,editor: dateTimeEditor },
+            { title: 'Unloading Commenced', field: 'unloading_commenced', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'Cleaning Commenced', field: 'cleaning_commenced', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'Unloading Completed', field: 'unloading_completed', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'MBC Cast Off', field: 'mbc_cast_off', width: 160, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'Sailed Out Load Port', field: 'sailed_out_load_port', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+{
+                title: 'Unloaded By',
+                field: 'vessel_unloaded_by',
+                width: 220,
+                headerHozAlign: 'center',
+                editor: function(cell, onRendered, success, cancel) {
+                    return makeMultiSelectEditor(EQUIPMENT_LIST)(cell, onRendered, success, cancel);
+                },
+                formatter: multiBadgeFormatter('#3182ce'),
+            },
+            {
+                title: 'Unloaded Berth',
+                field: 'unloaded_berth',
+                width: 220,
+                headerHozAlign: 'center',
+                editor: function(cell, onRendered, success, cancel) {
+                    return makeMultiSelectEditor(BERTH_LIST)(cell, onRendered, success, cancel);
+                },
+                formatter: multiBadgeFormatter('#38a169'),
+            },
             { title: 'TAT', field: 'tat', width: 100 }
         ];
     }
@@ -1167,8 +1402,9 @@
     document.getElementById('vd-table').addEventListener('mouseleave', function () {
         _tip.style.display = 'none';
     });
+
     /* ── Table instance ──────────────────────────────────── */
-    let table;
+    let table = null;
 
     function initTable(data) {
 
@@ -1181,68 +1417,207 @@
                 : buildColumns(),
 
             layout: "fitDataStretch",
-
             responsiveLayout: false,
-
             maxHeight: 'calc(100vh - 190px)',
-
             rowHeight: 30,
-
             placeholder: 'No records found.',
-
             pagination: true,
-
             paginationMode: "local",
-
             paginationSize: 20,
-
             paginationSizeSelector: [20, 50, 100, 200],
 
             rowFormatter: function (row) {
+
                 const data = row.getData();
                 const el = row.getElement();
 
                 const STATUS_COLORS = {
-                    // Barge statuses
-                    'completed_discharge': '#c6efce',
-                    'under_discharge': '#ffe699',
-                    'loaded_waiting': '#bdd7ee',
-                    'currently_loading': '#d9d2e9',
-                    'loaded_transit': '#9fc5e8',
-                    'waiting_discharge': '#f9cb9c',
-
-                    // ✅ MBC-specific statuses
-                    'waiting_gull': '#f4cccc',
-                    'on_way_dharamtar': '#f6b26b',
-                    'waiting_castoff': '#c6efce',
+                    completed_discharge: '#c6efce',
+                    under_discharge: '#ffe699',
+                    loaded_waiting: '#bdd7ee',
+                    currently_loading: '#d9d2e9',
+                    loaded_transit: '#9fc5e8',
+                    waiting_discharge: '#f9cb9c',
+                    on_way_dharamtar: '#f6b26b',
+                    waiting_gull: '#f4cccc',
+                    waiting_castoff: '#c6efce'
                 };
 
                 const STATUS_LABELS = {
-                    // Barge
-                    'completed_discharge': 'Completed Discharge',
-                    'under_discharge': 'Under Discharge',
-                    'loaded_waiting': 'Loaded & Waiting',
-                    'currently_loading': 'Currently Loading',
-                    'loaded_transit': 'Loaded & Transit',
-                    'waiting_discharge': 'Waiting For Discharge',
-
-                    // ✅ MBC
-                    'waiting_gull': 'Waiting at Gull Island',
-                    'on_way_dharamtar': 'On the Way to Dharamtar',
-                    'waiting_castoff': 'Waiting for Cast Off',
+                    completed_discharge: 'Completed Discharge',
+                    under_discharge: 'Under Discharge',
+                    loaded_waiting: 'Loaded Waiting',
+                    currently_loading: 'Currently Loading',
+                    loaded_transit: 'Loaded & Transit',
+                    waiting_discharge: 'Waiting For Discharge',
+                    on_way_dharamtar: 'On the Way to Dharamtar'
                 };
-                // Backend 
+
                 const status = data.current_status || '';
 
+                // Row background color
                 if (STATUS_COLORS[status]) {
                     el.style.backgroundColor = STATUS_COLORS[status];
                 }
-                if (STATUS_LABELS[status]) {
-                    el.setAttribute('data-status', STATUS_LABELS[status]);
-                }
-            },
 
+                // Tooltip text
+                el.dataset.status = STATUS_LABELS[status] || status;
+
+                // Browser tooltip
+
+
+                // Hover effect
+                el.addEventListener('mouseenter', function () {
+
+                    const tip = document.getElementById('row-tip');
+
+                    if (!tip) return;
+
+                    tip.textContent =
+                        STATUS_LABELS[status] || status || 'No Status';
+
+                    tip.style.display = 'block';
+                });
+
+                el.addEventListener('mousemove', function (e) {
+
+                    const tip = document.getElementById('row-tip');
+
+                    if (!tip) return;
+
+                    tip.style.top = (e.clientY + 10) + 'px';
+                    tip.style.left = (e.clientX + 10) + 'px';
+                });
+
+                el.addEventListener('mouseleave', function () {
+
+                    const tip = document.getElementById('row-tip');
+
+                    if (!tip) return;
+
+                    tip.style.display = 'none';
+                });
+            },
         });
+
+        // ── Track pending edits ──────────────────────────────────────
+        let _pendingRow = null;
+
+        table.on("cellEdited", function (cell) {
+
+            _pendingRow = cell.getRow().getData();
+
+            // Show floating Save button
+            const existing = document.getElementById('floating-save-btn');
+            if (!existing) {
+                const btn = document.createElement('button');
+                btn.id = 'floating-save-btn';
+                btn.innerHTML = '💾 Save Changes';
+                btn.style.cssText = `
+                position: fixed;
+                top: 50px;
+                right: 80px;
+                z-index: 99999;
+                background: #16a34a;
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                padding: 7px 18px;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+                box-shadow: 0 4px 16px rgba(22,163,74,0.4);
+                height: 34px;
+            `;
+                btn.onclick = saveAndRefresh;
+                document.body.appendChild(btn);
+            }
+        });
+
+        function saveAndRefresh() {
+
+            if (!_pendingRow) return;
+
+            const row = _pendingRow;
+
+            // ── Choose correct API + payload based on current view ──
+            if (currentView === 'mbc') {
+
+                fetch("/api/module/RP01/mbc-berth-details", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        id: row.mbc_id,
+                        mbc_arrival_port: row.mbc_arrival_port,
+                        mbc_amf_unloading_berth: row.mbc_amf_unloading_berth,
+                        unloading_commenced: row.unloading_commenced,
+                        cleaning_commenced: row.cleaning_commenced,
+                        unloading_completed: row.unloading_completed,
+                        mbc_cast_off: row.mbc_cast_off,
+                        sailed_out_load_port: row.sailed_out_load_port,
+                        vessel_unloaded_by: row.vessel_unloaded_by,
+                        unloaded_berth: row.unloaded_berth
+                    })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        _afterSave(res);
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save MBC data' });
+                    });
+
+            } else {
+
+                fetch("/api/module/RP01/berth-details", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        id: row.id,
+                        along_side_berth: row.along_side_berth,
+                        commence_discharge_berth: row.commence_discharge_berth,
+                        completed_discharge_berth: row.completed_discharge_berth,
+                        cast_off_berth_nt: row.cast_off_berth_nt,
+                        cast_off_port: row.cast_off_port,
+                        unloaded_by: row.unloaded_by,
+                    })
+                })
+                    .then(r => r.json())
+                    .then(res => {
+                        _afterSave(res);
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to save data' });
+                    });
+            }
+        }
+
+        function _afterSave(res) {
+            const btn = document.getElementById('floating-save-btn');
+            if (btn) btn.remove();
+            _pendingRow = null;
+
+            if (res.success) {
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'success',
+                    title: 'Saved Successfully',
+                    showConfirmButton: false,
+                    timer: 1500,
+                    timerProgressBar: true
+                });
+                setTimeout(() => applyFilters(), 500);
+            } else {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Save Failed',
+                    text: res.message || 'Unable to save data'
+                });
+            }
+        }
 
         updateCount(data.length);
         renderShiftPreview(data);
@@ -1318,119 +1693,101 @@
 
 
 
-    function applyFilters() {
+    let _currentController = null;
 
-
-
-        const selectedDate =
-            document.getElementById('filter-from').value;
-
-        if (selectedDate && new Date(selectedDate) < new Date('2026-05-01T00:00')) {
-
-            Swal.fire({
-                icon: 'info',
-                title: 'Report Not Available',
-                html: `<b>Cutoff Date:</b> 01-May-2026<br><br>Reports before this date are not available.`,
-                confirmButtonText: 'OK',
-                confirmButtonColor: '#4a90d9'
-            });
-
-            return;
-        }
-        const selectedToDate =
-            document.getElementById('filter-to').value;
-
-        const selectedColumn =
-            document.getElementById('column-filter').value;
-
-        const params = new URLSearchParams();
-
-        if (selectedDate) {
-            params.set('from_date', selectedDate);
-        }
-
-        if (selectedToDate) {
-            params.set('to_date', selectedToDate);
-        }
-
-        if (selectedColumn) {
-            params.set('column_filter', selectedColumn);
-        }
-
-        const selectedFilter =
-            document.getElementById(
-                'status-filter'
-            ).value;
-
-        params.set(
-            'status_filter',
-            selectedFilter
-        );
-        params.set('view_type', currentView);
-
-        document.getElementById('row-count').textContent =
-            'Loading…';
-
-        showTableLoader();
-
-        const apiUrl =
-            currentView === 'mbc'
-                ? '/api/module/RP01/mv-barge-report/mbc-data?'
-                : '/api/module/RP01/mv-barge-report/data?';
-
-        fetch(
-            apiUrl + params.toString()
-        )
-
-            .then(r => {
-
-                if (!r.ok) {
-                    throw new Error('Server error ' + r.status);
-                }
-
-                return r.json();
-            })
-
-            .then(data => {
-                hideError();
-                hideTableLoader();
-
-                if (table) {
-                    if (currentView === 'mbc') {
-                        table.setColumns(buildMbcColumns());
-                    } else {
-                        table.setColumns(buildColumns());
-                    }
-                    table.setData(data);
-                    updateCount(data.length);
-                } else {
-                    initTable(data);
-                }
-
-                // ── Always refresh shift preview with BOTH sources ──
-                fetchAndRenderShiftPreview();
-            })
-
-            .catch(err => {
-
-                hideTableLoader();
-
-                console.error(err);
-
-                if (table) {
-                    table.clearData();
-                }
-
-                showError(
-                    currentView === 'mbc'
-                        ? '❌ Error loading MBC data.'
-                        : '❌ Error loading Barges data.'
-                );
-
-                document.getElementById('row-count').textContent =
-                    'Error loading data.';
-            });
+function applyFilters() {
+    // Cancel previous in-flight request
+    if (_currentController) {
+        _currentController.abort();
     }
+    _currentController = new AbortController();
+
+    const selectedDate = document.getElementById('filter-from').value;
+
+    if (selectedDate && new Date(selectedDate) < new Date('2026-05-01T00:00')) {
+        Swal.fire({
+            icon: 'info',
+            title: 'Report Not Available',
+            html: `<b>Cutoff Date:</b> 01-May-2026<br><br>Reports before this date are not available.`,
+            confirmButtonText: 'OK',
+            confirmButtonColor: '#4a90d9'
+        });
+        return;
+    }
+
+    const selectedToDate = document.getElementById('filter-to').value;
+    const selectedColumn = document.getElementById('column-filter').value;
+
+    const params = new URLSearchParams();
+
+    if (selectedDate) {
+        params.set('from_date', selectedDate);
+    }
+
+    if (selectedToDate) {
+        params.set('to_date', selectedToDate);
+    }
+
+    if (selectedColumn) {
+        params.set('column_filter', selectedColumn);
+    }
+
+    const selectedFilter = document.getElementById('status-filter').value;
+    params.set('status_filter', selectedFilter);
+    params.set('view_type', currentView);
+
+    document.getElementById('row-count').textContent = 'Loading…';
+
+    showTableLoader();
+
+    const apiUrl = currentView === 'mbc'
+        ? '/api/module/RP01/mv-barge-report/mbc-data?'
+        : '/api/module/RP01/mv-barge-report/data?';
+
+    fetch(apiUrl + params.toString(), { signal: _currentController.signal })
+        .then(r => {
+            if (!r.ok) throw new Error('Server error ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            _currentController = null;
+            hideError();
+            hideTableLoader();
+
+            if (table) {
+                if (currentView === 'mbc') {
+                    table.setColumns(buildMbcColumns());
+                } else {
+                    table.setColumns(buildColumns());
+                }
+                table.setData(data);
+                updateCount(data.length);
+            } else {
+                initTable(data);
+            }
+
+            // Always refresh shift preview with BOTH sources
+            fetchAndRenderShiftPreview();
+        })
+        .catch(err => {
+            if (err.name === 'AbortError') return; // Ignore cancelled requests
+
+            hideTableLoader();
+            console.error(err);
+
+            if (table) {
+                table.clearData();
+            }
+
+            showError(
+                currentView === 'mbc'
+                    ? '❌ Error loading MBC data.'
+                    : '❌ Error loading Barges data.'
+            );
+
+            document.getElementById('row-count').textContent = 'Error loading data.';
+        });
+}
     function resetFilters() {
 
         const now = new Date();
@@ -2130,13 +2487,30 @@
     }
 
     /* ── On load — auto-fetch current month ──────────────── */
-    document.addEventListener('DOMContentLoaded', function () {
+// ── Dynamic Equipment & Berth lists ──────────────────────────────────
+    let EQUIPMENT_LIST = [];
+    let BERTH_LIST = [];
+
+    async function loadEquipmentAndBerth() {
+        try {
+            const [eqRes, berthRes] = await Promise.all([
+                fetch('/api/module/VEM01/all'),
+                fetch('/api/module/PBM01/all')
+            ]);
+            const eqData    = await eqRes.json();
+            const berthData = await berthRes.json();
+            // Handle both plain string arrays AND object arrays
+            EQUIPMENT_LIST = eqData.map(x => typeof x === 'string' ? x : (x.name || x.equipment_name || String(x)));
+            BERTH_LIST     = berthData.map(x => typeof x === 'string' ? x : (x.name || x.berth_name || String(x)));
+        } catch(e) {
+            console.error('Failed to load equipment/berth lists', e);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', async function () {
         swapStatusFilterOptions('barges');
-
+        await loadEquipmentAndBerth();
         applyFilters();
-
-        addFilterRow();
-
     });
     let filterIndex = 0;
 
@@ -2446,10 +2820,12 @@
     }
     function globalSearch() {
 
+        if (!table) {
+            return;
+        }
+
         const value =
-            document.getElementById('table-search')
-                .value
-                .toLowerCase();
+            document.getElementById('table-search').value;
 
         if (!value) {
             table.clearFilter(true);
@@ -2458,10 +2834,10 @@
 
         table.setFilter(function (data) {
 
-            return Object.values(data).some(val =>
-                String(val || '')
+            return Object.values(data).some(v =>
+                String(v || '')
                     .toLowerCase()
-                    .includes(value)
+                    .includes(value.toLowerCase())
             );
 
         });

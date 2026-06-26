@@ -4,6 +4,7 @@ from datetime import datetime, date as date_type
 import io
 from .. import bp
 from database import get_db, get_cursor
+from datetime import datetime
 
 
 # ── column definitions ─────────────────────────────────────────────────────────
@@ -168,12 +169,32 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter=''):
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
-    if from_date:
-        where_clauses.append('h.doc_date >= %s')
-        params.append(from_date)
-    if to_date:
-        where_clauses.append('h.doc_date <= %s')
-        params.append(to_date)
+    from datetime import datetime, timedelta
+
+    if from_date == to_date and from_date:
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(
+            hour=6,
+            minute=0,
+            second=0
+        )
+
+        end_dt = start_dt + timedelta(days=1)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp >= %s")
+        params.append(start_dt)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp < %s")
+        params.append(end_dt)
+    else:
+        if from_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) >= %s")
+            params.append(from_date)
+
+        if to_date:
+            where_clauses.append(
+                "DATE(NULLIF(dp.unloading_completed, '')::timestamp) <= %s"
+            )
+            params.append(to_date)
 
     cur.execute(f"""
         SELECT
@@ -197,9 +218,9 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter=''):
     if month_filter or fy_filter:
         filtered = []
         for r in rows:
-            if month_filter and _month_label(r.get('doc_date', '')) != month_filter:
+            if month_filter and _month_label(r.get('unloading_completed', '')) != month_filter:
                 continue
-            if fy_filter and _fy(r.get('doc_date', '')) != fy_filter:
+            if fy_filter and _fy(r.get('unloading_completed', '')) != fy_filter:
                 continue
             filtered.append(r)
         return filtered
@@ -259,9 +280,12 @@ def _compute_tat_metrics(rows):
     return {k: _avg_dur(v) for k, v in buckets.items()}
 
 
-def _write_tat_sheet(ws, period_label,
-                     period_count,
-                     period_m):
+def _write_tat_sheet(
+    ws,
+    period_label, mtd_label, ytd_label,
+    period_count, mtd_count, ytd_count,
+    period_m, mtd_m, ytd_m
+    ):
     """
     Write the MBC TAT Report sheet into an openpyxl Worksheet `ws`.
     Colours match the reference image exactly.
@@ -293,58 +317,73 @@ def _write_tat_sheet(ws, period_label,
 
     # ── column widths ────────────────────────────────────────────────
     ws.column_dimensions['A'].width = 62
-    ws.column_dimensions['B'].width = 14
+    ws.column_dimensions['B'].width = 14   # Target
+    ws.column_dimensions['C'].width = 14   # Date
+    ws.column_dimensions['D'].width = 14   # MTD
+    ws.column_dimensions['E'].width = 14   # YTD
 
     
 
     # ── Row 1: period super-headers ──────────────────────────────────
     ws.row_dimensions[1].height = 18
-    _cell(1, 1, '',              fnt(),                         C_GREEN, ctr)
-    _cell(1, 2, period_label,    fnt(bold=True, color='CC0000'), C_GREEN, ctr)
+    _cell(1, 1, '', fnt(), C_GREEN, ctr)
+    _cell(1, 2, '', fnt(), C_GREEN, ctr)
+    _cell(1, 3, period_label, fnt(bold=True, color='CC0000'), C_GREEN, ctr)
+    _cell(1, 4, 'MTD', fnt(bold=True, color='CC0000'), C_GREEN, ctr)
+    _cell(1, 5, 'YTD', fnt(bold=True, color='CC6600'), C_GREEN, ctr)
 
 
     # ── Row 2: column headers ────────────────────────────────────────
     ws.row_dimensions[2].height = 22
-    for ci, val in enumerate(['Activity', period_label], 1):
-     _cell(2, ci, val, fnt(bold=True), C_GREEN, ctr)
+    for ci, val in enumerate(
+     ['Activity', 'Target (Hrs)', period_label, mtd_label, ytd_label], 1
+     ):
+       _cell(2, ci, val, fnt(bold=True), C_GREEN, ctr)
 
     # ── Row 3: Trips ─────────────────────────────────────────────────
     ws.row_dimensions[3].height = 18
-    for ci, val in enumerate(['Trips', period_count], 1):
-     _cell(3, ci, val, fnt(bold=True, size=12), C_YELLOW, ctr)
+    for ci, val in enumerate(
+     ['Trips', '', period_count, mtd_count, ytd_count], 1
+     ):
+      _cell(3, ci, val, fnt(bold=True, size=12), C_YELLOW, ctr)
 
     # ── Activity rows definition ─────────────────────────────────────
     # (label, metric_key, row_style)
     # row_style: 'data' | 'section_total' | 'main_total' | 'tat'
     ACTIVITIES = [
-        ('Jaigad Arrival -  Jaigad Loading Commenced  (Preberthing delay)', 'preberthing',      'data'),
-        ('Loading Commence - Loading Completion  (Loading time)',            'loading',           'data'),
-        ('Loading Completed - Cast Off from Jaigad  (Waiting after loading)', 'wait_after_load', 'data'),
-        ('Total time taken at Jaigad',                                       'total_jaigad',     'section_total'),
-        ('Jaigad Departure to Gull Arrival  (Loaded Transit time)',          'jaigad_to_gull',   'data'),
-        ('Gull Arrival - Gull Departure  (Waiting at Gull)',                 'gull_waiting',     'data'),
-        ('Gull Departure - Dharamatar Arrival',                              'gull_to_dhar',     'data'),
-        ('Jaigad Departure - Dharamtar Arrival (Jaigad to Dharamtar)',       'jaigad_to_dhar',   'main_total'),
-        ('Dharamtar Arrival to Disch Commenced  (Preberthing delay)',        'preberthing_dhar', 'data'),
-        ('Disch Commended to Disch Completed  (Unloading Time)',             'unloading',        'data'),
-        ('Disch Completed to Cast Off from Dharamtar  (Waiting after Unloading)', 'wait_after_unload', 'data'),
-        ('Total time taken at Dharamtar',                                    'total_dharamtar',  'section_total'),
-        ('Dharamtar Departure to Jaigad Arrival',                            'dhar_to_jaigad',   'main_total'),
-        ('TAT',                                                              'tat',              'tat'),
-    ]
+    ('Jaigad Arrival - Jaigad Loading Commenced (Preberthing delay)', 'preberthing', '1:00', 'data'),
+    ('Loading Commence - Loading Completion (Loading time)', 'loading', '6:00', 'data'),
+    ('Loading Completed - Cast Off from Jaigad (Waiting after loading)', 'wait_after_load', '0:00', 'data'),
+    ('Total time taken at Jaigad', 'total_jaigad', '7:00', 'section_total'),
+
+    ('Jaigad Departure to Gull Arrival (Loaded Transit time)', 'jaigad_to_gull', '12:00', 'data'),
+    ('Gull Arrival - Gull Departure (Waiting at Gull)', 'gull_waiting', '10:00', 'data'),
+    ('Gull Departure - Dharamtar Arrival', 'gull_to_dhar', '4:00', 'data'),
+    ('Jaigad Departure - Dharamtar Arrival (Jaigad to Dharamtar)', 'jaigad_to_dhar', '26:00', 'main_total'),
+
+    ('Dharamtar Arrival to Disch Commenced (Preberthing delay)', 'preberthing_dhar', '4:00', 'data'),
+    ('Disch Commended to Disch Completed (Unloading Time)', 'unloading', '6:00', 'data'),
+    ('Disch Completed to Cast Off from Dharamtar (Waiting after Unloading)', 'wait_after_unload', '1:00', 'data'),
+    ('Total time taken at Dharamtar', 'total_dharamtar', '11:00', 'section_total'),
+
+    ('Dharamtar Departure to Jaigad Arrival', 'dhar_to_jaigad', '16:00', 'main_total'),
+    ('TAT', 'tat', '60:00', 'tat'),
+]     
 
     STYLE_BG   = {'data': C_WHITE,  'section_total': C_YELLOW, 'main_total': C_ORANGE, 'tat': C_CYAN}
     STYLE_BOLD = {'data': False,    'section_total': True,     'main_total': True,      'tat': True}
 
-    for ri, (label, key, style) in enumerate(ACTIVITIES, start=4):
+    for ri, (label, key, target, style) in enumerate(ACTIVITIES, start=4):
         ws.row_dimensions[ri].height = 18
         bg      = STYLE_BG[style]
         is_bold = STYLE_BOLD[style]
         fnt_row = fnt(bold=is_bold, size=11)
         vals = [
-            (1, label,               left),
-            (2, period_m.get(key, '—'), ctr),
-
+            (1, label, left),
+            (2, target, ctr),
+            (3, period_m.get(key, '—'), ctr),
+            (4, mtd_m.get(key, '—'), ctr),
+            (5, ytd_m.get(key, '—'), ctr),
         ]
         for ci, val, aln in vals:
             _cell(ri, ci, val, fnt_row, bg, aln)
@@ -359,7 +398,7 @@ def _write_tat_sheet(ws, period_label,
     for i, fn in enumerate(footnotes):
         r = fn_start + i
         ws.row_dimensions[r].height = 28
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
         c = ws.cell(r, 1, fn)
         c.font      = fnt(italic=True, size=9, color='444444')
         c.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
@@ -373,12 +412,30 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter):
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
-    if from_date:
-        where_clauses.append('h.doc_date >= %s')
-        params.append(from_date)
-    if to_date:
-        where_clauses.append('h.doc_date <= %s')
-        params.append(to_date)
+    from datetime import datetime, timedelta
+
+    if from_date == to_date and from_date:
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(
+            hour=6,
+            minute=0,
+            second=0
+        )
+
+        end_dt = start_dt + timedelta(days=1)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp>= %s")
+        params.append(start_dt)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp < %s")
+        params.append(end_dt)
+    else:
+        if from_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) >= %s")
+            params.append(from_date)
+
+        if to_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) <= %s")
+            params.append(to_date)
 
     cur.execute(f"""
         SELECT
@@ -401,8 +458,8 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter):
     result = []
     sr = 1
     for r in rows:
-        month = _month_label(r['doc_date'])
-        fy    = _fy(r['doc_date'])
+        month = _month_label(r['unloading_completed'])
+        fy = _fy(r['unloading_completed'])
         if month_filter and month != month_filter:
             continue
         if fy_filter and fy != fy_filter:
@@ -471,12 +528,30 @@ def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter=''
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
-    if from_date:
-        where_clauses.append('h.doc_date >= %s')
-        params.append(from_date)
-    if to_date:
-        where_clauses.append('h.doc_date <= %s')
-        params.append(to_date)
+    from datetime import datetime, timedelta
+
+    if from_date == to_date and from_date:
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(
+            hour=6,
+            minute=0,
+            second=0
+        )
+
+        end_dt = start_dt + timedelta(days=1)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp >= %s")
+        params.append(start_dt)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp < %s")
+        params.append(end_dt)
+    else:
+        if from_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) >= %s")
+            params.append(from_date)
+
+        if to_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) <= %s")
+            params.append(to_date)
 
     cur.execute(f"""
         SELECT
@@ -500,9 +575,9 @@ def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter=''
     if month_filter or fy_filter:
         filtered = []
         for r in rows:
-            if month_filter and _month_label(r.get('doc_date', '')) != month_filter:
+            if month_filter and _month_label(r.get('unloading_completed', '')) != month_filter:
                 continue
-            if fy_filter and _fy(r.get('doc_date', '')) != fy_filter:
+            if fy_filter and _fy(r.get('unloading_completed', '')) != fy_filter:
                 continue
             filtered.append(r)
         rows = filtered
@@ -718,12 +793,30 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
-    if from_date:
-        where_clauses.append('h.doc_date >= %s')
-        params.append(from_date)
-    if to_date:
-        where_clauses.append('h.doc_date <= %s')
-        params.append(to_date)
+    from datetime import datetime, timedelta
+
+    if from_date == to_date and from_date:
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(
+            hour=6,
+            minute=0,
+            second=0
+        )
+
+        end_dt = start_dt + timedelta(days=1)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp >= %s")
+        params.append(start_dt)
+
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp < %s")
+        params.append(end_dt)
+    else:
+        if from_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) >= %s")
+            params.append(from_date)
+
+        if to_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) <= %s")
+            params.append(to_date)
 
     cur.execute(f"""
         SELECT
@@ -746,9 +839,9 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
     if month_filter or fy_filter:
         filtered = []
         for r in rows:
-            if month_filter and _month_label(r.get('doc_date', '')) != month_filter:
+            if month_filter and _month_label(r.get('unloading_completed', '')) != month_filter:
                 continue
-            if fy_filter and _fy(r.get('doc_date', '')) != fy_filter:
+            if fy_filter and _fy(r.get('unloading_completed', '')) != fy_filter:
                 continue
             filtered.append(r)
         rows = filtered
@@ -1028,106 +1121,121 @@ def mbc_master_index():
 @bp.route('/api/module/RP01/mbc-master/data')
 @login_required
 def mbc_master_data():
+
+    selected_date = request.args.get('selected_date', '')
+
     rows = _fetch_rows(
-        request.args.get('from_date', ''),
-        request.args.get('to_date', ''),
+        selected_date,
+        selected_date,
         request.args.get('month', ''),
-        request.args.get('fy', ''),
+        request.args.get('fy', '')
     )
+
     return jsonify(rows)
 
-
 _TAT_ACTIVITIES = [
-    ('Jaigad Arrival -  Jaigad Loading Commenced  (Preberthing delay)',           'preberthing',       'data'),
-    ('Loading Commence - Loading Completion  (Loading time)',                      'loading',           'data'),
-    ('Loading Completed - Cast Off from Jaigad  (Waiting after loading)',         'wait_after_load',   'data'),
-    ('Total time taken at Jaigad',                                                'total_jaigad',      'section_total'),
-    ('Jaigad Departure to Gull Arrival  (Loaded Transit time)',                   'jaigad_to_gull',    'data'),
-    ('Gull Arrival - Gull Departure  (Waiting at Gull)',                          'gull_waiting',      'data'),
-    ('Gull Departure - Dharamatar Arrival',                                       'gull_to_dhar',      'data'),
-    ('Jaigad Departure - Dharamtar Arrival (Jaigad to Dharamtar)',                'jaigad_to_dhar',    'main_total'),
-    ('Dharamtar Arrival to Disch Commenced  (Preberthing delay)',                 'preberthing_dhar',  'data'),
-    ('Disch Commended to Disch Completed  (Unloading Time)',                      'unloading',         'data'),
-    ('Disch Completed to Cast Off from Dharamtar  (Waiting after Unloading)',     'wait_after_unload', 'data'),
-    ('Total time taken at Dharamtar',                                             'total_dharamtar',   'section_total'),
-    ('Dharamtar Departure to Jaigad Arrival',                                     'dhar_to_jaigad',    'main_total'),
-    ('TAT',                                                                       'tat',               'tat'),
+    ('Jaigad Arrival - Jaigad Loading Commenced (Preberthing delay)', 'preberthing', '1:00', 'data'),
+    ('Loading Commence - Loading Completion (Loading time)', 'loading', '6:00', 'data'),
+    ('Loading Completed - Cast Off from Jaigad (Waiting after loading)', 'wait_after_load', '0:00', 'data'),
+    ('Total time taken at Jaigad', 'total_jaigad', '7:00', 'section_total'),
+
+    ('Jaigad Departure to Gull Arrival (Loaded Transit time)', 'jaigad_to_gull', '12:00', 'data'),
+    ('Gull Arrival - Gull Departure (Waiting at Gull)', 'gull_waiting', '10:00', 'data'),
+    ('Gull Departure - Dharamtar Arrival', 'gull_to_dhar', '4:00', 'data'),
+    ('Jaigad Departure - Dharamtar Arrival (Jaigad to Dharamtar)', 'jaigad_to_dhar', '26:00', 'main_total'),
+
+    ('Dharamtar Arrival to Disch Commenced (Preberthing delay)', 'preberthing_dhar', '4:00', 'data'),
+    ('Disch Commended to Disch Completed (Unloading Time)', 'unloading', '6:00', 'data'),
+    ('Disch Completed to Cast Off from Dharamtar (Waiting after Unloading)', 'wait_after_unload', '1:00', 'data'),
+    ('Total time taken at Dharamtar', 'total_dharamtar', '11:00', 'section_total'),
+
+    ('Dharamtar Departure to Jaigad Arrival', 'dhar_to_jaigad', '16:00', 'main_total'),
+    ('TAT', 'tat', '60:00', 'tat'),
 ]
 
 
 @bp.route('/api/module/RP01/mbc-master/tat-data')
 @login_required
 def mbc_master_tat_data():
-    req_from  = request.args.get('from_date', '')
-    req_to    = request.args.get('to_date', '')
-    req_month = request.args.get('month', '')
-    req_fy    = request.args.get('fy', '')
 
-    ref_date_str = req_to or date_type.today().strftime('%Y-%m-%d')
-    try:
-        ref_dt = datetime.strptime(ref_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        ref_dt = date_type.today()
+    selected_date = request.args.get('selected_date')
 
-    # Period (same filter as master data)
-    period_raw   = _fetch_raw_trips(req_from, req_to, req_month, req_fy)
-    period_count = len(period_raw)
-    period_m     = _compute_tat_metrics(period_raw)
+    if not selected_date:
+        selected_date = date_type.today().strftime('%Y-%m-%d')
 
-    if req_month:
-        period_label = req_month
-    elif req_fy:
-        period_label = req_fy
-    elif req_from and req_to:
-        period_label = f'{req_from} to {req_to}'
-    else:
-        period_label = 'All Periods'
+    ref_dt = datetime.strptime(selected_date, '%Y-%m-%d').date()
 
+    # =========================
+    # DAILY (Selected Date)
+    # =========================
+    daily_raw = _fetch_raw_trips(
+        selected_date,
+        selected_date
+    )
+
+    daily_count = len(daily_raw)
+    daily_m = _compute_tat_metrics(daily_raw)
+
+    # =========================
     # MTD
-    mtd_from_str = ref_dt.replace(day=1).strftime('%Y-%m-%d')
-    mtd_raw      = _fetch_raw_trips(mtd_from_str, ref_date_str)
-    mtd_count    = len(mtd_raw)
-    mtd_m        = _compute_tat_metrics(mtd_raw)
-    mtd_label    = ref_dt.strftime('%b-%y')
+    # =========================
+    mtd_from = ref_dt.replace(day=1).strftime('%Y-%m-%d')
 
+    mtd_raw = _fetch_raw_trips(
+        mtd_from,
+        selected_date
+    )
+
+    mtd_count = len(mtd_raw)
+    mtd_m = _compute_tat_metrics(mtd_raw)
+
+    # =========================
     # YTD
-    fy_start_str, _ = _fy_date_range(ref_dt)
-    ytd_raw         = _fetch_raw_trips(fy_start_str, ref_date_str)
-    ytd_count       = len(ytd_raw)
-    ytd_m           = _compute_tat_metrics(ytd_raw)
-    ytd_label       = _fy_label_str(ref_dt)
+    # =========================
+    fy_start, _ = _fy_date_range(ref_dt)
+
+    ytd_raw = _fetch_raw_trips(
+        fy_start,
+        selected_date
+    )
+
+    ytd_count = len(ytd_raw)
+    ytd_m = _compute_tat_metrics(ytd_raw)
+
+    date_label = ref_dt.strftime('%d-%m-%Y')
+    mtd_label = ref_dt.strftime('%b-%y')
+    ytd_label = _fy_label_str(ref_dt)
 
     rows = [
         {
-            'label':    label,
-            'style':    style,
-            'date_val': period_m.get(key, '—'),
-            # 'mtd_val':  mtd_m.get(key, '—'),
-            # 'ytd_val':  ytd_m.get(key, '—'),
+            'label': label,
+            'target': target,
+            'style': style,
+            'date_val': daily_m.get(key, '—'),
+            'mtd_val': mtd_m.get(key, '—'),
+            'ytd_val': ytd_m.get(key, '—'),
         }
-        for label, key, style in _TAT_ACTIVITIES
+        for label, key, target, style in _TAT_ACTIVITIES
     ]
 
     return jsonify({
-        'date_label':  period_label,
-        'mtd_label':   mtd_label,
-        'ytd_label':   ytd_label,
-        'date_trips':  period_count,
-        'mtd_trips':   mtd_count,
-        'ytd_trips':   ytd_count,
-        'rows':        rows,
+        'date_label': date_label,
+        'mtd_label': mtd_label,
+        'ytd_label': ytd_label,
+        'date_trips': daily_count,
+        'mtd_trips': mtd_count,
+        'ytd_trips': ytd_count,
+        'rows': rows
     })
-
 
 @bp.route('/api/module/RP01/mbc-master/dppl-tat-data')
 @login_required
 def mbc_master_dppl_tat_data():
-    req_from  = request.args.get('from_date', '')
-    req_to    = request.args.get('to_date', '')
+    selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy    = request.args.get('fy', '')
 
-    rows = _fetch_dppl_tat_rows(req_from, req_to, req_month, req_fy)
+    rows = _fetch_dppl_tat_rows(selected_date, selected_date, req_month, req_fy)
 
     def _hhmm(val_hrs):
         """Decimal hours → 'H:MM' display string."""
@@ -1201,35 +1309,40 @@ def mbc_master_download():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    req_from  = request.args.get('from_date', '')
-    req_to    = request.args.get('to_date', '')
+    selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
-    req_fy    = request.args.get('fy', '')
+    req_fy = request.args.get('fy', '')
+
+    if not selected_date:
+        selected_date = date_type.today().strftime('%Y-%m-%d')
+
+    ref_dt = datetime.strptime(
+        selected_date,
+        '%Y-%m-%d'
+    ).date()
 
     # ── Sheet 1: Master Data rows (display-formatted) ─────────────────
-    rows = _fetch_rows(req_from, req_to, req_month, req_fy)
+    rows = _fetch_rows(
+    selected_date,
+    selected_date,
+    req_month,
+    req_fy
+   )
 
     # ── Reference date for MTD / YTD ──────────────────────────────────
-    ref_date_str = req_to or date_type.today().strftime('%Y-%m-%d')
-    try:
-        ref_dt = datetime.strptime(ref_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        ref_dt = date_type.today()
+    ref_date_str = selected_date
 
     # ── Sheet 2 period data: same filter as Sheet 1 ────────────────────
-    period_raw   = _fetch_raw_trips(req_from, req_to, req_month, req_fy)
-    period_count = len(period_raw)
-    period_m     = _compute_tat_metrics(period_raw)
+    daily_raw = _fetch_raw_trips(
+        selected_date,
+        selected_date
+    )
+
+    daily_count = len(daily_raw)
+    daily_m = _compute_tat_metrics(daily_raw)
 
     # Period label
-    if req_month:
-        period_label = req_month
-    elif req_fy:
-        period_label = req_fy
-    elif req_from and req_to:
-        period_label = f'{req_from} — {req_to}'
-    else:
-        period_label = 'All Periods'
+    period_label = ref_dt.strftime('%d-%m-%Y')
 
     # ── Sheet 2 MTD data ───────────────────────────────────────────────
     mtd_from_str = ref_dt.replace(day=1).strftime('%Y-%m-%d')
@@ -1251,7 +1364,12 @@ def mbc_master_download():
     # ══ Sheet 1: MBC Wise (default first sheet) ════════════════════════
     ws0 = wb.active
     ws0.title = 'MBC Wise'
-    mbc_wise_rows = _fetch_mbc_wise_rows(req_from, req_to, req_month, req_fy)
+    mbc_wise_rows = _fetch_mbc_wise_rows(
+    selected_date,
+    selected_date,
+    req_month,
+    req_fy
+    )
     _write_mbc_wise_sheet(ws0, mbc_wise_rows, period_label)
 
     # ══ Sheet 2: Master Data ═══════════════════════════════════════════
@@ -1350,15 +1468,21 @@ def mbc_master_download():
     # ══ Sheet 2: MBC TAT Report ════════════════════════════════════════
     ws2 = wb.create_sheet('MBC TAT Report')
     _write_tat_sheet(
-      ws2,
-    period_label,
-    period_count,
-    period_m  
+        ws2,
+        period_label,
+        mtd_label,
+        ytd_label,
+        daily_count,
+        mtd_count,
+        ytd_count,
+        daily_m,
+        mtd_m,
+        ytd_m
     )
 
     # ══ Sheet 3: DPPL TAT ══════════════════════════════════════════════
     ws3 = wb.create_sheet('DPPL TAT')
-    dppl_rows = _fetch_dppl_tat_rows(req_from, req_to, req_month, req_fy)
+    dppl_rows = _fetch_dppl_tat_rows(selected_date, selected_date)
     _write_dppl_tat_sheet(ws3, dppl_rows, period_label)
 
     # ── Stream response ────────────────────────────────────────────────
@@ -1367,10 +1491,10 @@ def mbc_master_download():
     buf.seek(0)
 
     fname_parts = ['MBC_TAT_Report']
-    if req_from:
-        fname_parts.append(req_from)
-    if req_to:
-        fname_parts.append('to_' + req_to)
+
+    if selected_date:
+        fname_parts.append(selected_date)
+
     filename = '_'.join(fname_parts) + '.xlsx'
 
     return Response(
@@ -1383,13 +1507,17 @@ def mbc_master_download():
 @bp.route('/api/module/RP01/mbc-master/mbc-wise-data')
 @login_required
 def mbc_master_mbc_wise_data():
-    req_from  = request.args.get('from_date', '')
-    req_to    = request.args.get('to_date', '')
+
+    selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
-    req_fy    = request.args.get('fy', '')
+    req_fy = request.args.get('fy', '')
 
-    rows = _fetch_mbc_wise_rows(req_from, req_to, req_month, req_fy)
-
+    rows = _fetch_mbc_wise_rows(
+        selected_date,
+        selected_date,
+        req_month,
+        req_fy
+    )
     def _day_to_hhmm(val_day):
         if val_day is None:
             return None
@@ -1399,19 +1527,23 @@ def mbc_master_mbc_wise_data():
 
     SEG_KEYS = [
         'preberthing', 'loading', 'wait_after_load', 'total_jaigad',
-        'jaigad_to_gull', 'gull_waiting', 'gull_to_dhar', 'jaigad_to_dhar',
-        'preberthing_dhar', 'unloading', 'wait_after_unload', 'total_dharamtar',
-        'dhar_to_jaigad', 'tat',
+        'jaigad_to_gull', 'gull_waiting', 'gull_to_dhar',
+        'jaigad_to_dhar', 'preberthing_dhar', 'unloading',
+        'wait_after_unload', 'total_dharamtar',
+        'dhar_to_jaigad', 'tat'
     ]
 
     out = []
+
     for r in rows:
         entry = {
             'mbc_name': r['mbc_name'],
-            'qty':      round(r['qty']) if r['qty'] else 0,
+            'qty': round(r['qty']) if r['qty'] else 0,
         }
+
         for k in SEG_KEYS:
             entry[k] = _day_to_hhmm(r.get(k))
+
         out.append(entry)
 
     return jsonify(out)
