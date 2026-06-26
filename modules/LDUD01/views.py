@@ -323,8 +323,9 @@ def save_barge_line():
         row_id, trip_number = model.save_barge_line(data)
     except psycopg2.errors.UniqueViolation:
         return jsonify({
-            'error': f"Trip {data.get('trip_number')} already exists for barge "
-                     f"'{data.get('barge_name')}' on this LDUD document."
+            'error': f"Trip {data.get('trip_number')} for barge "
+                     f"'{data.get('barge_name')}' already has cargo "
+                     f"'{data.get('cargo_name') or '(blank)'}' on this LDUD document."
         }), 400
     return jsonify({'id': row_id, 'success': True, 'trip_number': trip_number})
 

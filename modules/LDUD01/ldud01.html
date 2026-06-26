@@ -1643,7 +1643,7 @@
             height: 200,
             ajaxURL: `/api/module/LDUD01/delays/${ldudId}`,
             columnDefaults: { headerSort: false },
-            initialSort: [{column: "total_time_hrs", dir: "asc"}],
+            initialSort: [{column: "start_datetime", dir: "asc"}],
             cellEdited: () => markDirty('delays'),
             columns: [
                 {title: "Crane No", field: "crane_number", width: 110, editor: canEdit ? craneMultiSelectEditor : false,
@@ -2411,9 +2411,9 @@
             }
         });
 
-        // Keep Delays ordered ascending by Hrs after saving
+        // Keep Delays ordered ascending by Start date after saving
         if (type === 'delays' && subTables[ldudId] && subTables[ldudId].delays) {
-            subTables[ldudId].delays.setSort('total_time_hrs', 'asc');
+            subTables[ldudId].delays.setSort('start_datetime', 'asc');
         }
 
         clearDirty(type);

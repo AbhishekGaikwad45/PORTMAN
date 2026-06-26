@@ -1143,8 +1143,9 @@
                         formatter: multiBadgeFormatter('#3182ce')},
                     {title: "Unloading Berth", field: "vessel_unloading_berth", width: 160, editor: unloadingBerthMultiEditor,
                         formatter: multiBadgeFormatter('#38a169')},
-                    {title: "Discharge Stop", field: "discharge_stop_shifting", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
                     {title: "Discharge Start", field: "discharge_start_shifting", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                    {title: "Discharge Stop", field: "discharge_stop_shifting", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                    {title: "Reached Load Port", field: "reached_load_port", width: 150, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
                     delBtn('discharge_port')
                 ].filter(Boolean)
             });

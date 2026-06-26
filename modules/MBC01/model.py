@@ -186,14 +186,16 @@ def save_discharge_port_line(data):
                       vessel_all_made_fast=%s, unloading_commenced=%s, cleaning_commenced=%s,
                       cleaning_completed=%s, unloading_completed=%s, vessel_cast_off=%s, sailed_out_load_port=%s,
                       vessel_unloaded_by=%s,
-                      vessel_unloading_berth=%s, discharge_stop_shifting=%s, discharge_start_shifting=%s
+                      vessel_unloading_berth=%s, discharge_stop_shifting=%s, discharge_start_shifting=%s,
+                      reached_load_port=%s
                       WHERE id=%s''',
                    [_nv(data.get('arrival_gull_island')), _nv(data.get('departure_gull_island')), _nv(data.get('arrived_yellow_crane')),
                     _nv(data.get('vessel_arrival_port')),
                     _nv(data.get('vessel_all_made_fast')), _nv(data.get('unloading_commenced')), _nv(data.get('cleaning_commenced')),
                     _nv(data.get('cleaning_completed')), _nv(data.get('unloading_completed')), _nv(data.get('vessel_cast_off')),
                     _nv(data.get('sailed_out_load_port')), _nv(data.get('vessel_unloaded_by')), _nv(data.get('vessel_unloading_berth')),
-                    _nv(data.get('discharge_stop_shifting')), _nv(data.get('discharge_start_shifting')), data['id']])
+                    _nv(data.get('discharge_stop_shifting')), _nv(data.get('discharge_start_shifting')),
+                    _nv(data.get('reached_load_port')), data['id']])
         row_id = data['id']
     else:
         cur.execute('''INSERT INTO mbc_discharge_port_lines
@@ -201,14 +203,16 @@ def save_discharge_port_line(data):
                        vessel_arrival_port,
                        vessel_all_made_fast, unloading_commenced, cleaning_commenced, cleaning_completed,
                        unloading_completed, vessel_cast_off, sailed_out_load_port, vessel_unloaded_by,
-                       vessel_unloading_berth, discharge_stop_shifting, discharge_start_shifting)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
+                       vessel_unloading_berth, discharge_stop_shifting, discharge_start_shifting,
+                       reached_load_port)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
                    [data['mbc_id'], _nv(data.get('arrival_gull_island')), _nv(data.get('departure_gull_island')),
                     _nv(data.get('arrived_yellow_crane')), _nv(data.get('vessel_arrival_port')), _nv(data.get('vessel_all_made_fast')),
                     _nv(data.get('unloading_commenced')), _nv(data.get('cleaning_commenced')),
                     _nv(data.get('cleaning_completed')), _nv(data.get('unloading_completed')), _nv(data.get('vessel_cast_off')),
                     _nv(data.get('sailed_out_load_port')), _nv(data.get('vessel_unloaded_by')), _nv(data.get('vessel_unloading_berth')),
-                    _nv(data.get('discharge_stop_shifting')), _nv(data.get('discharge_start_shifting'))])
+                    _nv(data.get('discharge_stop_shifting')), _nv(data.get('discharge_start_shifting')),
+                    _nv(data.get('reached_load_port'))])
         row_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
