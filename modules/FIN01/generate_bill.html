@@ -252,7 +252,7 @@
         <span class="total-value highlight" id="totalAmount">₹0.00</span>
     </div>
     <div class="spacer"></div>
-    <button class="btn btn-success" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
+    <button class="btn btn-success" id="generateBtn" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
         Generate Bill
     </button>
 </div>
@@ -262,6 +262,32 @@ let billableData = null;
 let serviceTypesMap = {};
 let gstRatesMap = {};
 let customerData = null;
+
+// Rate fetching: cache responses by URL (many lines share a service_type_id)
+// and track in-flight loads so we can block billing until rates land.
+const rateCache = new Map();
+let pendingRates = 0;
+
+async function fetchRateJson(url) {
+    if (rateCache.has(url)) return rateCache.get(url);
+    const resp = await fetch(url);
+    const json = await resp.json();
+    rateCache.set(url, json);
+    return json;
+}
+
+function setRatesLoading(delta) {
+    pendingRates = Math.max(0, pendingRates + delta);
+    const btn = document.getElementById('generateBtn');
+    if (!btn) return;
+    if (pendingRates > 0) {
+        btn.disabled = true;
+        btn.textContent = 'Loading rates…';
+    } else {
+        btn.disabled = false;
+        btn.textContent = 'Generate Bill';
+    }
+}
 
 function formatDateDMY(value) {
     if (!value) return '';
@@ -329,6 +355,7 @@ async function loadBillables() {
         return;
     }
 
+    rateCache.clear();
     document.getElementById('loadBtn').textContent = 'Loading...';
     document.getElementById('loadBtn').disabled = true;
 
@@ -413,39 +440,41 @@ async function loadCargoLineRate(idx, serviceTypeId, cargoName) {
     const ct = document.getElementById('customerType').value;
     const cid = document.getElementById('customerId').value;
     const agId = document.getElementById('agreementId').value;
+    setRatesLoading(1);
+    try {
+        // Try cargo-specific rate first
+        if (cargoName) {
+            let url = `/api/module/FIN01/cargo-rates/${ct}/${cid}/${serviceTypeId}`;
+            if (agId) url += `?agreement_id=${agId}`;
+            try {
+                const json = await fetchRateJson(url);
+                if (json.success && json.rates && json.rates[cargoName] != null) {
+                    const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
+                    if (rateInput) {
+                        rateInput.value = parseFloat(json.rates[cargoName]).toFixed(2);
+                        recalcTotals();
+                        return;
+                    }
+                }
+            } catch(e) {}
+        }
 
-    // Try cargo-specific rate first
-    if (cargoName) {
-        let url = `/api/module/FIN01/cargo-rates/${ct}/${cid}/${serviceTypeId}`;
+        // Fallback to generic rate
+        let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
         if (agId) url += `?agreement_id=${agId}`;
         try {
-            const resp = await fetch(url);
-            const json = await resp.json();
-            if (json.success && json.rates && json.rates[cargoName] != null) {
+            const json = await fetchRateJson(url);
+            if (json.success) {
                 const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
                 if (rateInput) {
-                    rateInput.value = parseFloat(json.rates[cargoName]).toFixed(2);
+                    rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
                     recalcTotals();
-                    return;
                 }
             }
         } catch(e) {}
+    } finally {
+        setRatesLoading(-1);
     }
-
-    // Fallback to generic rate
-    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
-    if (agId) url += `?agreement_id=${agId}`;
-    try {
-        const resp = await fetch(url);
-        const json = await resp.json();
-        if (json.success) {
-            const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-            if (rateInput) {
-                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
-                recalcTotals();
-            }
-        }
-    } catch(e) {}
 }
 
 function renderOtherServices(records) {
@@ -492,9 +521,9 @@ async function loadServiceRate(idx, serviceTypeId) {
     let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
     if (agId) url += `?agreement_id=${agId}`;
 
+    setRatesLoading(1);
     try {
-        const resp = await fetch(url);
-        const json = await resp.json();
+        const json = await fetchRateJson(url);
         if (json.success) {
             const rateInput = document.getElementById(`svc_rate_${idx}`);
             if (rateInput) {
@@ -502,7 +531,9 @@ async function loadServiceRate(idx, serviceTypeId) {
                 recalcTotals();
             }
         }
-    } catch(e) {}
+    } catch(e) {} finally {
+        setRatesLoading(-1);
+    }
 }
 
 function onServiceChecked(cb) {
@@ -716,6 +747,16 @@ async function generateBill() {
 
     if (lines.length === 0) {
         alert('Please select at least one item to bill.');
+        return;
+    }
+
+    // Guard: never bill at a 0 rate (rate still loading or genuinely missing)
+    if (pendingRates > 0) {
+        alert('Rates are still loading. Please wait a moment and try again.');
+        return;
+    }
+    if (lines.some(l => !(l.rate > 0))) {
+        alert('Some selected lines have a 0.00 rate. Wait for rates to load or enter a rate manually before billing.');
         return;
     }
 
