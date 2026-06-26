@@ -1539,42 +1539,61 @@ def _fetch_mbc_cargo_handling(report_date):
     )
 
     # Financial Year To Date
-    # Financial Year To Date
-
     cur.execute("""
         SELECT
-            'IBRM' AS cargo_type,
-            'OTHERS' AS owner,
-            COALESCE(SUM(qty), 0) AS qty
+            cargo_type,
+            owner,
+            SUM(qty) AS qty
         FROM (
 
+            ----------------------------------------------------------------
+            -- Historical Data (April 2026)
+            ----------------------------------------------------------------
             SELECT
-                quantity AS qty
-            FROM rp01_historical_lueu
-            WHERE entry_date BETWEEN DATE '2026-04-01'
-                                AND DATE '2026-04-30'
-            AND (
-                source_display IS NULL
-                OR source_display NOT ILIKE '%%MV%%'
-            )
+                'IBRM' AS cargo_type,
+                COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+                h.quantity AS qty
+            FROM rp01_historical_lueu h
+            LEFT JOIN mbc_master m
+                ON TRIM(UPPER(h.source_display)) = TRIM(UPPER(m.mbc_name))
+            WHERE h.entry_date BETWEEN DATE '2026-04-01'
+                                  AND DATE '2026-04-30'
+              AND (
+                    h.source_display ILIKE 'JSW%%'
+                    OR h.source_display ILIKE 'MBC%%'
+                  )
 
             UNION ALL
 
+            ----------------------------------------------------------------
+            -- Live Data (May 2026 onwards)
+            ----------------------------------------------------------------
             SELECT
+                h.cargo_type,
+                COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
                 l.quantity AS qty
             FROM lueu_lines l
+            JOIN mbc_header h
+                ON h.id = l.source_id
+            LEFT JOIN mbc_master m
+                ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
             WHERE l.is_deleted = false
-            AND l.source_type = 'MBC'
-            AND l.entry_date::date BETWEEN DATE '2026-05-01'
-                                    AND %s
+              AND l.source_type = 'MBC'
+              AND l.entry_date::date BETWEEN DATE '2026-05-01'
+                                        AND %s
 
         ) x
+        GROUP BY
+            cargo_type,
+            owner
+        ORDER BY
+            owner,
+            cargo_type
     """, (
         target_date,
     ))
 
     year_rows = cur.fetchall()
-
     cur.close()
     conn.close()
 
@@ -2747,7 +2766,7 @@ def _build_excel_a4(
 
         'Goa Fines': [
             'Goa Fines',
-            'Vizag Fines'
+            
         ],
 
         'HBI': [
@@ -2765,6 +2784,7 @@ def _build_excel_a4(
 
         'Bacheli Fines': [
             'Bacheli Fines'
+            'Vizag Fines'
         ],
 
         'Goa Clo': [
@@ -5247,7 +5267,7 @@ def daily_ops_preview():
 
         'Goa Fines': [
             'Goa Fines',
-            'Vizag Fines'
+            
         ],
 
         'HBI': [
@@ -5265,6 +5285,7 @@ def daily_ops_preview():
 
         'Bacheli Fines': [
             'Bacheli Fines'
+            'Vizag Fines'
         ],
 
         'Goa Clo': [
