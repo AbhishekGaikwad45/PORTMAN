@@ -41,6 +41,8 @@
 <div class="tabs">
     <button class="tab active" onclick="showTab('sapInv')">SAP Invoices</button>
     <button class="tab" onclick="showTab('callbacks')">SAP Callbacks</button>
+    <button class="tab" onclick="showTab('outbound')">SAP Outbound Log</button>
+    <button class="tab" onclick="showTab('queue')">SAP Queue</button>
 </div>
 
 <!-- SAP Invoice Logs -->
@@ -59,6 +61,24 @@
         <span class="row-info">Rows: <span id="cbCount">0</span> / <span id="cbTotal">0</span></span>
     </div>
     <div id="callbacksTable"></div>
+</div>
+
+<!-- SAP Outbound Log: every outbound interaction incl. reversals + playground -->
+<div id="outboundPanel" class="tab-panel">
+    <div class="toolbar">
+        <span style="font-size:11px;color:#7f8c8d">Every <strong>outbound</strong> SAP call — postings, FB08 reversals, cancellation CNs, IRN fetches and the admin <strong>SAP Playground</strong>. Click View for the request/response payload.</span>
+        <span class="row-info">Rows: <span id="obCount">0</span> / <span id="obTotal">0</span></span>
+    </div>
+    <div id="outboundTable"></div>
+</div>
+
+<!-- SAP Queue: async posting queue with retry + manual send -->
+<div id="queuePanel" class="tab-panel">
+    <div class="toolbar">
+        <span style="font-size:11px;color:#7f8c8d">Async SAP posting queue — retries up to 10× every 5 min. <strong>failed</strong> rows can be sent manually.</span>
+        <span class="row-info">Rows: <span id="qCount">0</span> / <span id="qTotal">0</span></span>
+    </div>
+    <div id="queueTable"></div>
 </div>
 
 <!-- JSON detail modal (shared) -->
@@ -235,12 +255,140 @@ const callbacksTable = new Tabulator('#callbacksTable', {
     ]
 });
 
+// ── SAP Outbound Log table ────────────────────────────────────────────────────
+const outboundTable = new Tabulator('#outboundTable', {
+    height: 'calc(100vh - 210px)',
+    layout: 'fitData',
+    pagination: true,
+    paginationMode: 'remote',
+    paginationSize: 50,
+    ajaxURL: '/api/module/FSAP01/outbound-logs',
+    ajaxResponse: function(url, params, resp) {
+        document.getElementById('obCount').textContent = resp.data.length;
+        document.getElementById('obTotal').textContent = resp.total;
+        return resp;
+    },
+    columns: [
+        {title: 'Log #',     field: 'id',                  width: 70},
+        {title: 'When',      field: 'created_date',         width: 150},
+        {title: 'Type',      field: 'integration_type',     width: 120},
+        {title: 'Doc Kind',  field: 'source_type',          width: 150},
+        {title: 'Reference', field: 'source_reference',      minWidth: 150},
+        {title: 'Status',    field: 'status',               width: 100,
+            formatter: function(cell) { return statusBadge(cell.getValue()); }},
+        {title: 'HTTP',      field: 'response_status_code', width: 70},
+        {title: 'ms',        field: 'duration_ms',          width: 70, hozAlign: 'right'},
+        {title: 'By',        field: 'created_by',           width: 120},
+        {title: 'Payload',   field: 'id',                   width: 80,
+            formatter: function() { return '<button class="json-btn">View</button>'; },
+            cellClick: function(e, cell) { openOutboundModal(cell.getRow().getData()); }
+        },
+    ]
+});
+
+function openOutboundModal(row) {
+    document.getElementById('modalTitle').textContent =
+        'SAP ' + (row.source_type || '') + ' — ' + (row.source_reference || row.id);
+    document.getElementById('sapLogId').textContent     = row.id || '-';
+    document.getElementById('sapLogStatus').textContent = row.status || '-';
+    document.getElementById('sapLogHttp').textContent   = row.response_status_code || '-';
+    document.getElementById('sapLogToken').textContent  = row.integration_type || '-';
+    document.getElementById('sapLogIp').textContent     = row.created_by || '-';
+    document.getElementById('sapLogDate').textContent   = row.created_date || '-';
+    document.querySelector('#sapLogRequest').previousElementSibling.textContent = 'Request Sent to SAP';
+    document.querySelector('#sapLogResponse').previousElementSibling.textContent =
+        row.error_message ? 'Response / Error' : 'Response from SAP';
+    document.getElementById('sapLogRequest').textContent  = parseBody(row.request_body);
+    document.getElementById('sapLogResponse').textContent =
+        row.error_message ? (row.error_message + '\n\n' + parseBody(row.response_body))
+                          : parseBody(row.response_body);
+    document.getElementById('sapLogModal').style.display = 'flex';
+}
+
+// ── SAP Queue table ───────────────────────────────────────────────────────────
+const queueTable = new Tabulator('#queueTable', {
+    height: 'calc(100vh - 210px)',
+    layout: 'fitData',
+    pagination: true,
+    paginationMode: 'remote',
+    paginationSize: 50,
+    ajaxURL: '/api/module/FSAP01/sap-queue',
+    ajaxResponse: function(url, params, resp) {
+        document.getElementById('qCount').textContent = resp.data.length;
+        document.getElementById('qTotal').textContent = resp.total;
+        return resp;
+    },
+    columns: [
+        {title: 'Q #',        field: 'id',                  width: 60},
+        {title: 'Job',        field: 'job_type',            width: 110},
+        {title: 'Reference',  field: 'reference_number',     minWidth: 140},
+        {title: 'Status',     field: 'status',              width: 110,
+            formatter: function(cell) { return statusBadge(cell.getValue()); }},
+        {title: 'Retries',    field: 'retry_count',         width: 80, hozAlign: 'center',
+            formatter: function(cell) {
+                const d = cell.getRow().getData();
+                return (d.retry_count || 0) + '/' + (d.max_retries || 10);
+            }},
+        {title: 'Next Try',   field: 'next_attempt_at',      width: 150},
+        {title: 'SAP Doc #',  field: 'sap_document_number', width: 120},
+        {title: 'Last Error', field: 'last_error',           minWidth: 200,
+            formatter: function(cell) {
+                const v = cell.getValue(); return v ? `<span title="${v.replace(/"/g,'&quot;')}">${v.slice(0,60)}</span>` : '';
+            }},
+        {title: 'Actions',    field: 'id',                   width: 160,
+            formatter: function(cell) {
+                const d = cell.getRow().getData();
+                let h = '<button class="json-btn" data-act="view">Payload</button>';
+                if (d.status === 'failed' || d.status === 'pending') {
+                    h += ' <button class="json-btn" data-act="send" style="background:#e67e22;color:#fff;">Manual Send</button>';
+                }
+                return h;
+            },
+            cellClick: function(e, cell) {
+                const act = e.target.getAttribute('data-act');
+                const d = cell.getRow().getData();
+                if (act === 'view') {
+                    document.getElementById('modalTitle').textContent = 'SAP Queue Payload — ' + (d.reference_number || d.id);
+                    document.getElementById('sapLogId').textContent     = d.id;
+                    document.getElementById('sapLogStatus').textContent = d.status;
+                    document.getElementById('sapLogHttp').textContent   = (d.retry_count||0)+'/'+(d.max_retries||10);
+                    document.getElementById('sapLogToken').textContent  = d.job_type;
+                    document.getElementById('sapLogIp').textContent     = d.created_by || '-';
+                    document.getElementById('sapLogDate').textContent   = d.updated_date || d.created_date || '-';
+                    document.querySelector('#sapLogRequest').previousElementSibling.textContent = 'Saved Payload';
+                    document.querySelector('#sapLogResponse').previousElementSibling.textContent = 'Last Error';
+                    document.getElementById('sapLogRequest').textContent  = parseBody(d.payload);
+                    document.getElementById('sapLogResponse').textContent = d.last_error || '(none)';
+                    document.getElementById('sapLogModal').style.display = 'flex';
+                } else if (act === 'send') {
+                    manualSendQueueRow(d.id);
+                }
+            }
+        },
+    ]
+});
+
+async function manualSendQueueRow(queueId) {
+    if (!confirm('Manually send queue job #' + queueId + ' to SAP now?')) return;
+    try {
+        const res = await fetch('/api/module/FSAP01/sap-queue/manual-send', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({queue_id: queueId})
+        });
+        const r = await res.json();
+        if (r.ok) { alert('Sent to SAP successfully.'); queueTable.setData('/api/module/FSAP01/sap-queue'); }
+        else { alert('SAP Error: ' + (r.error || 'Failed')); }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
 function showTab(name) {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById(name + 'Panel').classList.add('active');
-    document.querySelectorAll('.tab')[{sapInv: 0, callbacks: 1}[name]].classList.add('active');
+    document.querySelectorAll('.tab')[{sapInv: 0, callbacks: 1, outbound: 2, queue: 3}[name]].classList.add('active');
     if (name === 'callbacks') callbacksTable.setData('/api/module/FSAP01/callback-logs');
+    if (name === 'outbound') outboundTable.setData('/api/module/FSAP01/outbound-logs');
+    if (name === 'queue') queueTable.setData('/api/module/FSAP01/sap-queue');
 }
 </script>
 {% endblock %}

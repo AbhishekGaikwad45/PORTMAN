@@ -49,6 +49,42 @@ def callback_logs():
     return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
 
 
+@bp.route('/api/module/FSAP01/outbound-logs')
+@login_required
+def outbound_logs():
+    """All outbound SAP interactions — postings, reversals, CNs, playground, IRN."""
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    type_filter = request.args.get('type') or None
+    data, total = model.get_outbound_logs(page, size, type_filter)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
+
+
+@bp.route('/api/module/FSAP01/sap-queue')
+@login_required
+def sap_queue_list():
+    """The async SAP outbound queue with retry/payload details."""
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 50))
+    status = request.args.get('status') or None
+    data, total = model.get_sap_queue(page, size, status)
+    return jsonify({'data': data, 'last_page': (total + size - 1) // size, 'total': total})
+
+
+@bp.route('/api/module/FSAP01/sap-queue/manual-send', methods=['POST'])
+@login_required
+def sap_queue_manual_send():
+    """Manually fire a queued/failed SAP job from the FSAP01 console."""
+    perms = get_perms()
+    if not perms.get('can_edit'):
+        return jsonify({'ok': False, 'error': 'No permission'}), 403
+    queue_id = (request.json or {}).get('queue_id')
+    if not queue_id:
+        return jsonify({'ok': False, 'error': 'queue_id required'}), 400
+    import sap_queue
+    return jsonify(sap_queue.manual_send(queue_id))
+
+
 @bp.route('/api/module/FSAP01/sap-cn-logs')
 @login_required
 def sap_cn_logs():
