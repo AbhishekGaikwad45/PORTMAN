@@ -61,7 +61,9 @@ def get_data(page=1, size=20, filters=None):
         total = cur.fetchone()['count']
         cur.execute(f'''
             SELECT mh.*,
-                   (SELECT COUNT(*) FROM mbc_customer_details cd WHERE cd.mbc_id = mh.id) AS _customer_count
+                   (SELECT COUNT(*) FROM mbc_customer_details cd WHERE cd.mbc_id = mh.id) AS _customer_count,
+                   (SELECT pd.id FROM mbc_proof_documents pd WHERE pd.mbc_id = mh.id ORDER BY pd.id DESC LIMIT 1) AS _proof_doc_id,
+                   (SELECT pd.original_filename FROM mbc_proof_documents pd WHERE pd.mbc_id = mh.id ORDER BY pd.id DESC LIMIT 1) AS _proof_filename
             FROM mbc_header mh
             {where_sql}
             ORDER BY mh.id DESC LIMIT %s OFFSET %s
@@ -404,7 +406,7 @@ def get_approval_eligibility(mbc_id):
             missing.append('Material PO Number — required on every Customer Details row')
     cur.execute('SELECT COUNT(*) FROM mbc_proof_documents WHERE mbc_id=%s', (mbc_id,))
     if cur.fetchone()['count'] == 0:
-        missing.append('Proof of Quantity — at least one document must be uploaded')
+        missing.append('Proof of Quantity — document must be uploaded (Proof of Qty column)')
     conn.close()
     return {'eligible': len(missing) == 0, 'missing': missing}
 

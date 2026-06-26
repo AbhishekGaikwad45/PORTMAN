@@ -391,24 +391,15 @@
     </div>
 </div>
 
+<!-- Shared hidden input for the Proof of Qty grid column (anyone can upload) -->
+<input type="file" id="proofColInput" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadProofColumn()">
+
 <!-- Approval Info Modal -->
 <div id="approvalInfoModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
     <div style="background:white;border-radius:8px;padding:24px;max-width:480px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
         <h3 style="margin:0 0 14px;font-size:16px;font-weight:600;">Approval Checklist</h3>
         <div id="approvalInfoBody" style="font-size:13px;margin-bottom:16px;"></div>
-        <div id="approvalProofSection" style="display:none;margin-bottom:14px;">
-            <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">
-                Proof of Quantity <span style="color:#e53e3e">*</span>
-                <span style="font-size:11px;color:#718096;font-weight:400;">&nbsp;mandatory — multiple files allowed</span>
-            </label>
-            <div id="approvalDocsList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:4px;"></div>
-            <input type="file" id="approvalDocsInput" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadApprovalProofDocs()">
-            <button type="button" onclick="document.getElementById('approvalDocsInput').click()"
-                    style="padding:6px 14px;background:#ebf8ff;border:1px dashed #3182ce;border-radius:4px;cursor:pointer;font-size:12px;color:#2b6cb0;font-weight:500;">
-                + Upload Proof of Quantity
-            </button>
-            <div id="approvalDocsUploading" style="display:none;font-size:12px;color:#718096;margin-top:4px;">Uploading…</div>
-        </div>
+        <div id="approvalProofView" style="display:none;margin-bottom:14px;font-size:12px;"></div>
         <div id="approvalPasswordSection" style="display:none;margin-bottom:14px;">
             <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Confirm your password <span style="color:#e53e3e">*</span></label>
             <input type="password" id="approvalPassword" placeholder="Enter your login password…" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;">
@@ -704,6 +695,25 @@
                 }
             },
             {title: "Created By", field: "created_by", width: 90},
+            {
+                title: "Proof of Qty", field: "_proof_doc_id", width: 150, headerSort: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    let html = '';
+                    if (data._proof_doc_id) {
+                        const name = data._proof_filename || 'file';
+                        const short = name.length > 16 ? name.slice(0, 15) + '…' : name;
+                        html += `<a href="/api/module/MBC01/proof_docs/file/${data._proof_doc_id}" target="_blank" title="${name}" onclick="event.stopPropagation()" style="color:#2b6cb0;text-decoration:underline;font-size:11px;">📄 ${short}</a>`;
+                    }
+                    if (data.doc_status !== 'Approved') {
+                        const label = data._proof_doc_id ? '↻' : '+ Upload';
+                        const tip = data._proof_doc_id ? 'Replace file' : 'Upload proof';
+                        html += `<button class="btn-info-approval" style="margin-left:6px;padding:2px 6px;" onclick="triggerProofUpload(${data.id}, event)" title="${tip}">${label}</button>`;
+                    }
+                    return html || '<span style="color:#a0aec0;font-size:11px;">—</span>';
+                }
+            },
             {
                 title: "Approval", field: "_approval_actions", width: 170, headerSort: false,
                 formatter: function(cell) {
@@ -1468,41 +1478,32 @@
         approvalUploadedDocs = [];
         const body = document.getElementById('approvalInfoBody');
         const approveBtn = document.getElementById('approvalInfoApproveBtn');
-        const proofSection = document.getElementById('approvalProofSection');
+        const proofView = document.getElementById('approvalProofView');
         const pwdSection = document.getElementById('approvalPasswordSection');
-        const docsList = document.getElementById('approvalDocsList');
         const pwdInput = document.getElementById('approvalPassword');
 
         body.innerHTML = '<em style="color:#718096;">Checking requirements...</em>';
         approveBtn.style.display = 'none';
-        proofSection.style.display = 'none';
+        proofView.style.display = 'none';
+        proofView.innerHTML = '';
         pwdSection.style.display = 'none';
-        docsList.innerHTML = '';
-        document.getElementById('approvalDocsInput').value = '';
-        document.getElementById('approvalDocsUploading').style.display = 'none';
         if (pwdInput) pwdInput.value = '';
         document.getElementById('approvalInfoModal').style.display = 'flex';
 
-        // Load any already-uploaded proof docs (so user can see them and re-upload isn't forced)
+        // Read-only view of the proof document (uploaded from the grid column).
         try {
             const dres = await fetch(`/api/module/MBC01/proof_docs/${id}`);
             const ddata = await dres.json();
             if (ddata.docs && ddata.docs.length) {
-                for (const doc of ddata.docs) {
-                    approvalUploadedDocs.push(doc);
-                    const item = document.createElement('div');
-                    item.style.cssText = 'font-size:12px;color:#276749;background:#f0fff4;padding:3px 8px;border-radius:4px;display:flex;align-items:center;gap:6px;';
-                    item.innerHTML = `<span>✓</span><a href="/api/module/MBC01/proof_docs/file/${doc.id}" target="_blank" style="color:#276749;text-decoration:underline;">${doc.original_filename}</a>`;
-                    docsList.appendChild(item);
-                }
+                for (const doc of ddata.docs) approvalUploadedDocs.push(doc);
+                const doc = ddata.docs[ddata.docs.length - 1];
+                proofView.style.display = 'block';
+                proofView.innerHTML = `Proof of Quantity: <a href="/api/module/MBC01/proof_docs/file/${doc.id}" target="_blank" style="color:#2b6cb0;text-decoration:underline;">📄 ${doc.original_filename}</a>`;
             }
         } catch(e) { /* ignore */ }
 
         const res = await fetch(`/api/module/MBC01/approval_check/${id}`);
         const data = await res.json();
-
-        // Always show proof docs upload section for approvers so they can add files even if check already passes
-        if (isApprover) proofSection.style.display = 'block';
 
         if (data.eligible) {
             body.innerHTML = '<div style="color:#276749;font-weight:600;margin-bottom:8px;">✅ All requirements met.</div>' +
@@ -1525,65 +1526,44 @@
         approvalUploadedDocs = [];
     }
 
-    async function uploadApprovalProofDocs() {
-        const input = document.getElementById('approvalDocsInput');
-        const files = input.files;
-        if (!files || !files.length) return;
+    // Proof of Qty grid column upload (anyone can fill; one file per MBC, replaces old)
+    let proofUploadTargetId = null;
 
-        document.getElementById('approvalDocsUploading').style.display = 'block';
+    function triggerProofUpload(id, event) {
+        event.stopPropagation();
+        proofUploadTargetId = id;
+        const input = document.getElementById('proofColInput');
+        input.value = '';
+        input.click();
+    }
+
+    async function uploadProofColumn() {
+        const input = document.getElementById('proofColInput');
+        if (!input.files || !input.files.length || !proofUploadTargetId) return;
         const fd = new FormData();
-        fd.append('mbc_id', approvalTargetId);
-        for (const f of files) fd.append('files', f);
-
+        fd.append('mbc_id', proofUploadTargetId);
+        fd.append('files', input.files[0]);
         try {
             const res = await fetch('/api/module/MBC01/proof_docs/upload', { method: 'POST', body: fd });
             const data = await res.json();
             if (data.error) { alert(data.error); return; }
-
-            const list = document.getElementById('approvalDocsList');
-            for (const doc of data.docs) {
-                approvalUploadedDocs.push(doc);
-                const item = document.createElement('div');
-                item.style.cssText = 'font-size:12px;color:#276749;background:#f0fff4;padding:3px 8px;border-radius:4px;display:flex;align-items:center;gap:6px;';
-                item.innerHTML = `<span>✓</span><a href="/api/module/MBC01/proof_docs/file/${doc.id}" target="_blank" style="color:#276749;text-decoration:underline;">${doc.original_filename}</a>`;
-                list.appendChild(item);
+            const doc = data.docs[0];
+            const row = table.getRows().find(r => r.getData().id === proofUploadTargetId);
+            if (row) {
+                row.update({_proof_doc_id: doc.id, _proof_filename: doc.original_filename});
+                row.reformat();
             }
-            // Re-run eligibility check so the "Proof of Quantity" item drops off the missing list if that was the only gap
-            await refreshApprovalChecklist();
         } catch(e) {
             alert('Upload failed. Please try again.');
         } finally {
-            document.getElementById('approvalDocsUploading').style.display = 'none';
             input.value = '';
-        }
-    }
-
-    async function refreshApprovalChecklist() {
-        if (!approvalTargetId) return;
-        const res = await fetch(`/api/module/MBC01/approval_check/${approvalTargetId}`);
-        const data = await res.json();
-        const body = document.getElementById('approvalInfoBody');
-        const approveBtn = document.getElementById('approvalInfoApproveBtn');
-        const pwdSection = document.getElementById('approvalPasswordSection');
-        if (data.eligible) {
-            body.innerHTML = '<div style="color:#276749;font-weight:600;margin-bottom:8px;">✅ All requirements met.</div>' +
-                (isApprover ? '<p style="color:#4a5568;font-size:12px;margin:0;">Review the proof documents, enter your password, then click Approve.</p>' :
-                 '<p style="color:#4a5568;font-size:12px;margin:0;">Waiting for approver to approve.</p>');
-            if (isApprover) {
-                approveBtn.style.display = 'inline-block';
-                pwdSection.style.display = 'block';
-            }
-        } else {
-            const items = data.missing.map(m => `<li style="margin:4px 0;">❌ ${m}</li>`).join('');
-            body.innerHTML = `<p style="margin:0 0 8px;font-weight:600;color:#744210;">The following must be completed before approval:</p><ul style="margin:0;padding-left:18px;">${items}</ul>`;
-            approveBtn.style.display = 'none';
-            pwdSection.style.display = 'none';
+            proofUploadTargetId = null;
         }
     }
 
     async function confirmApprove() {
         if (approvalUploadedDocs.length === 0) {
-            alert('Please upload at least one Proof of Quantity document before approving.');
+            alert('Please upload the Proof of Quantity document (Proof of Qty column) before approving.');
             return;
         }
         const password = (document.getElementById('approvalPassword').value || '').trim();
