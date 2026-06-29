@@ -216,7 +216,7 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
     cur.close()
     conn.close()
 
-    for v in vessels:
+    for i, v in enumerate(vessels):
         vid    = v.get('vcn_id')
         op     = v.get('operation_type', '')
         bl_qty = (bl_export.get(vid, 0) if op == 'Export' else bl_import.get(vid, 0))
@@ -230,7 +230,10 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         v['eta_to_dharamtar'] = eta_to_dharamtar.get(v['id'], '')
         v['wt_r19']           = ''
         v['at_gull_loaded']   = at_gull_loaded.get(v['id'], '')
-        v['mbc_eta']          = ', '.join(mbc_eta_list)
+        if i < len(mbc_eta_list):
+          v['mbc_eta'] = mbc_eta_list[i]
+        else:
+            v['mbc_eta'] = ''
 
     return vessels
 
@@ -513,6 +516,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         if status == "Discharging" and berth:
             occupied_berth_set.add(berth)
 
+    # Sort alphabetically by name regardless of type
+    barges.sort(key=lambda x: (x["name"] or "").upper())
+
     cur.close()
     conn.close()
     return barges, occupied_berth_set
@@ -520,9 +526,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
 
 # ── ROUTES — each defined exactly ONCE ───────────────────────────────────────
 
-@bp.route('/module/RP01/Barge-Position-Report/')
+@bp.route('/module/RP01/bargeposition/')
 @login_required
-def barge_position_dashboard():
+def bargeposition():
 
     barges, occupied_berth_set = _fetch_all_barges()
 
@@ -617,6 +623,7 @@ def barge_position_dashboard():
         all_barges=barges,
         mother_vessels=mother_vessels,
         tide_data=tide_data,
+         berths=berths,
         old_berths=old_berths,
         new_berths=new_berths,
         from_date=from_date_str,
@@ -630,6 +637,180 @@ def barge_position_dashboard():
         available_berths=max(0, 14 - occupied_berths),
         
     )
+    
+# ── API ROUTES ────────────────────────────────────────────────────────────────
+
+@bp.route('/api/module/RP01/berth-occupancy')
+@login_required
+def api_berth_occupancy():
+    include_completed = request.args.get('completed', '0') == '1'
+
+    if include_completed:
+        report_date = request.args.get('date', '')
+        shift       = request.args.get('shift', 'ALL')
+
+        if not report_date:
+            return jsonify([])
+
+        try:
+            base = datetime.strptime(report_date, '%Y-%m-%d')
+        except Exception:
+            return jsonify([])
+
+        # For date-only filtering — match the full selected date regardless of time
+        date_start = base.replace(hour=0,  minute=0,  second=0)
+        date_end   = base.replace(hour=23, minute=59, second=59)
+
+        # If a specific shift is selected, narrow the window
+        if shift.upper() != 'ALL':
+            SHIFT_WINDOWS = {
+                'A': (base.replace(hour=6,  minute=0),  base.replace(hour=14, minute=0)),
+                'B': (base.replace(hour=14, minute=0),  base.replace(hour=22, minute=0)),
+                'C': (base.replace(hour=22, minute=0),  (base + timedelta(days=1)).replace(hour=6, minute=0)),
+            }
+            from_dt, to_dt = SHIFT_WINDOWS.get(shift.upper(), (date_start, date_end))
+        else:
+            from_dt, to_dt = date_start, date_end
+
+        conn = get_db()
+        cur  = get_cursor(conn)
+        results = []
+
+        # Completed BARGES
+        # Use flexible regex: matches YYYY-MM-DD with space OR T separator
+        cur.execute(r"""
+            SELECT *
+            FROM (
+                SELECT
+                    bl.barge_name,
+                    bl.cargo_name,
+                    bl.commence_discharge_berth,
+                    bl.along_side_berth,
+                    bl.completed_discharge_berth,
+                    bl.cast_off_port,
+                    COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                    CASE
+                        WHEN bl.cast_off_port IS NOT NULL
+                             AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(bl.cast_off_port), 1, 10)::date
+                        WHEN bl.completed_discharge_berth IS NOT NULL
+                             AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(bl.completed_discharge_berth), 1, 10)::date
+                        ELSE NULL
+                    END AS completed_date
+                FROM ldud_barge_lines bl
+                JOIN ldud_header h ON h.id = bl.ldud_id
+                WHERE COALESCE(TRIM(bl.barge_name),'') <> ''
+                  AND (
+                        (bl.cast_off_port IS NOT NULL
+                         AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                        OR
+                        (bl.completed_discharge_berth IS NOT NULL
+                         AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                      )
+            ) sub
+            WHERE sub.completed_date = %s::date
+            ORDER BY sub.barge_name
+        """, (report_date,))
+
+        for row in cur.fetchall():
+            row = dict(row)
+            commenced = _fmt_dt(row.get('commence_discharge_berth') or row.get('along_side_berth'))
+            completed = _fmt_dt(row.get('cast_off_port') or row.get('completed_discharge_berth'))
+            results.append({
+                'type':      'BARGE',
+                'status':    'Completed',
+                'name':      row['barge_name'],
+                'cargo':     row.get('cargo_name') or '',
+                'bl_qty':    float(row['bl_qty'] or 0),
+                'commenced': commenced,
+                'completed': completed,
+            })
+
+        # Completed MBCs
+        cur.execute(r"""
+            SELECT *
+            FROM (
+                SELECT
+                    h.mbc_name,
+                    h.cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
+                    p.unloading_commenced,
+                    p.unloading_completed,
+                    p.vessel_cast_off,
+                    CASE
+                        WHEN p.unloading_completed IS NOT NULL
+                             AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(p.unloading_completed), 1, 10)::date
+                        WHEN p.vessel_cast_off IS NOT NULL
+                             AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(p.vessel_cast_off), 1, 10)::date
+                        ELSE NULL
+                    END AS completed_date
+                FROM mbc_header h
+                JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+                WHERE (
+                        (p.unloading_completed IS NOT NULL
+                         AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                        OR
+                        (p.vessel_cast_off IS NOT NULL
+                         AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                      )
+            ) sub
+            WHERE sub.completed_date = %s::date
+            ORDER BY sub.mbc_name
+        """, (report_date,))
+
+        for row in cur.fetchall():
+            row = dict(row)
+            results.append({
+                'type':      'MBC',
+                'status':    'Completed',
+                'name':      row['mbc_name'],
+                'cargo':     row.get('cargo_name') or '',
+                'bl_qty':    float(row['bl_qty'] or 0),
+                'commenced': _fmt_dt(row.get('unloading_commenced')),
+                'completed': _fmt_dt(row.get('unloading_completed') or row.get('vessel_cast_off')),
+            })
+
+        cur.close()
+        conn.close()
+        return jsonify(results)
+
+    # Original logic — completely untouched
+    barges, _ = _fetch_all_barges()
+    return jsonify(barges)
+
+
+@bp.route('/api/module/RP01/mother-vessel-data')
+@login_required
+def api_mother_vessel_data():
+    from_datetime = _parse_dt(request.args.get('from_datetime'))
+    to_datetime   = _parse_dt(request.args.get('to_datetime'))
+    if not from_datetime or not to_datetime:
+        return jsonify([])
+    vessels_raw = _fetch_mother_vessels(from_datetime, to_datetime)
+    vessels = [{
+        'vessel_name':         v.get('vessel_name') or '',
+        'discharge_commenced': _fmt_dt(v.get('discharge_commenced')),
+        'discharge_completed': _fmt_dt(v.get('discharge_completed')),
+        'under_loading':       v.get('under_loading') or '',
+        'eta_to_dharamtar':    v.get('eta_to_dharamtar') or '',
+        'wt_r19':              v.get('wt_r19') or '',
+        'at_gull_loaded':      v.get('at_gull_loaded') or '',
+        'mbc_eta':             v.get('mbc_eta') or '',
+    } for v in vessels_raw]
+    return jsonify(vessels)
+
+
+@bp.route('/api/module/RP01/tide-data')
+@login_required
+def api_tide_data():
+    from_datetime = _parse_dt(request.args.get('from_datetime'))
+    to_datetime   = _parse_dt(request.args.get('to_datetime'))
+    if not from_datetime or not to_datetime:
+        return jsonify([])
+    return jsonify(_fetch_tide_data(from_datetime, to_datetime))
 
 
 @bp.route('/api/module/RP01/shift-details')
@@ -648,171 +829,6 @@ def get_shift_details():
         "crane_operator_list": crane_operator_list,
     })
 
-
-@bp.route('/api/module/RP01/mother-vessel-data')
-@login_required
-def mother_vessel_data():
-
-    from_datetime = datetime.fromisoformat(request.args.get('from_datetime'))
-    to_datetime   = datetime.fromisoformat(request.args.get('to_datetime'))
-
-    # Widen window: previous day 00:00 so completed vessels are included
-    window_start = datetime(
-        from_datetime.year,
-        from_datetime.month,
-        from_datetime.day,
-        0, 0, 0
-    ) - timedelta(days=1)
-
-    vessels = _fetch_mother_vessels(window_start, to_datetime)
-    
-    
-    
-
-    return jsonify([{
-        "vessel_name":         v.get("vessel_name"),
-        "nor_tendered":        _fmt_dt(v.get("nor_tendered")),
-        "discharge_commenced": _fmt_dt(v.get("discharge_commenced")),
-        "discharge_completed": _fmt_dt(v.get("discharge_completed")),
-        "under_loading":       v.get("under_loading", ""),
-        "eta_to_dharamtar":    v.get("eta_to_dharamtar", ""),
-        "wt_r19":              "",
-        "at_gull_loaded":      v.get("at_gull_loaded", ""),
-        "mbc_eta":             v.get("mbc_eta", ""),
-    } for v in vessels])
-
-
-@bp.route('/api/module/RP01/tide-data')
-@login_required
-def tide_data_api():
-    from_datetime = datetime.fromisoformat(request.args.get('from_datetime'))
-    to_datetime   = datetime.fromisoformat(request.args.get('to_datetime'))
-    return jsonify(_fetch_tide_data(from_datetime, to_datetime))
-
-
-@bp.route('/api/module/RP01/berth-occupancy')
-@login_required
-def berth_occupancy():
-    completed = request.args.get("completed") == "1"
-    selected_date  = request.args.get('date')
-    selected_shift = request.args.get('shift')
-
-    items, _ = _fetch_all_barges(selected_date, selected_shift)
-    
-
-    # If popup requests completed data
-    if completed:
-
-        completed = []
-
-        conn = get_db()
-        cur = get_cursor(conn)
-
-        # ---------------- COMPLETED BARGES ----------------
-        cur.execute("""
-            SELECT
-                l.id,
-                l.barge_name,
-                l.cargo_name,
-                COALESCE(l.discharge_quantity,0) AS qty,
-                l.cast_off_port,
-                l.completed_discharge_berth
-            FROM ldud_barge_lines l
-            WHERE
-                l.cast_off_port IS NOT NULL
-                OR l.completed_discharge_berth IS NOT NULL
-        """)
-
-        for row in cur.fetchall():
-            row = dict(row)
-
-            completed_dt = _parse_dt(
-                row["cast_off_port"] or row["completed_discharge_berth"]
-            )
-
-            if completed_dt and completed_dt.date() == datetime.strptime(
-                selected_date, "%Y-%m-%d"
-            ).date():
-
-                completed.append({
-                    "type": "BARGE",
-                    "name": row["barge_name"],
-                    "cargo": row["cargo_name"] or "",
-                    "qty": float(row["qty"] or 0),
-                    "status": "Completed",
-                    "completed_date": _fmt_dt(completed_dt)
-                })
-
-        # ---------------- COMPLETED MBC ----------------
-        cur.execute("""
-            SELECT
-                h.id,
-                h.mbc_name,
-                h.cargo_name,
-                COALESCE(h.bl_quantity,0) AS qty,
-                p.unloading_completed,
-                p.vessel_cast_off
-            FROM mbc_header h
-            JOIN mbc_discharge_port_lines p
-                ON p.mbc_id=h.id
-            WHERE
-                p.unloading_completed IS NOT NULL
-                OR p.vessel_cast_off IS NOT NULL
-        """)
-
-        for row in cur.fetchall():
-            row = dict(row)
-
-            completed_dt = (
-                _parse_dt(row["vessel_cast_off"])
-                or _parse_dt(row["unloading_completed"])
-            )
-
-            if completed_dt and completed_dt.date() == datetime.strptime(
-                selected_date, "%Y-%m-%d"
-            ).date():
-
-                completed.append({
-                    "type": "MBC",
-                    "name": row["mbc_name"],
-                    "cargo": row["cargo_name"] or "",
-                    "qty": float(row["qty"] or 0),
-                    "status": "Completed",
-                    "completed_date": _fmt_dt(completed_dt)
-                })
-
-        cur.close()
-        conn.close()
-
-        return jsonify(completed)
-
-    # Existing berth/waiting response remains unchanged
-    return jsonify(items)
-@bp.route('/api/module/RP01/berths')
-@login_required
-def get_berths():
-
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    cur.execute("""
-        SELECT
-            id,
-            berth_id,
-            berth_name,
-            berth_sequence
-        FROM port_berth_master
-        ORDER BY
-            COALESCE(berth_sequence,999),
-            berth_name
-    """)
-
-    data = [dict(r) for r in cur.fetchall()]
-
-    cur.close()
-    conn.close()
-
-    return jsonify(data)
 
 @bp.route('/api/module/RP01/shift-wise-discharge')
 @login_required
@@ -865,11 +881,10 @@ def _shift_wise_discharge_inner():
             WHERE entry_date = %s
               AND is_deleted IS NOT TRUE
               AND delay_name IS NOT NULL AND delay_name != ''
-              AND (
-                  LOWER(delay_name) LIKE '%%payloader%%'
-                  OR LOWER(delay_name) LIKE '%%Labor Cleaning%%'
-                
-              )
+                AND (
+                    LOWER(delay_name) LIKE '%%payloader%%'
+                    OR LOWER(delay_name) LIKE '%%labor cleaning%%'
+                )
         """, (selected_date,))
     else:
         cur.execute("""
@@ -878,29 +893,33 @@ def _shift_wise_discharge_inner():
             WHERE entry_date = %s AND shift = %s
               AND is_deleted IS NOT TRUE
               AND delay_name IS NOT NULL AND delay_name != ''
-              AND (
-                  LOWER(delay_name) LIKE '%%payloader%%'
-                  OR LOWER(delay_name) LIKE '%%Labor Cleaning%%'
-                  
-              )
+                AND (
+                    LOWER(delay_name) LIKE '%%payloader%%'
+                    OR LOWER(delay_name) LIKE '%%labor cleaning%%'
+                )
         """, (selected_date, shift))
 
     delay_map = {}
-
     for row in cur.fetchall():
-        key = (row['source_id'], row['source_type'])
-        name = (row['delay_name'] or '').lower()
+        key = (row["source_id"], row["source_type"])
 
         if key not in delay_map:
             delay_map[key] = {
-                'payloader': False,
-                'labour': False
+                "payloader": False,
+                "labour": False
             }
 
-        if 'payloader' in name:
-            delay_map[key]['payloader'] = True
-        else:
-            delay_map[key]['labour'] = True
+        delay = (row["delay_name"] or "").strip().lower()
+
+        print("DELAY ROW:", row["source_id"], row["source_type"], delay)
+
+        if "payloader" in delay:
+            delay_map[key]["payloader"] = True
+
+        if "labor cleaning" in delay or "labour cleaning" in delay:
+            delay_map[key]["labour"] = True
+
+    print("DELAY MAP:", delay_map)
 
 
     # ── 3. BARGE DISCHARGE ──
@@ -996,6 +1015,12 @@ def _shift_wise_discharge_inner():
             (row['vcn_id'], 'VCN'),
             {'payloader': False, 'labour': False}
         )
+        print(
+            "BARGE:",
+            row["barge_name"],
+            row["vcn_id"],
+            delays
+        )
         barge_discharge.append({
             'type': 'BARGE',
             'name': row['barge_name'],
@@ -1010,52 +1035,52 @@ def _shift_wise_discharge_inner():
 
         # ── 4. MBC DISCHARGE ─────────────────────────────────────────────────────
 
-        if is_all:
+    if is_all:
             cur.execute("""
                 SELECT
                     l.source_id AS id,
-                    l.barge_name AS mbc_name,
-                    l.cargo_name,
-                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                    COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
                     SUM(COALESCE(l.quantity,0)) AS actual_discharge
                 FROM lueu_lines l
-                LEFT JOIN mbc_header h
+                JOIN mbc_header h
                     ON h.id = l.source_id
                 WHERE l.source_type = 'MBC'
                 AND l.is_deleted IS NOT TRUE
                 AND l.entry_date = %s
-                AND TRIM(COALESCE(l.barge_name,'')) <> ''
                 GROUP BY
                     l.source_id,
-                    l.barge_name,
-                    l.cargo_name,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                    COALESCE(l.cargo_name, h.cargo_name),
                     h.bl_quantity
                 HAVING SUM(COALESCE(l.quantity,0)) > 0
-                ORDER BY l.barge_name
+                ORDER BY
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
             """, (selected_date,))
-        else:
+    else:
             cur.execute("""
                 SELECT
                     l.source_id AS id,
-                    l.barge_name AS mbc_name,
-                    l.cargo_name,
-                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                    COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
                     SUM(COALESCE(l.quantity,0)) AS actual_discharge
                 FROM lueu_lines l
-                LEFT JOIN mbc_header h
+                JOIN mbc_header h
                     ON h.id = l.source_id
                 WHERE l.source_type = 'MBC'
                 AND l.is_deleted IS NOT TRUE
                 AND l.entry_date = %s
                 AND l.shift = %s
-                AND TRIM(COALESCE(l.barge_name,'')) <> ''
                 GROUP BY
                     l.source_id,
-                    l.barge_name,
-                    l.cargo_name,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                    COALESCE(l.cargo_name, h.cargo_name),
                     h.bl_quantity
                 HAVING SUM(COALESCE(l.quantity,0)) > 0
-                ORDER BY l.barge_name
+                ORDER BY
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
             """, (selected_date, shift))
 
     mbc_discharge = []
@@ -1066,6 +1091,12 @@ def _shift_wise_discharge_inner():
         delays = delay_map.get(
             (row['id'], 'MBC'),
             {'payloader': False, 'labour': False}
+        )
+        print(
+            "MBC:",
+            row["mbc_name"],
+            row["id"],
+            delays
         )
 
         mbc_discharge.append({
@@ -1087,410 +1118,127 @@ def _shift_wise_discharge_inner():
         'barge_discharge': barge_discharge,
         'mbc_discharge': mbc_discharge,
     })
-    
-    
-    
 
-
-    
-@bp.route('/api/module/RP01/download-barge-position-excel')
+@bp.route('/api/module/RP01/shift-report/save', methods=['POST'])
 @login_required
-def download_barge_position_excel():
+def api_shift_report_save():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
 
-    selected_date  = request.args.get('date', '')
-    selected_shift = request.args.get('shift', 'ALL')
-    shift_incharge = request.args.get('shift_incharge', '')
-    bpo            = request.args.get('bpo', '')
-    operator       = request.args.get('operator', '')
+    import json as _json
 
-    barges, occupied_berth_set = _fetch_all_barges(selected_date, selected_shift)
-
-    waiting     = [b for b in barges if b["status"] in ["Waiting", "Under Discharge"]]
-    discharging = [b for b in barges if b["status"] == "Discharging"]
-
-    from_datetime = datetime.combine(
-        datetime.strptime(selected_date, "%Y-%m-%d").date(),
-        datetime.min.time()
-    ) - timedelta(days=1)
-
-    to_datetime = datetime.combine(
-        datetime.strptime(selected_date, "%Y-%m-%d").date(),
-        datetime.max.time()
-    )
-
-    mother_vessels = _fetch_mother_vessels(from_datetime, to_datetime)
-    tide_data      = _fetch_tide_data(from_datetime, to_datetime)
-
-    # ── Fetch berth occupancy for board ──────────────────────────────────────
     conn = get_db()
     cur  = get_cursor(conn)
-    cur.execute("SELECT berth_name FROM port_berth_master ORDER BY berth_sequence, id")
-    berths = [r["berth_name"].upper() for r in cur.fetchall()]
+
+    try:
+        # Separate berth_layout (berths only) and waiting_area from the combined list
+        all_layout    = data.get('berth_layout', [])
+        berth_layout  = [item for item in all_layout if item.get('berth') != 'WAITING']
+        waiting_area  = [item for item in all_layout if item.get('berth') == 'WAITING']
+
+        cur.execute("""
+            INSERT INTO barge_position_report
+                (report_date, shift, shift_incharge, bpo, crane_operator,
+                 berth_layout, waiting_area, wt_r19, mbc_eta,
+                 eta_to_dharamtar, on_the_way_gull, shift_plan,
+                 notes, movement_logs, updated_at)
+            VALUES (%s, %s, %s, %s, %s,
+                    %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
+                    %s::jsonb, %s::jsonb, %s::jsonb,
+                    %s::jsonb, %s::jsonb, NOW())
+            ON CONFLICT (report_date, shift)
+            DO UPDATE SET
+                shift_incharge  = EXCLUDED.shift_incharge,
+                bpo             = EXCLUDED.bpo,
+                crane_operator  = EXCLUDED.crane_operator,
+                berth_layout    = EXCLUDED.berth_layout,
+                waiting_area    = EXCLUDED.waiting_area,
+                wt_r19          = EXCLUDED.wt_r19,
+                mbc_eta         = EXCLUDED.mbc_eta,
+                eta_to_dharamtar= EXCLUDED.eta_to_dharamtar,
+                on_the_way_gull = EXCLUDED.on_the_way_gull,
+                shift_plan      = EXCLUDED.shift_plan,
+                notes           = EXCLUDED.notes,
+                movement_logs   = EXCLUDED.movement_logs,
+                updated_at      = NOW()
+        """, (
+            data.get('report_date'),
+            data.get('shift'),
+            data.get('shift_incharge', ''),
+            data.get('bpo', ''),
+            data.get('crane_operator', ''),
+            _json.dumps(berth_layout),
+            _json.dumps(waiting_area),
+            _json.dumps(data.get('wt_r19', {})),
+            _json.dumps(data.get('mbc_eta', {})),
+            _json.dumps(data.get('eta_to_dharamtar', {})),
+            _json.dumps(data.get('on_the_way_gull', {})),
+            _json.dumps(data.get('shift_plan', {})),
+            _json.dumps(data.get('notes', [])),
+            _json.dumps(data.get('movement_logs', [])),
+        ))
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+
+    cur.close()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/module/RP01/shift-report/load')
+@login_required
+def api_shift_report_load():
+    report_date = request.args.get('date')
+    shift       = request.args.get('shift', 'ALL')
+    if not report_date:
+        return jsonify({'found': False})
+
+    conn = get_db()
+    cur  = get_cursor(conn)
+
+    try:
+        cur.execute("""
+            SELECT * FROM barge_position_report
+            WHERE report_date = %s AND shift = %s
+        """, (report_date, shift))
+        row = cur.fetchone()
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return jsonify({'found': False, 'error': str(e)})
+
     cur.close()
     conn.close()
 
-    old_berths = berths[:6]
-    new_berths = berths[6:]
-    positions  = ['A/S', 'D/B', 'T/B', 'F/B', 'S/B']
+    if not row:
+        return jsonify({'found': False})
 
-    # Build berth→position→item map
-    berth_map = {}
-    for item in barges:
-        b = (item.get("berth") or "").strip().upper()
-        p = (item.get("position") or "A/S").upper()
-        if b:
-            berth_map[(b, p)] = item
+    row = dict(row)
 
-    # ── Styles ────────────────────────────────────────────────────────────────
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Daily Barge Position"
+    # Merge berth_layout and waiting_area back into one list
+    # (frontend sends/receives them combined)
+    berth_layout = row.get('berth_layout') or []
+    waiting_area = row.get('waiting_area') or []
+    combined     = berth_layout + waiting_area
 
-    thin = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'),  bottom=Side(style='thin')
-    )
-    thick_border = Border(
-        left=Side(style='medium'), right=Side(style='medium'),
-        top=Side(style='medium'),  bottom=Side(style='medium')
-    )
-
-    BLUE_HDR   = PatternFill("solid", fgColor="4D8CCD")   # header blue
-    YELLOW_HDR = PatternFill("solid", fgColor="FFFF00")   # title yellow
-    GREEN_CELL = PatternFill("solid", fgColor="C6EFCE")   # discharging
-    BLUE_CELL  = PatternFill("solid", fgColor="DBEAFE")   # waiting-discharge
-    GREY_CELL  = PatternFill("solid", fgColor="E5E7EB")   # completed
-    WAIT_CELL  = PatternFill("solid", fgColor="FEF08A")   # waiting area
-
-    white_bold   = Font(bold=True, color="FFFFFF", size=10)
-    black_bold   = Font(bold=True, color="000000", size=10)
-    normal_font  = Font(size=10)
-    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    left_align   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
-
-    def style_cell(cell, fill=None, font=None, alignment=None, border=None):
-        if fill:      cell.fill      = fill
-        if font:      cell.font      = font
-        if alignment: cell.alignment = alignment
-        if border:    cell.border    = border
-
-    def set_row_height(ws, row, height):
-        ws.row_dimensions[row].height = height
-
-    # ── ROW 1: Title bar (Image 1 top row) ───────────────────────────────────
-    r = 1
-    # A1: "date"
-    ws.cell(r, 1, "date")
-    style_cell(ws.cell(r,1), border=thin, alignment=center_align, font=black_bold)
-
-    # B1: date value  (merged B1:C1)
-    ws.merge_cells(f"B{r}:C{r}")
-    ws.cell(r, 2, selected_date)
-    style_cell(ws.cell(r,2), border=thin, alignment=center_align, font=black_bold)
-
-    # D1: title (merged D1:H1)
-    ws.merge_cells(f"D{r}:H{r}")
-    ws.cell(r, 4, "DPPL OPRATION SHIFT WISE  REPORT")
-    style_cell(ws.cell(r,4), border=thin, alignment=center_align, font=Font(bold=True, size=11))
-
-    # I1: "SHIFT"
-    ws.cell(r, 9, "SHIFT")
-    style_cell(ws.cell(r,9), border=thin, alignment=center_align, font=black_bold)
-
-    # J1: shift value  (merged J1:K1)
-    ws.merge_cells(f"J{r}:K{r}")
-    shift_label = {"A": "A- SHIFT", "B": "B- SHIFT", "C": "C- SHIFT"}.get(selected_shift, "ALL SHIFT")
-    ws.cell(r, 10, shift_label)
-    style_cell(ws.cell(r,10), border=thin, alignment=center_align,
-               font=Font(bold=True, size=10, color="006400"))
-
-    # L1: DOC NO
-    ws.cell(r, 12, "DOC NO OPE/0100/F/01")
-    style_cell(ws.cell(r,12), border=thin, alignment=center_align, font=black_bold)
-
-    # M1: REV
-    ws.cell(r, 13, "REV.02")
-    style_cell(ws.cell(r,13), border=thin, alignment=center_align, font=black_bold)
-
-    # N1: ISSUE NO
-    ws.merge_cells(f"N{r}:O{r}")
-    ws.cell(r, 14, "ISSUE NO. isuue date:01.04.2022")
-    style_cell(ws.cell(r,14), border=thin, alignment=center_align, font=black_bold)
-
-    set_row_height(ws, r, 20)
-
-    # ── ROW 2: Shift Incharge / BPO / Operator ───────────────────────────────
-    r = 2
-    ws.cell(r, 1, "shift incharge name")
-    style_cell(ws.cell(r,1), border=thin, alignment=center_align, font=black_bold)
-
-    ws.merge_cells(f"B{r}:H{r}")
-    ws.cell(r, 2, shift_incharge.upper() or "PRASHANT MHATRE")
-    style_cell(ws.cell(r,2), border=thin, alignment=center_align, font=black_bold)
-
-    ws.cell(r, 9, "BPO")
-    style_cell(ws.cell(r,9), border=thin, alignment=center_align, font=black_bold)
-
-    ws.merge_cells(f"J{r}:K{r}")
-    ws.cell(r, 10, bpo.upper() or "BPO NAME")
-    style_cell(ws.cell(r,10), border=thin, alignment=center_align, font=black_bold)
-
-    ws.cell(r, 12, "operator")
-    style_cell(ws.cell(r,12), border=thin, alignment=center_align, font=black_bold)
-
-    ws.merge_cells(f"N{r}:O{r}")
-    ws.cell(r, 14, operator.upper() or "oprater name")
-    style_cell(ws.cell(r,14), border=thin, alignment=center_align, font=black_bold)
-
-    set_row_height(ws, r, 20)
-
-    r = 3  # blank separator
-
-    # ── SUMMARY METRICS ROW ───────────────────────────────────────────────────
-    r = 4
-    summary_items = [
-        ("TOTAL MBC & BARGES IN PORT", len(barges)),
-        ("WAITING",                    len(waiting)),
-        ("DISCHARGING",                len(discharging)),
-        ("OCCUPIED BERTHS",            len(occupied_berth_set)),
-        ("AVAILABLE BERTHS",           max(0, 14 - len(occupied_berth_set))),
-    ]
-    col = 1
-    for label, val in summary_items:
-        ws.cell(r,   col, label)
-        ws.cell(r+1, col, val)
-        style_cell(ws.cell(r,col),   fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-        style_cell(ws.cell(r+1,col), font=black_bold,
-                   alignment=center_align, border=thin)
-        col += 3
-    set_row_height(ws, r,   22)
-    set_row_height(ws, r+1, 20)
-    r += 3
-
-    # ── BOARD MATRIX — OLD BERTH (left) + NEW BERTHS (right) side by side ────
-    r += 1
-    positions  = ['A/S', 'D/B', 'T/B', 'F/B', 'S/B']
-
-    # Column layout:
-    # Col 1      = OLD BERTH label
-    # Col 2-6    = OLD positions (A/S, D/B, T/B, F/B, S/B)
-    # Col 7      = empty gap
-    # Col 8      = NEW BERTH label
-    # Col 9-13   = NEW positions (A/S, D/B, T/B, F/B, S/B)
-
-    OLD_START = 1   # berth label col
-    OLD_POS   = 2   # first position col
-    GAP_COL   = 7
-    NEW_START = 8
-    NEW_POS   = 9
-
-    # ── Section title row ────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:F{r}")
-    ws.cell(r, OLD_START, f"OLD BERTH  ({len(old_berths)} BERTHS)")
-    style_cell(ws.cell(r, OLD_START), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-
-    ws.cell(r, GAP_COL, "")  # gap
-
-    ws.merge_cells(f"H{r}:M{r}")
-    ws.cell(r, NEW_START, f"NEW BERTHS  ({len(new_berths)} BERTHS)")
-    style_cell(ws.cell(r, NEW_START), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 20)
-    r += 1
-
-    # ── Column header row ────────────────────────────────────────────────────
-    matrix_hdrs = ["BERTH"] + positions
-
-    for ci, h in enumerate(matrix_hdrs, OLD_START):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r, ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-
-    ws.cell(r, GAP_COL, "")  # gap
-
-    for ci, h in enumerate(matrix_hdrs, NEW_START):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r, ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
-
-    # ── Data rows — OLD and NEW side by side ─────────────────────────────────
-    max_rows = max(len(old_berths), len(new_berths))
-
-    for i in range(max_rows):
-
-        # ── OLD BERTH side ───────────────────────────────────────────────────
-        if i < len(old_berths):
-            berth = old_berths[i]
-            ws.cell(r, OLD_START, berth)
-            style_cell(ws.cell(r, OLD_START), font=black_bold,
-                       alignment=left_align, border=thin)
-
-            for ci, pos in enumerate(positions, OLD_POS):
-                item = berth_map.get((berth.upper(), pos))
-                if item:
-                    dqty = float(item.get('discharge_qty', 0))
-                    bal  = float(item.get('balance_qty',  0))
-                    txt  = (f"{item['type']} \u2013 {item['name']}\n"
-                            f"{item['cargo']}\n"
-                            f"Disch: {dqty} MT\n"
-                            f"Bal: {bal} MT")
-                    fill = (GREEN_CELL if dqty > 0 and bal > 0
-                            else BLUE_CELL if bal > 0
-                            else GREY_CELL)
-                    style_cell(ws.cell(r, ci, txt), fill=fill,
-                               font=normal_font, alignment=center_align, border=thin)
-                else:
-                    style_cell(ws.cell(r, ci, "\u2014"),
-                               alignment=center_align, border=thin, font=normal_font)
-        else:
-            # fill empty cols so border still shows
-            for ci in range(OLD_START, OLD_START + 6):
-                style_cell(ws.cell(r, ci, ""),
-                           alignment=center_align, border=thin, font=normal_font)
-
-        # ── GAP col ──────────────────────────────────────────────────────────
-        ws.cell(r, GAP_COL, "")
-
-        # ── NEW BERTH side ───────────────────────────────────────────────────
-        if i < len(new_berths):
-            berth = new_berths[i]
-            ws.cell(r, NEW_START, berth)
-            style_cell(ws.cell(r, NEW_START), font=black_bold,
-                       alignment=left_align, border=thin)
-
-            for ci, pos in enumerate(positions, NEW_POS):
-                item = berth_map.get((berth.upper(), pos))
-                if item:
-                    dqty = float(item.get('discharge_qty', 0))
-                    bal  = float(item.get('balance_qty',  0))
-                    txt  = (f"{item['type']} \u2013 {item['name']}\n"
-                            f"{item['cargo']}\n"
-                            f"Disch: {dqty} MT\n"
-                            f"Bal: {bal} MT")
-                    fill = (GREEN_CELL if dqty > 0 and bal > 0
-                            else BLUE_CELL if bal > 0
-                            else GREY_CELL)
-                    style_cell(ws.cell(r, ci, txt), fill=fill,
-                               font=normal_font, alignment=center_align, border=thin)
-                else:
-                    style_cell(ws.cell(r, ci, "\u2014"),
-                               alignment=center_align, border=thin, font=normal_font)
-        else:
-            for ci in range(NEW_START, NEW_START + 6):
-                style_cell(ws.cell(r, ci, ""),
-                           alignment=center_align, border=thin, font=normal_font)
-
-        set_row_height(ws, r, 55)
-        r += 1
-
-    r += 1
-
-    # ── WAITING AREA ──────────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:F{r}")
-    ws.cell(r, 1, "WAITING AREA")
-    style_cell(ws.cell(r,1), fill=YELLOW_HDR, font=black_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
-
-    for ci, h in enumerate(["TYPE","NAME","CARGO","DISCHARGE (MT)","BALANCE (MT)","STATUS"], 1):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r,ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    r += 1
-
-    for item in waiting:
-        data = [item["type"], item["name"], item["cargo"],
-                item["discharge_qty"], item["balance_qty"], item["status"]]
-        for ci, v in enumerate(data, 1):
-            cell = ws.cell(r, ci, v)
-            style_cell(cell, fill=WAIT_CELL, font=normal_font,
-                       alignment=center_align, border=thin)
-        set_row_height(ws, r, 18)
-        r += 1
-
-    r += 1
-
-    # ── MOTHER VESSEL ─────────────────────────────────────────────────────────
-    mv_params = [
-        ("VSL DISCH COMMNACED",    "discharge_commenced"),
-        ("VSL DISCHARGE COMPLITED","discharge_completed"),
-        ("UNDER LOADING",          "under_loading"),
-        ("ETA TO DHARAMTAR",       "eta_to_dharamtar"),
-        ("WT @ R19",               "wt_r19"),
-        ("ON THE WAY TO GULL",     "at_gull_loaded"),
-        ("MBC ETA",                "mbc_eta"),
-    ]
-
-    # Header row
-    ws.cell(r, 1, "Parameter")
-    style_cell(ws.cell(r,1), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    for vi, mv in enumerate(mother_vessels, 2):
-        ws.cell(r, vi, f"Vessel {vi-1}\n{mv.get('vessel_name','')}")
-        style_cell(ws.cell(r,vi), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    set_row_height(ws, r, 30)
-    r += 1
-
-    for label, key in mv_params:
-        ws.cell(r, 1, label)
-        style_cell(ws.cell(r,1), font=black_bold, alignment=left_align, border=thin)
-        for vi, mv in enumerate(mother_vessels, 2):
-            cell = ws.cell(r, vi, mv.get(key, "") or "")
-            style_cell(cell, font=normal_font, alignment=center_align, border=thin)
-        set_row_height(ws, r, 18)
-        r += 1
-
-    r += 1
-
-    # ── TIDE TABLE ────────────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:C{r}")
-    ws.cell(r, 1, "TIDE TABLE")
-    style_cell(ws.cell(r,1), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
-
-    for ci, h in enumerate(["TYPE","TIME","HEIGHT (m)"], 1):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r,ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    r += 1
-
-    for t in tide_data:
-        for ci, v in enumerate([t["type"], t["time"], t["height"]], 1):
-            cell = ws.cell(r, ci, v)
-            fill = GREEN_CELL if t["type"] == "HW" else BLUE_CELL
-            style_cell(cell, fill=fill, font=normal_font,
-                       alignment=center_align, border=thin)
-        set_row_height(ws, r, 16)
-        r += 1
-
-    # ── Column widths ─────────────────────────────────────────────────────────
-    col_widths = {
-            1: 14,  # OLD berth label
-            2: 20, 3: 18, 4: 18, 5: 18, 6: 18,   # OLD positions
-            7: 3,                                   # GAP
-            8: 14,  # NEW berth label
-            9: 20, 10: 18, 11: 18, 12: 18, 13: 18, # NEW positions
-            14: 20, 15: 10, 16: 26,
-        }
-    from openpyxl.utils import get_column_letter
-    for cn, w in col_widths.items():
-        ws.column_dimensions[get_column_letter(cn)].width = w
-
-    # ── Send file ─────────────────────────────────────────────────────────────
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    fname = f"Daily_Barge_Position_{selected_date}_{selected_shift}.xlsx"
-    return send_file(output, as_attachment=True, download_name=fname,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    
-    
+    return jsonify({
+        'found':           True,
+        'shift_incharge':  row.get('shift_incharge', ''),
+        'bpo':             row.get('bpo', ''),
+        'crane_operator':  row.get('crane_operator', ''),
+        'berth_layout':    combined,
+        'wt_r19':          row.get('wt_r19')          or {},
+        'mbc_eta':         row.get('mbc_eta')         or {},
+        'eta_to_dharamtar':row.get('eta_to_dharamtar')or {},
+        'on_the_way_gull': row.get('on_the_way_gull') or {},
+        'shift_plan':      row.get('shift_plan')      or {},
+        'notes':           row.get('notes')           or [],
+        'movement_logs':   row.get('movement_logs')   or [],
+        'updated_at':      str(row.get('updated_at', '')),
+    })
