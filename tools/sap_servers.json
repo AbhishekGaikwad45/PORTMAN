@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Quality",
+    "base_url": "https://sapapiqas.jsw.in:52401",
+    "token_url": "https://sapapiqas.jsw.in:52401/RESTAdapter/OAuthServer",
+    "client_id": "jsw_api",
+    "client_secret": "fL6GOT9zuiY3LtiJHSr8R0w5CeQObG6Gy2J4f832i5I",
+    "endpoint_path": "/RESTAdapter/DynaportInvoice"
+  }
+]

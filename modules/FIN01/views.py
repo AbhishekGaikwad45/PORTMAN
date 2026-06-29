@@ -626,6 +626,50 @@ def get_cargo_rates(customer_type, customer_id, service_type_id):
     return jsonify({'success': True, 'rates': rate_map})
 
 
+def _build_agreement_rate_maps(cur, customer_type, customer_id, agreement_id, today):
+    """One batched rate lookup for the whole bill. Returns (cargo_rates, generic_rates):
+       cargo_rates   = {(service_type_id, cargo_name): rate}
+       generic_rates = {service_type_id: rate}   (cargo-agnostic line)
+    Mirrors the resolution in get_agreement_rate / get_cargo_rates, but in a
+    single query so the client doesn't fetch rates line-by-line."""
+    if agreement_id:
+        cur.execute('''
+            SELECT cal.service_type_id, cal.cargo_name, cal.rate
+            FROM customer_agreement_lines cal
+            INNER JOIN customer_agreements ca ON cal.agreement_id = ca.id
+            WHERE ca.id = %s
+        ''', [agreement_id])
+    else:
+        cur.execute('''
+            SELECT cal.service_type_id, cal.cargo_name, cal.rate
+            FROM customer_agreement_lines cal
+            INNER JOIN customer_agreements ca ON cal.agreement_id = ca.id
+            WHERE ca.customer_type = %s AND ca.customer_id = %s
+              AND ca.is_active = 1 AND ca.agreement_status = 'Approved'
+              AND ca.valid_from <= %s AND (ca.valid_to IS NULL OR ca.valid_to >= %s)
+            ORDER BY ca.valid_from DESC
+        ''', [customer_type, customer_id, today, today])
+    cargo_rates, generic_rates = {}, {}
+    for r in cur.fetchall():
+        stid = r['service_type_id']
+        if r['cargo_name']:
+            cargo_rates.setdefault((stid, r['cargo_name']), r['rate'])
+        else:
+            generic_rates.setdefault(stid, r['rate'])
+    return cargo_rates, generic_rates
+
+
+def _resolve_rate(cargo_rates, generic_rates, service_type_id, cargo_name):
+    """Cargo-specific rate first, then the cargo-agnostic generic rate."""
+    if service_type_id is None:
+        return None
+    if cargo_name and (service_type_id, cargo_name) in cargo_rates:
+        rate = cargo_rates[(service_type_id, cargo_name)]
+    else:
+        rate = generic_rates.get(service_type_id)
+    return float(rate) if rate is not None else None
+
+
 @bp.route('/api/module/FIN01/customer-billables/<customer_type>/<int:customer_id>')
 def get_customer_billables(customer_type, customer_id):
     """Get all billable items for a customer/agent.
@@ -817,6 +861,19 @@ def get_customer_billables(customer_type, customer_id):
         ORDER BY sr.id
     """, [customer_type, customer_id])
     other_services = [dict(r) for r in cur.fetchall()]
+
+    # --- Embed agreement rates (one batched lookup, was N client round-trips) ---
+    from datetime import datetime as _dt
+    today = _dt.now().strftime('%Y-%m-%d')
+    agreement_id = request.args.get('agreement_id')
+    cargo_rates, generic_rates = _build_agreement_rate_maps(
+        cur, customer_type, customer_id, agreement_id, today)
+    for item in cargo_handling:
+        item['rate'] = _resolve_rate(cargo_rates, generic_rates,
+                                     item.get('service_type_id'), item.get('cargo_name'))
+    for rec in other_services:
+        rec['rate'] = _resolve_rate(cargo_rates, generic_rates,
+                                    rec.get('service_type_id'), None)
 
     # --- C. Already billed lines for reference ---
     cur.execute("""

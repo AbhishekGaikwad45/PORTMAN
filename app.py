@@ -477,12 +477,28 @@ def delete_saved_filter(filter_id):
     conn.close()
     return jsonify({'ok': True})
 
+def _sap_queue_tick():
+    """Runs every 5 minutes. Retries due SAP postings; safe no-op if queue empty."""
+    try:
+        from sap_queue import process_sap_queue
+        process_sap_queue()
+    except Exception:
+        pass
+
 _mail_scheduler = BackgroundScheduler(daemon=True)
 _mail_scheduler.add_job(
     _mail_tick,
     trigger='interval',
     minutes=5,
     id='mail_queue',
+    replace_existing=True,
+    max_instances=1,
+)
+_mail_scheduler.add_job(
+    _sap_queue_tick,
+    trigger='interval',
+    minutes=5,
+    id='sap_queue',
     replace_existing=True,
     max_instances=1,
 )

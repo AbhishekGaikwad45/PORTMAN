@@ -6,6 +6,7 @@ from database import get_user_permissions, get_db, get_cursor, get_module_config
 from mail_service import notify_module_approver, get_module_approver_info, build_approval_mail_html
 import sap_builder
 import sap_client
+import sap_queue
 import logging
 
 log = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ def invoices():
     data, total = model.get_invoice_data(page, status_filter=status_filter)
 
     now = datetime.now()
+    queue_map = sap_queue.get_active_jobs_map([r['id'] for r in data if r.get('id')])
     for row in data:
         # 24h FB08 window anchors on sap_posting_date (set by /api/sap/callback
         # when SAP confirms the posting), falling back to posted_date (our staging
@@ -165,6 +167,7 @@ def invoices():
         row['within_cancel_window'] = bool(
             posted_dt and (now - posted_dt) <= timedelta(hours=24)
         )
+        row['sap_queue'] = queue_map.get(row.get('id'))
 
     return render_template('finv01_invoices.html',
                          data=data,
@@ -200,42 +203,32 @@ def generate_invoice():
                          module_code='FINV01')
 
 
-def _auto_post_to_sap(invoice_id, invoice_number):
-    """Auto-post invoice to SAP. Updates status to 'Posted to SAP' or 'SAP Failed'."""
+def _enqueue_invoice_post(invoice_id, invoice_number):
+    """Queue the invoice for async SAP posting (non-blocking).
+
+    The payload is built and saved now so the posting survives SAP being down
+    (e.g. Thursday migration windows). The background worker retries it up to
+    10 times, 5 minutes apart; on exhaustion the invoice shows 'SAP Failed'
+    with a Manual Send option. Returns immediately — no synchronous SAP call.
+    """
     try:
         invoice = model.get_invoice_by_id(invoice_id)
         invoice_lines = model.get_invoice_lines(invoice_id)
         payload = sap_builder.build_invoice_payload(invoice, invoice_lines)
-        result = sap_client.post_invoice_to_sap(
-            payload, 'Invoice', invoice_id,
-            invoice_number, session.get('username')
-        )
-        now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        qid = sap_queue.enqueue(
+            'post', 'Invoice', invoice_id, invoice_number, payload,
+            invoice_id=invoice_id, created_by=session.get('username'))
         conn = get_db()
         cur = get_cursor(conn)
-        if result['ok']:
-            # Staging push only — SAP returns Status='N' with no Document_Number yet.
-            # sap_document_number and sap_posting_date are intentionally left for
-            # /api/sap/callback to populate when SAP confirms the actual posting.
-            # The 24h FB08 window anchors on sap_posting_date, so it must reflect
-            # SAP's confirmation time, not our staging push time.
-            cur.execute('''UPDATE invoice_header
-                SET posted_by=%s, posted_date=%s,
-                    invoice_status='Posted to SAP'
-                WHERE id=%s''',
-                [session.get('username'), now_ts, invoice_id])
-        else:
-            cur.execute('''UPDATE invoice_header
-                SET invoice_status='SAP Failed',
-                    sap_error = %s
-                WHERE id=%s''',
-                [result['message'], invoice_id])
+        cur.execute('''UPDATE invoice_header
+            SET invoice_status='Queued for SAP', sap_error=NULL WHERE id=%s''',
+            [invoice_id])
         conn.commit()
         conn.close()
-        return result
+        return {'ok': True, 'queued': True, 'queue_id': qid,
+                'message': 'Queued for SAP posting'}
     except Exception as e:
-        log.exception('Auto-post to SAP failed for invoice %s', invoice_number)
-        # Mark as failed
+        log.exception('Failed to queue invoice %s for SAP', invoice_number)
         try:
             conn = get_db()
             cur = get_cursor(conn)
@@ -343,8 +336,8 @@ def create_invoice():
 
     invoice_id, invoice_number = model.create_invoice_from_bills(bill_ids, invoice_data)
 
-    # Auto-post to SAP immediately after creation
-    sap_result = _auto_post_to_sap(invoice_id, invoice_number)
+    # Queue for SAP posting (async, retried by the background worker) — no loader.
+    sap_result = _enqueue_invoice_post(invoice_id, invoice_number)
     invoice = model.get_invoice_by_id(invoice_id) or {}
     _queue_invoice_review_request(
         invoice_id,
@@ -358,8 +351,7 @@ def create_invoice():
         'success': True,
         'id': invoice_id,
         'invoice_number': invoice_number,
-        'sap_status': 'Posted to SAP' if sap_result.get('ok') else 'SAP Failed',
-        'sap_document_number': sap_result.get('sap_document_number', ''),
+        'sap_status': invoice.get('invoice_status') or 'Queued for SAP',
         'sap_message': sap_result.get('message', ''),
     })
 
@@ -851,16 +843,26 @@ def retry_sap():
     if invoice.get('sap_document_number'):
         return jsonify({'success': False, 'error': 'Invoice already posted to SAP'})
 
-    if invoice.get('invoice_status') not in ('SAP Failed', 'Generated'):
+    if invoice.get('invoice_status') not in ('SAP Failed', 'Generated', 'Queued for SAP'):
         return jsonify({'success': False, 'error': f"Cannot retry — status is '{invoice.get('invoice_status')}'"})
 
-    result = _auto_post_to_sap(invoice_id, invoice['invoice_number'])
+    # If a post job is already queued/failed, do a one-shot manual send; otherwise
+    # queue it fresh. Either way SAP is hit by the worker, not synchronously here.
+    post_rows = [q for q in sap_queue.get_queue_for_invoice(invoice_id)
+                 if q['job_type'] == 'post' and q['status'] != 'sent']
+    if post_rows:
+        result = sap_queue.manual_send(post_rows[0]['id'])
+        if result.get('ok'):
+            return jsonify({'success': True,
+                            'sap_document_number': result.get('sap_document_number'),
+                            'message': 'Posted to SAP.'})
+        return jsonify({'success': False, 'error': result.get('error') or 'SAP send failed'})
 
+    result = _enqueue_invoice_post(invoice_id, invoice['invoice_number'])
     return jsonify({
         'success': result.get('ok', False),
-        'sap_document_number': result.get('sap_document_number'),
+        'queued': result.get('queued', False),
         'message': result.get('message', ''),
-        'log_id': result.get('log_id')
     })
 
 
@@ -941,39 +943,18 @@ def cancel_invoice_sap():
 
     invoice_lines = model.get_invoice_lines(invoice_id)
     payload = sap_builder.build_invoice_reversal_payload(invoice, invoice_lines)
-    result = sap_client.post_invoice_to_sap(
-        payload, 'InvoiceReversal', invoice_id,
-        invoice['invoice_number'], session.get('username')
-    )
-
-    if result['ok']:
-        now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        reversal_doc = result.get('sap_document_number') or ''
-        original_doc = invoice.get('sap_document_number') or ''
-        reversal_note = f"SAP FB08 reversal posted. Original: {original_doc}; Reversal: {reversal_doc}"
-        conn = get_db()
-        cur = get_cursor(conn)
-        unbilled_bills = model.unbill_invoice_sources(cur, invoice_id)
-        if unbilled_bills:
-            reversal_note += f". Bills unbilled: {', '.join(unbilled_bills)}"
-        cur.execute('''UPDATE invoice_header
-            SET invoice_status='Cancelled',
-                posted_by=%s,
-                posted_date=%s,
-                remarks = CASE
-                    WHEN COALESCE(remarks, '') = '' THEN %s
-                    ELSE remarks || ' | ' || %s
-                END
-            WHERE id=%s''',
-            [session.get('username'), now_ts, reversal_note, reversal_note, invoice_id])
-        conn.commit()
-        conn.close()
+    # Queue the reversal — the worker posts to SAP (with retries) and, on
+    # success, unbills the cargo and marks the invoice Cancelled.
+    qid = sap_queue.enqueue(
+        'reversal', 'InvoiceReversal', invoice_id, invoice['invoice_number'],
+        payload, invoice_id=invoice_id, created_by=session.get('username'))
 
     return jsonify({
-        'success': result['ok'],
-        'sap_document_number': result.get('sap_document_number'),
-        'message': result['message'],
-        'log_id': result['log_id']
+        'success': True,
+        'queued': True,
+        'queue_id': qid,
+        'message': 'FB08 reversal queued for SAP. The invoice will be marked '
+                   'Cancelled and its cargo unbilled once SAP confirms.'
     })
 
 
@@ -1031,84 +1012,49 @@ def create_cancellation_cn():
             'error': f'Cancellation CN already exists: {existing["doc_number"]}'
         })
 
-    # 1. Build SAP payload from the ORIGINAL invoice (not from the FDCN)
-    #    — sap_builder flips Invoice_Credit→C and Document_type→DG only.
+    # Build the SAP payload from the ORIGINAL invoice (sap_builder flips
+    # Invoice_Credit→C and Document_type→DG only) and queue it. The worker
+    # posts to SAP (with retries) and, on success, creates the Portbird-side
+    # FDCN 'CN' record, marks the invoice Cancelled, and unbills the cargo.
     invoice_lines = model.get_invoice_lines(invoice_id)
     payload = sap_builder.build_invoice_credit_note_payload(invoice, invoice_lines)
-    result = sap_client.post_invoice_to_sap(
-        payload, 'InvoiceCreditNote', invoice_id,
-        invoice['invoice_number'], session.get('username')
-    )
-
-    if not result['ok']:
-        return jsonify({
-            'success': False,
-            'error': result.get('message') or 'SAP post failed',
-            'log_id': result.get('log_id'),
-        })
-
-    # 2. SAP accepted — create the Portbird-side FDCN CN record for tracking.
-    # The unique partial index `uniq_active_cancellation_cn_per_invoice` on
-    # fdcn_header guards against any race that slips past the SELECT above:
-    # a duplicate INSERT raises a uniqueness error which we translate to a
-    # clean message.
-    from modules.FDCN01 import model as fdcn_model
-    username = session.get('username')
-    try:
-        fdcn_id, cn_doc_number = fdcn_model.create_cancellation_cn(invoice_id, username)
-    except ValueError as e:
-        return jsonify({
-            'success': False,
-            'error': f'SAP posted but FDCN record failed: {str(e)}',
-            'sap_document_number': result.get('sap_document_number'),
-            'log_id': result.get('log_id'),
-        }), 500
-    except Exception as e:
-        msg = str(e).lower()
-        if 'uniq_active_cancellation_cn_per_invoice' in msg or 'unique' in msg:
-            return jsonify({
-                'success': False,
-                'error': 'A cancellation CN already exists for this invoice (concurrent request blocked).',
-                'sap_document_number': result.get('sap_document_number'),
-                'log_id': result.get('log_id'),
-            }), 409
-        raise
-
-    sap_doc = result.get('sap_document_number') or ''
-    if sap_doc:
-        fdcn_model.update_sap_details(fdcn_id, sap_doc, username)
-
-    # 3. Mark the original invoice as Cancelled, with cross-reference to the CN,
-    #    and fully unbill the underlying bills/cargo so they can be re-invoiced.
-    now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    original_sap_doc = invoice.get('sap_document_number') or ''
-    cn_note = (f"Cancelled via CN {cn_doc_number}. "
-               f"SAP original: {original_sap_doc}; SAP CN: {sap_doc}")
-    conn = get_db()
-    cur = get_cursor(conn)
-    unbilled_bills = model.unbill_invoice_sources(cur, invoice_id)
-    if unbilled_bills:
-        cn_note += f". Bills unbilled: {', '.join(unbilled_bills)}"
-    cur.execute('''UPDATE invoice_header
-        SET invoice_status='Cancelled',
-            posted_by=%s,
-            posted_date=%s,
-            remarks = CASE
-                WHEN COALESCE(remarks, '') = '' THEN %s
-                ELSE remarks || ' | ' || %s
-            END
-        WHERE id=%s''',
-        [username, now_ts, cn_note, cn_note, invoice_id])
-    conn.commit()
-    conn.close()
+    qid = sap_queue.enqueue(
+        'credit_note', 'InvoiceCreditNote', invoice_id, invoice['invoice_number'],
+        payload, invoice_id=invoice_id, created_by=session.get('username'))
 
     return jsonify({
         'success': True,
-        'fdcn_id': fdcn_id,
-        'cn_doc_number': cn_doc_number,
-        'sap_document_number': sap_doc,
-        'message': f'Credit Note {cn_doc_number} posted to SAP. Invoice cancelled.',
-        'log_id': result['log_id'],
+        'queued': True,
+        'queue_id': qid,
+        'message': 'Cancellation Credit Note queued for SAP. Once SAP confirms, '
+                   'the CN is created and the invoice marked Cancelled.'
+    })
+
+
+@bp.route('/api/module/FINV01/sap-queue/manual-send', methods=['POST'])
+def sap_queue_manual_send():
+    """One-shot manual send of a queued/failed SAP job (post / reversal / CN)."""
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Not logged in'}), 401
+    perms = get_perms()
+    if not perms.get('can_edit'):
+        return jsonify({'success': False, 'error': 'No permission'}), 403
+
+    data = request.json or {}
+    queue_id = data.get('queue_id')
+    if not queue_id and data.get('invoice_id'):
+        rows = [q for q in sap_queue.get_queue_for_invoice(data['invoice_id'])
+                if q['status'] != 'sent']
+        if rows:
+            queue_id = rows[0]['id']
+    if not queue_id:
+        return jsonify({'success': False, 'error': 'No queued SAP job found'})
+
+    result = sap_queue.manual_send(queue_id)
+    return jsonify({
+        'success': result.get('ok', False),
+        'sap_document_number': result.get('sap_document_number'),
+        'error': result.get('error'),
     })
 
 

@@ -252,7 +252,7 @@
         <span class="total-value highlight" id="totalAmount">₹0.00</span>
     </div>
     <div class="spacer"></div>
-    <button class="btn btn-success" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
+    <button class="btn btn-success" id="generateBtn" onclick="generateBill()" style="font-size: 12px; padding: 8px 20px;">
         Generate Bill
     </button>
 </div>
@@ -333,7 +333,12 @@ async function loadBillables() {
     document.getElementById('loadBtn').disabled = true;
 
     try {
-        const resp = await fetch(`/api/module/FIN01/customer-billables/${ct}/${cid}`);
+        // Rates are computed server-side and embedded per line — one request,
+        // everything populated at once (no per-row rate fetches).
+        const agId = document.getElementById('agreementId').value;
+        let url = `/api/module/FIN01/customer-billables/${ct}/${cid}`;
+        if (agId) url += `?agreement_id=${agId}`;
+        const resp = await fetch(url);
         billableData = await resp.json();
 
         renderCargoCards(billableData.cargo_handling || []);
@@ -390,15 +395,10 @@ function renderCargoCards(cards) {
             <td style="text-align:right; color:${billedQty > 0 ? '#e67e22' : '#95a5a6'}; font-size:10px;">${billedQty > 0 ? billedQty.toFixed(2) : '-'}</td>
             <td style="text-align:right; font-weight:600; color:${billedQty > 0 ? '#2980b9' : 'inherit'};">${balance.toFixed(2)} ${card.uom || ''}</td>
             <td>${isBillable ? `<input type="number" step="0.01" min="0.01" max="${balance.toFixed(2)}" id="cargo_line_billqty_${idx}" value="${balance.toFixed(2)}" data-balance="${balance.toFixed(2)}" onchange="validateBillQty(this); recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
-            <td>${isBillable ? `<input type="number" step="0.01" id="cargo_line_rate_${idx}" placeholder="0.00" onchange="recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
+            <td>${isBillable ? `<input type="number" step="0.01" id="cargo_line_rate_${idx}" value="${card.rate != null ? Number(card.rate).toFixed(2) : ''}" placeholder="0.00" onchange="recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;">` : '-'}</td>
             <td style="text-align:right;font-weight:600;" id="cargo_line_amt_${idx}">-</td>
         `;
         tbody.appendChild(tr);
-
-        // Auto-load rate from agreement
-        if (isBillable && card.service_type_id) {
-            loadCargoLineRate(idx, card.service_type_id, card.cargo_name);
-        }
     });
 }
 
@@ -407,45 +407,6 @@ function toggleAllCargo(masterCb) {
         cb.checked = masterCb.checked;
     });
     recalcTotals();
-}
-
-async function loadCargoLineRate(idx, serviceTypeId, cargoName) {
-    const ct = document.getElementById('customerType').value;
-    const cid = document.getElementById('customerId').value;
-    const agId = document.getElementById('agreementId').value;
-
-    // Try cargo-specific rate first
-    if (cargoName) {
-        let url = `/api/module/FIN01/cargo-rates/${ct}/${cid}/${serviceTypeId}`;
-        if (agId) url += `?agreement_id=${agId}`;
-        try {
-            const resp = await fetch(url);
-            const json = await resp.json();
-            if (json.success && json.rates && json.rates[cargoName] != null) {
-                const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-                if (rateInput) {
-                    rateInput.value = parseFloat(json.rates[cargoName]).toFixed(2);
-                    recalcTotals();
-                    return;
-                }
-            }
-        } catch(e) {}
-    }
-
-    // Fallback to generic rate
-    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
-    if (agId) url += `?agreement_id=${agId}`;
-    try {
-        const resp = await fetch(url);
-        const json = await resp.json();
-        if (json.success) {
-            const rateInput = document.getElementById(`cargo_line_rate_${idx}`);
-            if (rateInput) {
-                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
-                recalcTotals();
-            }
-        }
-    } catch(e) {}
 }
 
 function renderOtherServices(records) {
@@ -471,38 +432,13 @@ function renderOtherServices(records) {
             <td>${rec.service_name || ''}</td>
             <td>${parseFloat(rec.billable_quantity || 0).toFixed(2)}</td>
             <td>${rec.billable_uom || st.uom || ''}</td>
-            <td><input type="number" step="0.01" id="svc_rate_${idx}" placeholder="0.00"
+            <td><input type="number" step="0.01" id="svc_rate_${idx}" value="${rec.rate != null ? Number(rec.rate).toFixed(2) : ''}" placeholder="0.00"
                 data-idx="${idx}" onchange="recalcTotals()" style="width:80px; padding:3px 5px; font-size:11px;"></td>
             <td id="svc_amount_${idx}" style="font-weight:600;">-</td>
             <td style="font-size:10px; color:#7f8c8d;">${rec.ref_source_display || '-'}</td>
         `;
         tbody.appendChild(tr);
-
-        // Auto-load rate
-        if (rec.service_type_id) {
-            loadServiceRate(idx, rec.service_type_id);
-        }
     });
-}
-
-async function loadServiceRate(idx, serviceTypeId) {
-    const ct = document.getElementById('customerType').value;
-    const cid = document.getElementById('customerId').value;
-    const agId = document.getElementById('agreementId').value;
-    let url = `/api/module/FIN01/agreement-rate/${ct}/${cid}/${serviceTypeId}`;
-    if (agId) url += `?agreement_id=${agId}`;
-
-    try {
-        const resp = await fetch(url);
-        const json = await resp.json();
-        if (json.success) {
-            const rateInput = document.getElementById(`svc_rate_${idx}`);
-            if (rateInput) {
-                rateInput.value = parseFloat(json.data.rate || 0).toFixed(2);
-                recalcTotals();
-            }
-        }
-    } catch(e) {}
 }
 
 function onServiceChecked(cb) {
@@ -716,6 +652,12 @@ async function generateBill() {
 
     if (lines.length === 0) {
         alert('Please select at least one item to bill.');
+        return;
+    }
+
+    // Guard: never bill at a 0 rate (no agreement rate found — enter manually)
+    if (lines.some(l => !(l.rate > 0))) {
+        alert('Some selected lines have a 0.00 rate (no agreement rate found). Enter a rate manually before billing.');
         return;
     }
 
