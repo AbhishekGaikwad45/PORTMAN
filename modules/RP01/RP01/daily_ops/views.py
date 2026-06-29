@@ -10,7 +10,7 @@ from datetime import timedelta
 from .. import bp
 from database import get_db, get_cursor
 from .model import build_fy_throughput
-
+import psycopg2.extras
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -824,22 +824,67 @@ def _fetch_upcoming_vessels(report_date):
 
     return rows
 
-def _fetch_shift_wise_discharge(report_date):
 
+
+def _fetch_shift_wise_discharge(report_date):
     target_date = report_date - timedelta(days=1)
 
     conn = get_db()
-    cur = get_cursor(conn)
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute("""
         SELECT
-            shift,
-            cargo_name,
-            COALESCE(SUM(quantity),0) AS qty
-        FROM lueu_lines
-        WHERE TO_DATE(entry_date,'YYYY-MM-DD') = %s
-        GROUP BY shift, cargo_name
-        ORDER BY shift, cargo_name
+            TRIM(l.shift) AS shift,
+
+            CASE
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'DOLOMITE%%' THEN 'Dolomite'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'LIMESTONE%%' THEN 'Limestone'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'DHAMRA FINES%%' THEN 'Dhamra Fines'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'BRBF%%' THEN 'BRBF'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'GOA FINES%%' THEN 'Goa Fines'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'GOA CLO%%' THEN 'Goa CLO'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'CLO-KDL%%'
+                  OR UPPER(TRIM(l.cargo_name)) LIKE 'KDL CLO%%' THEN 'KDL CLO'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'SLAG%%' THEN 'Slag'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'CLINKER%%' THEN 'Clinker'
+                ELSE TRIM(l.cargo_name)
+            END AS cargo_name,
+
+            UPPER(TRIM(vc.cargo_category)) AS cargo_category,
+            UPPER(TRIM(vc.cargo_category_2)) AS cargo_category_2,
+            COALESCE(SUM(l.quantity),0) AS qty
+
+        FROM lueu_lines l
+
+        LEFT JOIN vessel_cargo vc
+          ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+
+        WHERE l.entry_date::date=%s
+
+        GROUP BY
+            TRIM(l.shift),
+
+            CASE
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'DOLOMITE%%' THEN 'Dolomite'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'LIMESTONE%%' THEN 'Limestone'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'DHAMRA FINES%%' THEN 'Dhamra Fines'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'BRBF%%' THEN 'BRBF'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'GOA FINES%%' THEN 'Goa Fines'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'GOA CLO%%' THEN 'Goa CLO'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'CLO-KDL%%'
+                  OR UPPER(TRIM(l.cargo_name)) LIKE 'KDL CLO%%' THEN 'KDL CLO'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'SLAG%%' THEN 'Slag'
+                WHEN UPPER(TRIM(l.cargo_name)) LIKE 'CLINKER%%' THEN 'Clinker'
+                ELSE TRIM(l.cargo_name)
+            END,
+
+            UPPER(TRIM(vc.cargo_category)),
+            UPPER(TRIM(vc.cargo_category_2))
+
+        ORDER BY
+            TRIM(l.shift),
+            UPPER(TRIM(vc.cargo_category_2)),
+            cargo_name
     """, (target_date,))
 
     rows = cur.fetchall()
@@ -849,6 +894,172 @@ def _fetch_shift_wise_discharge(report_date):
 
     return rows
 
+
+def _get_ibrm_cbrm_flux(cargo_category, cargo_category_2):
+    """
+    Map vessel_cargo category values to IBRM / CBRM / FLUX.
+    Adjust these sets to match exactly what your vessel_cargo table stores.
+    """
+    IBRM_CATEGORIES = {
+        'ORE FINES', 'PELLETS', 'LUMPS', 'HBI', 'CLO',
+        'PYRITE', 'PYROXINITE', 'OLIVINE', 'HARSCO SLAG'
+    }
+    CBRM_CATEGORIES = {
+        'COKING COAL', 'OTHER COAL', 'COKE'
+    }
+    FLUX_CATEGORIES = {
+        'LIMESTONE', 'DOLOMITE', 'BENTONITE_QUARTZITE',
+        'MOP & A/SULPHATE'
+    }
+
+    # Check cargo_category_2 first (more specific), then cargo_category
+    for val in [cargo_category_2, cargo_category]:
+        if not val:
+            continue
+        v = val.strip().upper()
+        if v in IBRM_CATEGORIES:
+            return 'IBRM'
+        if v in CBRM_CATEGORIES:
+            return 'CBRM'
+        if v in FLUX_CATEGORIES:
+            return 'FLUX'
+
+    return None  # Standalone (Slag, Clinker, etc.)
+
+
+def _render_cargo_handled(report_date):
+    from collections import OrderedDict, defaultdict
+
+    cargo_handled = _fetch_shift_wise_discharge(report_date)
+
+    CATEGORY_SLOTS = {'IBRM': 10, 'CBRM': 8, 'FLUX': 6}
+    CATEGORY_ORDER = ['IBRM', 'CBRM', 'FLUX']
+
+    category_cargoes = {cat: OrderedDict() for cat in CATEGORY_ORDER}
+    uncategorised    = OrderedDict()
+
+    for row in cargo_handled:
+        cat  = _get_ibrm_cbrm_flux(
+            row.get('cargo_category') or '',
+            row.get('cargo_category_2') or ''
+        )
+        name = (row.get('cargo_name') or '').strip()
+        if not name:
+            continue
+        if cat in category_cargoes:
+            category_cargoes[cat][name] = None
+        else:
+            uncategorised[name] = None
+
+    # Build flat column list with blank padding per category
+    columns = []
+    for cat in CATEGORY_ORDER:
+        slots = CATEGORY_SLOTS[cat]
+        names = list(category_cargoes[cat].keys())
+        used  = min(len(names), slots)
+        for name in names[:used]:
+            columns.append(name)
+        for _ in range(slots - used):
+            columns.append('')
+
+    # Standalones (Slag, Clinker) + anything else uncategorised
+    STANDALONE = ['Slag', 'Clinker']
+    standalone_found = [
+        n for n in uncategorised
+        if any(s.lower() in n.lower() for s in STANDALONE)
+    ]
+    for name in standalone_found:
+        columns.append(name)
+    for name in uncategorised:
+        if name not in standalone_found:
+            columns.append(name)
+
+    # Pre-aggregate (shift, cargo_name) ? qty
+    agg = defaultdict(float)
+    for row in cargo_handled:
+        shift = (row.get('shift') or '').strip()
+        name  = (row.get('cargo_name') or '').strip()
+        qty   = float(row.get('qty') or 0)
+        agg[(shift, name)] += qty
+
+    # -- Render HTML -----------------------------------------------------------
+    html = """
+    <br><br>
+    <h3 style='margin-bottom:10px'>Cargo Handled</h3>
+    <div style="width:100%;overflow-x:auto;overflow-y:hidden;margin-bottom:15px;">
+    <table style="border-collapse:collapse;font-family:Arial;font-size:13px;
+                  width:max-content;white-space:nowrap;">
+    """
+
+    th_sticky = ("border:1px solid #ccc;padding:8px;position:sticky;"
+                 "left:0;background:#4a90d9;z-index:2;")
+    th_base   = "border:1px solid #ccc;padding:8px;min-width:90px;"
+
+    html += "<tr style='background:#4a90d9;color:white;'>"
+    html += f"<th style='{th_sticky}'>Shift</th>"
+    for col in columns:
+        html += f"<th style='{th_base}'>{col}</th>"
+    html += f"<th style='{th_base}'>Grand Total</th></tr>"
+
+    cargo_totals = defaultdict(float)
+    grand_total  = 0.0
+
+    for shift in ['A', 'B', 'C']:
+        row_total = 0.0
+        html += "<tr>"
+        html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:center;"
+                 f"font-weight:bold;position:sticky;left:0;background:white;z-index:1;'>"
+                 f"{shift}</td>")
+        for col in columns:
+            qty = agg[(shift, col)] if col else 0.0
+            row_total         += qty
+            cargo_totals[col] += qty
+            html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:right;'>"
+                     f"{qty:,.0f}</td>")
+        grand_total += row_total
+        html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:right;"
+                 f"font-weight:bold;background:#f8f9fa;'>{row_total:,.0f}</td>")
+        html += "</tr>"
+
+    # Grand total row
+    html += "<tr style='background:#e8f0fe;font-weight:bold;'>"
+    html += (f"<td style='border:1px solid #ccc;padding:8px;position:sticky;"
+             f"left:0;background:#e8f0fe;z-index:1;'>Grand Total</td>")
+    for col in columns:
+        html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:right;'>"
+                 f"{cargo_totals[col]:,.0f}</td>")
+    html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:right;"
+             f"background:#dbeafe;'>{grand_total:,.0f}</td></tr>")
+
+    # Category totals row
+    col_index = 0
+    cat_sums  = {}
+    for cat in CATEGORY_ORDER:
+        slots = CATEGORY_SLOTS[cat]
+        cat_sums[cat] = sum(
+            cargo_totals[columns[col_index + i]]
+            for i in range(slots)
+            if col_index + i < len(columns)
+        )
+        col_index += slots
+
+    html += "<tr style='background:#f2f2f2;font-weight:bold;'>"
+    html += (f"<td style='border:1px solid #ccc;padding:8px;position:sticky;"
+             f"left:0;background:#f2f2f2;z-index:1;'>Category Totals</td>")
+    for cat in CATEGORY_ORDER:
+        slots = CATEGORY_SLOTS[cat]
+        html += (f"<td colspan='{slots}' style='border:1px solid #ccc;padding:8px;"
+                 f"text-align:center;'>{cat} : {cat_sums[cat]:,.0f}</td>")
+    for col in columns[col_index:]:
+        val = cargo_totals[col] if col else 0
+        html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:center;'>"
+                 f"{val:,.0f}</td>")
+    html += (f"<td style='border:1px solid #ccc;padding:8px;text-align:center;"
+             f"background:#dbeafe;'>{grand_total:,.0f}</td>")
+    html += "</tr>"
+
+    html += "</table></div>"
+    return html
 
 def _fetch_discharging_mbcs(report_date):
 
@@ -1536,11 +1747,61 @@ def _fetch_mbc_cargo_handling(report_date):
     )
 
     # Financial Year To Date
-    year_rows = _period(
-        fy_start,
-        target_date
-    )
+    cur.execute("""
+        SELECT
+            cargo_type,
+            owner,
+            SUM(qty) AS qty
+        FROM (
 
+            ----------------------------------------------------------------
+            -- Historical Data (April 2026)
+            ----------------------------------------------------------------
+            SELECT
+                'IBRM' AS cargo_type,
+                COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+                h.quantity AS qty
+            FROM rp01_historical_lueu h
+            LEFT JOIN mbc_master m
+                ON TRIM(UPPER(h.source_display)) = TRIM(UPPER(m.mbc_name))
+            WHERE h.entry_date BETWEEN DATE '2026-04-01'
+                                AND DATE '2026-04-30'
+            AND (
+                    h.source_display ILIKE 'JSW%%'
+                    OR h.source_display ILIKE 'MBC%%'
+                    OR h.source_display ILIKE 'Gautam%%'
+                    OR h.source_display ILIKE 'Siddhi%%'
+                )
+
+            UNION ALL
+
+            ----------------------------------------------------------------
+            -- Live Data (May 2026 onwards)
+            ----------------------------------------------------------------
+            SELECT
+                h.cargo_type,
+                COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+                l.quantity AS qty
+            FROM lueu_lines l
+            JOIN mbc_header h
+                ON h.id = l.source_id
+            LEFT JOIN mbc_master m
+                ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
+            WHERE l.is_deleted = false
+            AND l.source_type = 'MBC'
+            AND l.entry_date::date BETWEEN DATE '2026-05-01'
+                                        AND %s
+
+        ) x
+        GROUP BY
+            cargo_type,
+            owner
+        ORDER BY
+            owner,
+            cargo_type
+    """, (target_date,))
+
+    year_rows = cur.fetchall()
     cur.close()
     conn.close()
 
@@ -2650,34 +2911,97 @@ def _build_excel_a4(
     VALUE_FONT = Font(name="Calibri", size=21)
     TOTAL_FONT = Font(name="Calibri", size=21, bold=True)
     cargo_handled_start_row = current_row
-    # =================================================
-    # CARGO HANDLED
-    # =================================================
+    
+    from collections import OrderedDict, defaultdict
 
     cargo_handled = _fetch_shift_wise_discharge(report_date)
 
-    cargo_names = [
-        'BRBF',
-        'Orissa Fines',
-        'Goa Fines',
-        'HBI',
-        'KDL CLO',
-        'Jimblebar Fines',
-        'Bacheli Fines',
-        'Goa Clo',
-        'Mabu',
-        'Illavara',
-        'Uval + Kestrel',
-        'MLV',
-        'PCI',
-        'Antracite',
-        'Limestone',
-        'Bentonite',
-        'Oliflux',
-        'Dolomite',
-        'Slag Loading/Unloading',
+    CATEGORY_SLOTS = {
+        'IBRM': 10,
+        'CBRM': 8,
+        'FLUX': 6
+    }
+
+    CATEGORY_ORDER = [
+        'IBRM',
+        'CBRM',
+        'FLUX'
+    ]
+
+    category_cargoes = {
+        cat: OrderedDict()
+        for cat in CATEGORY_ORDER
+    }
+
+    uncategorised = OrderedDict()
+
+    for row in cargo_handled:
+
+        category = _get_ibrm_cbrm_flux(
+            row.get("cargo_category") or "",
+            row.get("cargo_category_2") or ""
+        )
+
+        cargo = (row.get("cargo_name") or "").strip()
+
+        if not cargo:
+            continue
+
+        if category in category_cargoes:
+            category_cargoes[category][cargo] = None
+        else:
+            uncategorised[cargo] = None
+
+    cargo_names = []
+
+    for cat in CATEGORY_ORDER:
+
+        names = list(category_cargoes[cat].keys())
+
+        used = min(len(names), CATEGORY_SLOTS[cat])
+
+        cargo_names.extend(names[:used])
+
+        cargo_names.extend(
+            [''] * (CATEGORY_SLOTS[cat] - used)
+        )
+
+    STANDALONE = [
+        'Slag',
         'Clinker'
     ]
+
+    standalone = [
+        c for c in uncategorised
+        if any(
+            s.lower() in c.lower()
+            for s in STANDALONE
+        )
+    ]
+
+    cargo_names.extend(standalone)
+
+    for cargo in uncategorised:
+
+        if cargo not in standalone:
+            cargo_names.append(cargo)
+
+    
+
+    # Font used for every actual data value in the table (quantities, totals,
+    # category totals). Labels (Shift / A-B-C / "Grand Total" / header names /
+    # title) keep using _font() and are untouched.
+    value_font = Font(name="Calibri", size=21)
+
+    # Aliases used to match raw cargo_name values from the DB to a display
+    # column. NOTE: this MUST be defined here (or imported/passed in) - it is
+    # not a global anywhere in the project, so any view/function that builds
+    # a cargo table needs its own copy in scope, or you'll hit
+    # NameError: name 'cargo_alias' is not defined.
+    # Blank '' columns are intentionally NOT given aliases - they are
+    # placeholders for future cargo types and must always total 0 (handled by
+    # the `if cargo == ''` guard below, not by anything in this dict).
+   
 
     CH_START_COL = LABEL_START + UV_TOTAL + 1
     CA_START_COL = CH_START_COL
@@ -2799,18 +3123,19 @@ def _build_excel_a4(
 
         for cargo in cargo_names:
 
-            qty = sum(
-                float(r.get('qty') or 0)
-                for r in cargo_handled
-                if (
-                    (r.get('shift') or '').strip()
-                    == shift
+            if cargo == '':
+                # Placeholder column reserved for a future cargo type.
+                # Always 0 - never matched against real cargo_name data.
+                # (Without this guard, an empty alias string would match
+                # every row, since '' is a substring of any string.)
+                qty = 0
+            else:
+                qty = sum(
+                    float(r.get("qty") or 0)
+                    for r in cargo_handled
+                    if (r.get("shift") or "").strip() == shift
+                    and (r.get("cargo_name") or "").strip() == cargo
                 )
-                and (
-                    (r.get('cargo_name') or '').strip()
-                    == cargo
-                )
-            )
 
             ws.cell(
                 excel_row,
@@ -2827,6 +3152,11 @@ def _build_excel_a4(
                 excel_row,
                 col
             ).alignment = _ctr
+
+            ws.cell(
+                excel_row,
+                col
+            ).font = value_font
 
             cargo_totals[cargo] += qty
             row_total += qty
@@ -2848,6 +3178,11 @@ def _build_excel_a4(
             excel_row,
             CH_TOTAL_COL
         ).alignment = _ctr
+
+        ws.cell(
+            excel_row,
+            CH_TOTAL_COL
+        ).font = value_font
 
         grand_total += row_total
 
@@ -2874,7 +3209,7 @@ def _build_excel_a4(
             cargo_totals[cargo]
         )
 
-        c.font = _font()
+        c.font = value_font
         c.border = thick_bdr
         c.alignment = _ctr
 
@@ -2886,92 +3221,85 @@ def _build_excel_a4(
         grand_total
     )
 
-    c.font = _font()
+    c.font = value_font
     c.border = thick_bdr
     c.alignment = _ctr
 
     # Category Totals Row
     category_row = grand_row + 1
 
-    ibrm_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'BRBF',
-            'Orissa Fines',
-            'Goa Fines',
-            'HBI',
-            'KDL CLO'
-        ]
-    )
+    # IBRM: 9 named cargoes + 2 blank placeholder columns = 11 columns
+    index = 0
 
-    cbrm_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'Jimblebar Fines',
-            'Bacheli Fines',
-            'Goa Clo',
-            'Mabu',
-            'Illavara',
-            'Uval + Kestrel',
-            'MLV',
-            'PCI',
-            'Antracite'
-        ]
-    )
+    category_totals = {}
 
-    flux_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'Limestone',
-            'Bentonite',
-            'Oliflux'
-        ]
-    )
+    for cat in CATEGORY_ORDER:
+
+        slots = CATEGORY_SLOTS[cat]
+
+        category_totals[cat] = sum(
+            cargo_totals.get(
+                cargo_names[index + i],
+                0
+            )
+            for i in range(slots)
+            if index + i < len(cargo_names)
+        )
+
+        index += slots
+
+    ibrm_total = category_totals["IBRM"]
+    cbrm_total = category_totals["CBRM"]
+    flux_total = category_totals["FLUX"]
 
     ws.merge_cells(
         start_row=category_row,
         start_column=CH_START_COL + 1,
         end_row=category_row,
-        end_column=CH_START_COL + 5
+        end_column=CH_START_COL + 11
     )
 
     ws.merge_cells(
         start_row=category_row,
-        start_column=CH_START_COL + 6,
+        start_column=CH_START_COL + 12,
         end_row=category_row,
-        end_column=CH_START_COL + 14
+        end_column=CH_START_COL + 19
     )
 
     ws.merge_cells(
         start_row=category_row,
-        start_column=CH_START_COL + 15,
+        start_column=CH_START_COL + 20,
         end_row=category_row,
-        end_column=CH_START_COL + 17
+        end_column=CH_START_COL + 25
     )
 
-    ws.cell(
+    c = ws.cell(
         category_row,
         CH_START_COL + 1,
         f"IBRM : {ibrm_total:,.0f}"
     )
+    c.font = value_font
 
-    ws.cell(
+    c = ws.cell(
         category_row,
-        CH_START_COL + 6,
+        CH_START_COL + 12,
         f"CBRM : {cbrm_total:,.0f}"
     )
+    c.font = value_font
 
-    ws.cell(
+    c = ws.cell(
         category_row,
-        CH_START_COL + 15,
+        CH_START_COL + 20,
         f"FLUXES : {flux_total:,.0f}"
     )
+    c.font = value_font
 
-    ws.cell(
+    c = ws.cell(
         category_row,
         CH_TOTAL_COL,
         grand_total
     )
+    c.font = value_font
 
     for col in range(
         CH_START_COL,
@@ -3033,8 +3361,6 @@ def _build_excel_a4(
     # IMPORTANT
     # Move all following sections below Cargo Handled
     current_row = category_row + 4
-
-    
 
     # ── cargo availability ────────────────────────────────────────────
     cargo_availability = cargo_availability or []
@@ -4964,343 +5290,447 @@ def daily_ops_preview():
     # =================================================
     # CARGO HANDLED
     # =================================================
+    html += _render_cargo_handled(report_date)
+    # cargo_handled = _fetch_shift_wise_discharge(report_date)
 
-    cargo_handled = _fetch_shift_wise_discharge(report_date)
+    # cargo_names = [
+    #     'BRBF',
+    #     'Dhamra Fines',
+    #     'Goa Fines',
+    #     'HBI',
+    #     'KDL CLO',
+    #     'SSF',
+    #     'Bacheli Fines',
+    #     'Goa Clo',
+    #     'Orrisa Clo',
+    #     '',
+    #     '',
 
-    cargo_names = [
-    'BRBF',
-    'Orissa Fines',
-    'Goa Fines',
-    'HBI',
-    'KDL CLO',
+    #     'Goonyella',
+    #     'Antos',
+    #     'Mabu',
+    #     'Uval + Kestrel',
+    #     'MLV',
+    #     'PCI',
+    #     '',
+    #     '',
 
-    'Jimblebar Fines',
-    'Bacheli Fines',
-    'Goa Clo',
-    'Mabu',
-    'Illavara',
-    'Uval + Kestrel',
-    'MLV',
-    'PCI',
-    'Antracite',
+    #     'Limestone',
+    #     'Bentonite',
+    #     'Oliflux',
+    #     'Dolomite',
+    #     '',
+    #     '',
 
-    'Limestone',
-    'Bentonite',
-    'Oliflux',
+    #     'Slag Loading/Unloading',
 
-    'Dolomite',
+    #     'Clinker'
+    # ]
 
-    'Slag Loading/Unloading',
+    # html += """
+    # <br><br>
 
-    'Clinker'
-]
+    # <h3 style='margin-bottom:10px'>
+    #     Cargo Handled
+    # </h3>
 
-    html += """
-    <br><br>
+    # <div style="
+    #     width:100%;
+    #     overflow-x:auto;
+    #     overflow-y:hidden;
+    #     margin-bottom:15px;
+    # ">
 
-    <h3 style='margin-bottom:10px'>
-        Cargo Handled
-    </h3>
+    # <table style="
+    #     border-collapse:collapse;
+    #     font-family:Arial;
+    #     font-size:13px;
+    #     width:max-content;
+    #     white-space:nowrap;
+    # ">
 
-    <div style="
-        width:100%;
-        overflow-x:auto;
-        overflow-y:hidden;
-        margin-bottom:15px;
-    ">
+    # <tr style="background:#4a90d9;color:white;">
 
-    <table style="
-        border-collapse:collapse;
-        font-family:Arial;
-        font-size:13px;
-        width:max-content;
-        white-space:nowrap;
-    ">
+    #     <th style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         position:sticky;
+    #         left:0;
+    #         background:#4a90d9;
+    #         z-index:2;
+    #     ">
+    #         Shift
+    #     </th>
+    # """
 
-    <tr style="background:#4a90d9;color:white;">
+    # for cargo in cargo_names:
 
-        <th style="
-            border:1px solid #ccc;
-            padding:8px;
-            position:sticky;
-            left:0;
-            background:#4a90d9;
-            z-index:2;
-        ">
-            Shift
-        </th>
-    """
+    #     html += f"""
+    #     <th style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         min-width:90px;
+    #     ">
+    #         {cargo}
+    #     </th>
+    #     """
 
-    for cargo in cargo_names:
+    # html += """
+    #     <th style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         min-width:90px;
+    #     ">
+    #         Grand Total
+    #     </th>
 
-        html += f"""
-        <th style="
-            border:1px solid #ccc;
-            padding:8px;
-            min-width:90px;
-        ">
-            {cargo}
-        </th>
-        """
+    # </tr>
+    # """
 
-    html += """
-        <th style="
-            border:1px solid #ccc;
-            padding:8px;
-            min-width:90px;
-        ">
-            Grand Total
-        </th>
+    # cargo_totals = {cargo: 0 for cargo in cargo_names}
+    # grand_total = 0
 
-    </tr>
-    """
+    # cargo_alias = {
+    #     'BRBF': [
+    #         'BRBF',
+    #         'BRBF Fines'
+    #     ],
 
-    cargo_totals = {cargo: 0 for cargo in cargo_names}
-    grand_total = 0
+    #     # Match ANY cargo name containing "Dhamra"
+    #     'Dhamra Fines': [
+    #         'Dhamra'
+    #     ],
 
-    for shift in ["A", "B", "C"]:
+    #     'Goa Fines': [
+    #         'Goa Fines',
+            
+    #     ],
 
-        row_total = 0
+    #     'HBI': [
+    #         'HBI'
+    #     ],
 
-        html += f"""
-        <tr>
+    #     'KDL CLO': [
+    #         'KDL CLO',
+    #         'CLO-KDL'
+    #     ],
 
-            <td style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:center;
-                font-weight:bold;
-                position:sticky;
-                left:0;
-                background:white;
-                z-index:1;
-            ">
-                {shift}
-            </td>
-        """
+    #     'Jimblebar Fines': [
+    #         'Jimblebar Fines'
+    #     ],
 
-        for cargo in cargo_names:
+    #     'Bacheli Fines': [
+    #         'Bacheli Fines',
+    #         'Vizag Fines'
+    #     ],
 
-            qty = sum(
-                float(r.get('qty') or 0)
-                for r in cargo_handled
-                if (r.get('shift') or '').strip() == shift
-                and (r.get('cargo_name') or '').strip() == cargo
-            )
+    #     'Goa Clo': [
+    #         'Goa Clo'
+    #     ],
 
-            row_total += qty
-            cargo_totals[cargo] += qty
+    #     'Mabu': [
+    #         'Mabu',
+    #         'Mabu Coal'
+    #     ],
 
-            html += f"""
-            <td style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:right;
-            ">
-                {qty:,.0f}
-            </td>
-            """
+    #     'Illavara': [
+    #         'Illavara',
+    #         'Illawara Coal'
+    #     ],
 
-        grand_total += row_total
+    #     'Uval + Kestrel': [
+    #         'Uval',
+    #         'Kestrel'
+    #     ],
 
-        html += f"""
-            <td style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:right;
-                font-weight:bold;
-                background:#f8f9fa;
-            ">
-                {row_total:,.0f}
-            </td>
+    #     'MLV': [
+    #         'MLV'
+    #     ],
 
-        </tr>
-        """
+    #     'PCI': [
+    #         'PCI',
+    #         'LV PCI Coal'
+    #     ],
 
-    # ==========================================
-    # GRAND TOTAL ROW
-    # ==========================================
+    #     'Antracite': [
+    #         'Antracite',
+    #         'Anthrcite Coal'
+    #     ],
 
-    html += """
-    <tr style="
-        background:#e8f0fe;
-        font-weight:bold;
-    ">
+    #     'Limestone': [
+    #         'Limestone',
+    #         'Limestone SMS'
+    #     ],
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            position:sticky;
-            left:0;
-            background:#e8f0fe;
-            z-index:1;
-        ">
-            Grand Total
-        </td>
-    """
+    #     'Bentonite': [
+    #         'Bentonite'
+    #     ],
 
-    for cargo in cargo_names:
+    #     'Oliflux': [
+    #         'Oliflux'
+    #     ],
 
-        html += f"""
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:right;
-        ">
-            {cargo_totals[cargo]:,.0f}
-        </td>
-        """
+    #     'Dolomite': [
+    #         'Dolomite',
+    #         'Dolomite Aggregate',
+    #         'Dolomite SMS'
+    #     ],
 
-    html += f"""
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:right;
-            background:#dbeafe;
-        ">
-            {grand_total:,.0f}
-        </td>
+    #     'Slag Loading/Unloading': [
+    #         'Slag'
+    #     ],
 
-    </tr>
-    """
+    #     'Clinker': [
+    #         'Clinker'
+    #     ]
+    # }
 
-    # ==========================================
-    # CATEGORY TOTALS ROW
-    # ==========================================
+    # for shift in ["A", "B", "C"]:
 
-    ibrm_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'BRBF',
-            'Orissa Fines',
-            'Goa Fines',
-            'HBI',
-            'KDL CLO'
-        ]
-    )
+    #     row_total = 0
 
-    cbrm_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'Jimblebar Fines',
-            'Bacheli Fines',
-            'Goa Clo',
-            'Mabu',
-            'Illavara',
-            'Uval + Kestrel',
-            'MLV',
-            'PCI',
-            'Antracite'
-        ]
-    )
+    #     html += f"""
+    #     <tr>
 
-    flux_total = sum(
-        cargo_totals.get(c, 0)
-        for c in [
-            'Limestone',
-            'Bentonite',
-            'Oliflux'
-        ]
-    )
+    #         <td style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:center;
+    #             font-weight:bold;
+    #             position:sticky;
+    #             left:0;
+    #             background:white;
+    #             z-index:1;
+    #         ">
+    #             {shift}
+    #         </td>
+    #     """
 
-    dolomite_total = cargo_totals.get('Dolomite', 0)
+    #     for cargo in cargo_names:
 
-    slag_total = cargo_totals.get(
-        'Slag Loading/Unloading',
-        0
-    )
+    #         if cargo == '':
+    #             # Placeholder column reserved for a future cargo type.
+    #             # Always 0 - never matched against real cargo_name data.
+    #             qty = 0
+    #         else:
+    #             qty = sum(
+    #                 float(r.get('qty') or 0)
+    #                 for r in cargo_handled
+    #                 if (r.get('shift') or '').strip() == shift
+    #                 and any(
+    #                     alias.lower() in (r.get('cargo_name') or '').lower()
+    #                     for alias in cargo_alias.get(cargo, [cargo])
+    #                 )
+    #             )
 
-    clinker_total = cargo_totals.get(
-        'Clinker',
-        0
-    )
+    #         row_total += qty
+    #         cargo_totals[cargo] += qty
 
-    html += f"""
-    <tr style="
-        background:#f2f2f2;
-        font-weight:bold;
-    ">
+    #         html += f"""
+    #         <td style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:right;
+    #         ">
+    #             {qty:,.0f}
+    #         </td>
+    #         """
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            position:sticky;
-            left:0;
-            background:#f2f2f2;
-            z-index:1;
-        ">
-            Category Totals
-        </td>
+    #     grand_total += row_total
 
-        <td colspan="5"
-            style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:center;
-            ">
-            IBRM : {ibrm_total:,.0f}
-        </td>
+    #     html += f"""
+    #         <td style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:right;
+    #             font-weight:bold;
+    #             background:#f8f9fa;
+    #         ">
+    #             {row_total:,.0f}
+    #         </td>
 
-        <td colspan="9"
-            style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:center;
-            ">
-            CBRM : {cbrm_total:,.0f}
-        </td>
+    #     </tr>
+    #     """
 
-        <td colspan="3"
-            style="
-                border:1px solid #ccc;
-                padding:8px;
-                text-align:center;
-            ">
-            FLUXES : {flux_total:,.0f}
-        </td>
+    # # ==========================================
+    # # GRAND TOTAL ROW
+    # # ==========================================
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:center;
-        ">
-            {dolomite_total:,.0f}
-        </td>
+    # html += """
+    # <tr style="
+    #     background:#e8f0fe;
+    #     font-weight:bold;
+    # ">
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:center;
-        ">
-            {slag_total:,.0f}
-        </td>
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         position:sticky;
+    #         left:0;
+    #         background:#e8f0fe;
+    #         z-index:1;
+    #     ">
+    #         Grand Total
+    #     </td>
+    # """
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:center;
-        ">
-            {clinker_total:,.0f}
-        </td>
+    # for cargo in cargo_names:
 
-        <td style="
-            border:1px solid #ccc;
-            padding:8px;
-            text-align:center;
-            background:#dbeafe;
-        ">
-            {grand_total:,.0f}
-        </td>
+    #     html += f"""
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         text-align:right;
+    #     ">
+    #         {cargo_totals[cargo]:,.0f}
+    #     </td>
+    #     """
 
-    </tr>
+    # html += f"""
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         text-align:right;
+    #         background:#dbeafe;
+    #     ">
+    #         {grand_total:,.0f}
+    #     </td>
 
-    </table>
+    # </tr>
+    # """
 
-    </div>
-    """
+    # # ==========================================
+    # # CATEGORY TOTALS ROW
+    # # ==========================================
+
+    # # IBRM: 9 named cargoes + 2 blank placeholder columns = 11 columns
+    # ibrm_total = sum(
+    #     cargo_totals.get(c, 0)
+    #     for c in [
+    #         'BRBF',
+    #         'Dhamra Fines',
+    #         'Goa Fines',
+    #         'HBI',
+    #         'KDL CLO',
+    #         'SSF',
+    #         'Bacheli Fines',
+    #         'Goa Clo',
+    #         'Orrisa Clo',
+    #     ]
+    # )
+
+    # # CBRM: 6 named cargoes + 2 blank placeholder columns = 8 columns
+    # cbrm_total = sum(
+    #     cargo_totals.get(c, 0)
+    #     for c in [
+    #         'Goonyella',
+    #         'Antos',
+    #         'Mabu',
+    #         'Uval + Kestrel',
+    #         'MLV',
+    #         'PCI',
+    #     ]
+    # )
+
+    # # FLUXES: 4 named cargoes + 2 blank placeholder columns = 6 columns
+    # flux_total = sum(
+    #     cargo_totals.get(c, 0)
+    #     for c in [
+    #         'Limestone',
+    #         'Bentonite',
+    #         'Oliflux',
+    #         'Dolomite',
+    #     ]
+    # )
+
+    # slag_total = cargo_totals.get(
+    #     'Slag Loading/Unloading',
+    #     0
+    # )
+
+    # clinker_total = cargo_totals.get(
+    #     'Clinker',
+    #     0
+    # )
+
+    # html += f"""
+    # <tr style="
+    #     background:#f2f2f2;
+    #     font-weight:bold;
+    # ">
+
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         position:sticky;
+    #         left:0;
+    #         background:#f2f2f2;
+    #         z-index:1;
+    #     ">
+    #         Category Totals
+    #     </td>
+
+    #     <td colspan="11"
+    #         style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:center;
+    #         ">
+    #         IBRM : {ibrm_total:,.0f}
+    #     </td>
+
+    #     <td colspan="8"
+    #         style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:center;
+    #         ">
+    #         CBRM : {cbrm_total:,.0f}
+    #     </td>
+
+    #     <td colspan="6"
+    #         style="
+    #             border:1px solid #ccc;
+    #             padding:8px;
+    #             text-align:center;
+    #         ">
+    #         FLUXES : {flux_total:,.0f}
+    #     </td>
+
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         text-align:center;
+    #     ">
+    #         {slag_total:,.0f}
+    #     </td>
+
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         text-align:center;
+    #     ">
+    #         {clinker_total:,.0f}
+    #     </td>
+
+    #     <td style="
+    #         border:1px solid #ccc;
+    #         padding:8px;
+    #         text-align:center;
+    #         background:#dbeafe;
+    #     ">
+    #         {grand_total:,.0f}
+    #     </td>
+
+    # </tr>
+
+    # </table>
+
+    # </div>
+    # """
     html += """
 <br><br>
-    <h3>Cargo Availability for the Day</h3>
+   <h3>Cargo Availability for the Day</h3>
     <div style="overflow-x:auto;width:100%;">
     <table id="cargo-availability-table"
        style="border-collapse:collapse;font-family:Arial;font-size:12px;white-space:nowrap;">
@@ -5308,23 +5738,32 @@ def daily_ops_preview():
         <th style="border:1px solid #ccc;padding:8px;height:38px;"></th>
 
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">BRBF</th>
-<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Orissa Fines</th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Dhamra Fines</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Goa Fines</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">HBI</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">KDL CLO</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Jimblebar Fines</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Bacheli Fines</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Goa Clo</th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Mabu</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Illavara</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Uval + Kestrel</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">MLV</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">PCI</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Antracite</th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Limestone</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Bentonite</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Oliflux</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Dolomite</th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+<th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;"></th>
+
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Slag Loading/Unloading</th>
 <th contenteditable="true" style="border:1px solid #ccc;padding:8px;height:38px;">Clinker</th>
 
@@ -5333,23 +5772,29 @@ def daily_ops_preview():
     <tr>
         <td style="border:1px solid #ccc;padding:8px;font-weight:bold;">At Jetty</td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_BRBF" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
-        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Orissa Fines" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Dhamra Fines" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Goa Fines" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_HBI" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_KDL CLO" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Jimblebar Fines" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Bacheli Fines" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Goa Clo" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_ibrm_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_ibrm_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Mabu" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Illavara" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Uval + Kestrel" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_MLV" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_PCI" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Antracite" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_cbrm_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_cbrm_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Limestone" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Bentonite" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Oliflux" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Dolomite" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_flux_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_flux_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Slag Loading/Unloading" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="at_jetty_Clinker" style="border:1px solid #ccc;padding:8px;text-align:right;min-width:80px;"></td>
         <td id="row1_total"
@@ -5359,23 +5804,29 @@ def daily_ops_preview():
     <tr>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_label" style="border:1px solid #ccc;padding:8px;min-width:100px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_BRBF" style="border:1px solid #ccc;padding:8px;min-width:80px;"></td>
-        <td contenteditable="true" data-section="cargo_avail" data-key="row2_Orissa Fines" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_Dhamra Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Goa Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_HBI" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_KDL CLO" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Jimblebar Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Bacheli Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Goa Clo" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_ibrm_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_ibrm_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Mabu" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Illavara" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Uval + Kestrel" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_MLV" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_PCI" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Antracite" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_cbrm_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_cbrm_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Limestone" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Bentonite" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Oliflux" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Dolomite" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_flux_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row2_flux_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Slag Loading/Unloading" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row2_Clinker" style="border:1px solid #ccc;padding:8px;"></td>
         <td id="row2_total"
@@ -5385,23 +5836,29 @@ def daily_ops_preview():
     <tr>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_label" style="border:1px solid #ccc;padding:8px;min-width:100px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_BRBF" style="border:1px solid #ccc;padding:8px;min-width:80px;"></td>
-        <td contenteditable="true" data-section="cargo_avail" data-key="row3_Orissa Fines" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_Dhamra Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Goa Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_HBI" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_KDL CLO" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Jimblebar Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Bacheli Fines" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Goa Clo" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_ibrm_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_ibrm_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Mabu" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Illavara" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Uval + Kestrel" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_MLV" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_PCI" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Antracite" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_cbrm_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_cbrm_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Limestone" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Bentonite" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Oliflux" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Dolomite" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_flux_blank1" style="border:1px solid #ccc;padding:8px;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="row3_flux_blank2" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Slag Loading/Unloading" style="border:1px solid #ccc;padding:8px;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="row3_Clinker" style="border:1px solid #ccc;padding:8px;"></td>
         <td id="row3_total"
@@ -5411,23 +5868,29 @@ def daily_ops_preview():
     <tr style="background:#f2f2f2;font-weight:bold;">
         <td style="border:1px solid #ccc;padding:8px;">Total</td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_BRBF" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
-        <td contenteditable="true" data-section="cargo_avail" data-key="total_Orissa Fines" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_Dhamra Fines" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Goa Fines" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_HBI" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_KDL CLO" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Jimblebar Fines" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Bacheli Fines" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Goa Clo" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_ibrm_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_ibrm_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Mabu" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Illavara" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Uval + Kestrel" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_MLV" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_PCI" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Antracite" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_cbrm_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_cbrm_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Limestone" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Bentonite" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Oliflux" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Dolomite" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_flux_blank1" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
+        <td contenteditable="true" data-section="cargo_avail" data-key="total_flux_blank2" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Slag Loading/Unloading" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_Clinker" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
         <td contenteditable="true" data-section="cargo_avail" data-key="total_grand" style="border:1px solid #ccc;padding:8px;text-align:right;"></td>
@@ -5439,7 +5902,7 @@ def daily_ops_preview():
 
     <td style="border:1px solid #ccc;padding:8px;"></td>
 
-    <td colspan="5"
+    <td colspan="10"
         id="grand_ibrm"
         contenteditable="true"
         data-section="cargo_avail"
@@ -5447,7 +5910,7 @@ def daily_ops_preview():
         style="border:1px solid #ccc;padding:8px;text-align:center;">
     </td>
 
-    <td colspan="10"
+    <td colspan="8"
         id="grand_cbrm"
         contenteditable="true"
         data-section="cargo_avail"
@@ -5455,7 +5918,7 @@ def daily_ops_preview():
         style="border:1px solid #ccc;padding:8px;text-align:center;">
     </td>
 
-    <td colspan="3"
+    <td colspan="6"
         id="grand_fluxes"
         contenteditable="true"
         data-section="cargo_avail"
@@ -6633,7 +7096,7 @@ def daily_ops_download():
 
     cargo_availability = [
         {"cargo_name": "BRBF", "at_jetty_qty": ""},
-        {"cargo_name": "Orissa Fines", "at_jetty_qty": ""},
+        {"cargo_name": "Dhamra Fines", "at_jetty_qty": ""},
         {"cargo_name": "Goa Fines", "at_jetty_qty": ""},
         {"cargo_name": "HBI", "at_jetty_qty": ""},
         {"cargo_name": "KDL CLO", "at_jetty_qty": ""},
