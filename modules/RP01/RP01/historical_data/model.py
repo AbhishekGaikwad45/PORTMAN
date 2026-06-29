@@ -10,7 +10,8 @@ from database import get_db, get_cursor
 # match these exact keys so upload mapping is a direct dict lookup.
 COLUMNS = [
     'entry_date', 'shift', 'equipment_name', 'from_time', 'to_time',
-    'source_display', 'barge_name', 'cargo_name', 'delay_name', 'system_name',
+    'source_display', 'barge_name', 'cargo_name', 'cargo_type_a', 'cargo_type_b',
+    'mv_mbc', 'delay_name', 'system_name',
     'route_name', 'berth_name', 'shift_incharge', 'operator_name',
     'quantity', 'quantity_uom', 'remarks',
 ]
@@ -380,7 +381,8 @@ def get_rows(page=1, size=50, filters=None):
 
 # Free-text columns editable inline (typed columns handled via parse_* below).
 _TEXT_EDIT_COLS = ['shift', 'equipment_name', 'source_display', 'barge_name',
-                   'cargo_name', 'delay_name', 'system_name', 'route_name',
+                   'cargo_name', 'cargo_type_a', 'cargo_type_b', 'mv_mbc',
+                   'delay_name', 'system_name', 'route_name',
                    'berth_name', 'shift_incharge', 'operator_name', 'quantity_uom', 'remarks']
 
 
