@@ -1232,8 +1232,8 @@
                         <tr data-mv-row="eta_to_dharamtar">
                             <td><b>ETA TO DHARAMTAR</b></td>
                             {% for vessel in mother_vessels %}
-                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}"
-                                data-field="eta_to_dharamtar" oninput="markUnsaved()">
+                            <td data-vessel="{{ vessel.vessel_name }}"
+                                data-field="eta_to_dharamtar"">
                                 {{ vessel.eta_to_dharamtar }}
                             </td>
                             {% endfor %}
@@ -1609,6 +1609,7 @@
             const wtR19 = {};
             const mbcEta = {};
             const etaToDharamtar = {};
+            const onTheWayGull = {}; 
 
             document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
                 wtR19[td.dataset.vessel] = td.textContent.trim();
@@ -1619,6 +1620,9 @@
             });
             document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
                 etaToDharamtar[td.dataset.vessel] = td.textContent.trim();
+            });
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {   // NEW
+            onTheWayGull[td.dataset.vessel] = td.textContent.trim();
             });
 
             // ── 4. Notes ────────────────────────────────────────────────────────────
@@ -1645,6 +1649,7 @@
                 wt_r19: wtR19,
                 eta_to_dharamtar: etaToDharamtar,
                 mbc_eta: mbcEta,
+                on_the_way_gull: onTheWayGull,
                 shift_plan: shiftPlan,
                 notes: notes,
                 movement_logs: _movementLogs,
@@ -1743,6 +1748,13 @@
                 if (val !== undefined) {
                     td.textContent = val;
                 }
+            });
+        }
+        // ── On the way to Gull (NEW, alongside existing WT@R19 / MBC ETA / ETA blocks) ──
+        if (savedData.on_the_way_gull) {
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {
+                const val = savedData.on_the_way_gull[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
             });
         }
 
@@ -1884,9 +1896,9 @@
             ['VSL DISCH COMMNACED', 'discharge_commenced', false],
             ['VSL DISCHARGE COMPLITED', 'discharge_completed', false],
             ['UNDER LOADING', 'under_loading', false],
-            ['ETA TO DHARAMTAR', 'eta_to_dharamtar', true],
+            ['ETA TO DHARAMTAR', 'at_gull_loaded', false],
             ['WT @ R19', 'wt_r19', true],  // editable
-            ['ON THE WAY TO GULL', 'at_gull_loaded', false],
+            ['ON THE WAY TO GULL', 'on_the_way_gull', true, 'on_the_way_gull', false],
             ['MBC ETA', 'mbc_eta', true],  // editable
         ];
 
