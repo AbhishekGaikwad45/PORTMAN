@@ -281,6 +281,7 @@ def _fetch_cargo_pivot(entry_date, shift):
         WHERE l.entry_date = %s
           AND l.quantity > 0
           AND l.cargo_name IS NOT NULL AND l.cargo_name != ''
+          AND l.is_deleted IS NOT TRUE
     """
     params = [entry_date]
     if not _is_all_shifts(shift):
@@ -330,6 +331,7 @@ def _fetch_shift_pivot(entry_date, shift):
           AND l.quantity > 0
           AND l.cargo_name IS NOT NULL AND l.cargo_name != ''
           AND l.shift IS NOT NULL AND l.shift != ''
+          AND l.is_deleted IS NOT TRUE
     """
     params = [entry_date]
     if not _is_all_shifts(shift):
@@ -371,6 +373,7 @@ def _fetch_delays(entry_date, shift):
         LEFT JOIN port_delay_types d ON d.name = l.delay_name
         WHERE l.entry_date = %s
           AND l.delay_name IS NOT NULL AND l.delay_name != ''
+          AND l.is_deleted IS NOT TRUE
     """
     params = [entry_date]
     if not _is_all_shifts(shift):
@@ -411,6 +414,7 @@ def _fetch_delay_options(entry_date, shift):
         LEFT JOIN port_delay_types d ON d.name = l.delay_name
         WHERE l.entry_date = %s
           AND l.delay_name IS NOT NULL AND l.delay_name != ''
+          AND l.is_deleted IS NOT TRUE
     """
     params = [entry_date]
     if not _is_all_shifts(shift):
