@@ -2869,27 +2869,57 @@
     }
     function globalSearch() {
 
-        if (!table) {
-            return;
-        }
-
-        const value =
-            document.getElementById('table-search').value;
-
-        if (!value) {
-            table.clearFilter(true);
-            return;
-        }
-
-        table.setFilter(function (data) {
-
-            return Object.values(data).some(v =>
-                String(v || '')
-                    .toLowerCase()
-                    .includes(value.toLowerCase())
-            );
-
-        });
+    if (!table) {
+        return;
     }
+
+    const rawValue = document.getElementById('table-search').value.trim();
+
+    if (!rawValue) {
+        table.clearFilter(true);
+        return;
+    }
+
+    const value = rawValue.toLowerCase();
+
+    // Normalize a raw date value (ISO or already DD-MM-YYYY) into DD-MM-YYYY HH:MM
+    function formatDateForSearch(raw) {
+        if (!raw) return '';
+        raw = String(raw).trim();
+
+        // Already in DD-MM-YYYY HH:MM (barge fields)
+        if (/^\d{2}-\d{2}-\d{4}/.test(raw)) {
+            return raw.toLowerCase();
+        }
+
+        // ISO format (MBC fields): 2026-06-20T05:20 or 2026-06-20 05:20
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return '';
+
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+
+        return `${dd}-${mm}-${yyyy} ${hh}:${min}`.toLowerCase();
+    }
+
+    table.setFilter(function (data) {
+
+        return Object.values(data).some(v => {
+            const str = String(v || '').toLowerCase();
+
+            // Plain substring match on raw value
+            if (str.includes(value)) return true;
+
+            // Also check the "as displayed" date format
+            const formatted = formatDateForSearch(v);
+            if (formatted && formatted.includes(value)) return true;
+
+            return false;
+        });
+    });
+}
 </script>
 {% endblock %}
