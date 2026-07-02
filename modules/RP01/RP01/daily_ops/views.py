@@ -3236,8 +3236,7 @@ def _build_excel_a4(
     for cat in CATEGORY_ORDER:
 
         slots = CATEGORY_SLOTS[cat]
-
-        category_totals[cat] = sum(
+        category_totals[cat] = sum( 
             cargo_totals.get(
                 cargo_names[index + i],
                 0

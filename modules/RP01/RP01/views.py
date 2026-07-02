@@ -18,7 +18,7 @@ from .daily_barge_report import views as _mv_barge_report_views  # noqa: registe
 from .cargo_report import views as _cargo_report_views
 from .historical_data import views as _historical_data_views  # noqa: registers historical-data routes on bp
 from .report_24_hours import views as _report_24_hours_views
-# from .daily_progress_report import views as _daily_progress_report_views
+from .daily_progress_report import views as _daily_progress_report_views
 
 def login_required(f):
     @wraps(f)
