@@ -2524,10 +2524,41 @@ def vessel_discharge_summary():
     try:
         report_dt = datetime.strptime(report_date, "%Y-%m-%d")
 
-        month_start = report_dt.replace(day=1).date()
+        # ----------------------------------------------------------------
+        # WINDOW LOGIC
+        #
+        # window_end   = selected report_date at 08:00 AM
+        # window_start = 1st of the "active" month at 08:00 AM
+        #
+        # If report_date is the 1st of a month, there is no "month to
+        # date" data for the current month yet, so we roll back and show
+        # the ENTIRE previous month instead.
+        #
+        # Example: report_date = 2026-07-01
+        #   -> window_start = 2026-06-01 08:00:00
+        #   -> window_end   = 2026-07-01 08:00:00   (covers all of June)
+        #
+        # Example: report_date = 2026-07-15
+        #   -> window_start = 2026-07-01 08:00:00
+        #   -> window_end   = 2026-07-15 08:00:00   (month-to-date)
+        # ----------------------------------------------------------------
 
-        print("MONTH START:", month_start)
-        print("REPORT DATE:", report_date)
+        if report_dt.day == 1:
+            prev_month_last_day = report_dt.replace(day=1) - timedelta(days=1)
+            month_start_date = prev_month_last_day.replace(day=1)
+        else:
+            month_start_date = report_dt.replace(day=1)
+
+        window_start = month_start_date.replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+
+        window_end = report_dt.replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+
+        print("WINDOW START:", window_start)
+        print("WINDOW END:", window_end)
 
         query = """
 
@@ -2604,9 +2635,8 @@ def vessel_discharge_summary():
 
         la.discharge_commenced IS NOT NULL
 
-        AND DATE(la.discharge_commenced)
-            BETWEEN %s
-                AND %s
+        AND la.discharge_commenced >= %s
+        AND la.discharge_commenced <  %s
 
         GROUP BY
 
@@ -2624,16 +2654,16 @@ def vessel_discharge_summary():
         print("\nEXECUTING QUERY:")
         print(query)
 
-        print("\nQUERY PARAM:")
-        print(report_date)
+        print("\nQUERY PARAMS:")
+        print(window_start, window_end)
 
         cur.execute(
 
             query,
 
             (
-                month_start,
-                report_date
+                window_start,
+                window_end
             )
 
         )
