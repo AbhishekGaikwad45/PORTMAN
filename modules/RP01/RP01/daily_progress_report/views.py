@@ -512,6 +512,16 @@ def monthly_cargo_report():
         window_start = window_end - timedelta(hours=24)
         cutoff_date = (report_dt - timedelta(days=1)).strftime('%Y-%m-%d')
 
+        def format_hrs_to_hms(hours):
+            """Convert decimal hours (e.g. 13.75) to 'H:MM:SS' string."""
+            if hours is None:
+                return "-"
+            total_seconds = int(round(hours * 3600))
+            h = total_seconds // 3600
+            m = (total_seconds % 3600) // 60
+            s = total_seconds % 60
+            return f"{h}:{m:02d}:{s:02d}"
+
         query = """
         WITH vessel_order AS (
             SELECT
@@ -573,6 +583,7 @@ def monthly_cargo_report():
                 vo.vessel_name,
                 vo.vessel_seq,
                 vo.sort_order,
+                vo.discharge_started,
                 vo.discharge_completed,
                 TRIM(vcd.cargo_name) AS cargo_name
             FROM vessel_order vo
@@ -587,6 +598,7 @@ def monthly_cargo_report():
             vl.cargo_name,
             vl.vessel_seq,
             vl.sort_order,
+            vl.discharge_started,
             vl.discharge_completed,
 
             DATE(lco.start_time) AS cargo_date,
@@ -614,6 +626,7 @@ def monthly_cargo_report():
             vl.cargo_name,
             vl.vessel_seq,
             vl.sort_order,
+            vl.discharge_started,
             vl.discharge_completed,
             DATE(lco.start_time)
 
@@ -624,21 +637,19 @@ def monthly_cargo_report():
         """
 
         cur.execute(
-    query,
-    (
-        window_end,
-        window_start,
-        report_date,
-        report_date
-    )
-)
+            query,
+            (
+                window_end,
+                window_start,
+                report_date,
+                cutoff_date
+            )
+        )
         rows = cur.fetchall()
 
         # --- Combined BL + Discharged + Balance, computed directly in SQL per vcn_id ---
-        # Get all VCN IDs
         vcn_ids = list({r["vcn_id"] for r in rows if r["vcn_id"]})
 
-        # Store only BL Quantity
         bl_map = {}
 
         if vcn_ids:
@@ -654,17 +665,54 @@ def monthly_cargo_report():
             for r in cur.fetchall():
                 bl_map[r["vcn_id"]] = float(r["total_bl"])
 
+        # --- Fetch delay windows (Mother Vessel Agent / Force Majeure / MBP) ---
+        # NOTE: ldud_delays has no FK to vessel_delay_types, so we join on name (TRIMmed).
+        # type mapping:
+        #   MOTHER VESSEL ACCOUNT -> "Mother Vessel Agent"
+        #   FORCE MAJEURE         -> "Force Majeure"
+        #   MbPT                  -> "MBP"
+        ldud_ids = list({row["id"] for row in rows})
+
+        delay_map = {}  # { ldud_id: [ (start_dt, end_dt), ... ] }
+
+        if ldud_ids:
+            cur.execute("""
+                SELECT
+                    d.ldud_id,
+                    d.start_datetime,
+                    d.end_datetime,
+                    vdt.type AS delay_type
+                FROM ldud_delays d
+                JOIN vessel_delay_types vdt
+                    ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+                WHERE d.ldud_id = ANY(%s)
+                AND vdt.type IN ('MOTHER VESSEL ACCOUNT', 'FORCE MAJEURE', 'MbPT')
+                AND d.start_datetime IS NOT NULL
+                AND d.end_datetime IS NOT NULL
+            """, (ldud_ids,))
+
+            for r in cur.fetchall():
+                try:
+                    d_start = datetime.fromisoformat(r["start_datetime"])
+                    d_end = datetime.fromisoformat(r["end_datetime"])
+                except (ValueError, TypeError):
+                    continue
+                delay_map.setdefault(r["ldud_id"], []).append((d_start, d_end))
+
         print("\nTOTAL ROWS:", len(rows))
         print("VCN IDS:", vcn_ids)
         print("BL MAP:", bl_map)
+        print("DELAY MAP:", delay_map)
+
         report_data = {}
 
         for row in rows:
-            vessel_name      = row['vessel_name']       or '-'
-            cargo_name       = row['cargo_name']        or '-'
-            vessel_seq       = row['vessel_seq']
-            sort_order       = row['sort_order']
-            discharge_completed = row['discharge_completed']
+            vessel_name          = row['vessel_name']       or '-'
+            cargo_name           = row['cargo_name']        or '-'
+            vessel_seq           = row['vessel_seq']
+            sort_order           = row['sort_order']
+            discharge_started    = row['discharge_started']
+            discharge_completed  = row['discharge_completed']
 
             key = f"{row['id']}"
 
@@ -672,10 +720,13 @@ def monthly_cargo_report():
                 bl_qty = bl_map.get(row["vcn_id"], 0)
 
                 report_data[key] = {
+                    "ldud_id": row["id"],
                     "vessel_name": vessel_name,
                     "cargo_names": [],
                     "vessel_seq": vessel_seq,
                     "sort_order": sort_order,
+                    "discharge_started": discharge_started,
+                    "discharge_completed_dt": discharge_completed,
                     "discharge_completed": str(discharge_completed) if discharge_completed else "",
 
                     "bl_quantity": bl_qty,
@@ -691,7 +742,6 @@ def monthly_cargo_report():
             if row["day_label"]:
                 day = row["day_label"]
 
-                # One record per day per vessel
                 if day not in report_data[key]["daily_data"]:
                     report_data[key]["daily_data"][day] = {
                         "date_day": day,
@@ -708,7 +758,6 @@ def monthly_cargo_report():
 
             vessel["daily_data"] = list(vessel["daily_data"].values())
 
-            # Total quantity displayed in the report
             total_discharged = sum(
                 float(d["total_qty"] or 0)
                 for d in vessel["daily_data"]
@@ -721,7 +770,60 @@ def monthly_cargo_report():
                 0
             )
 
+            # ---------- W/W HRS CALCULATION ----------
+            # Window for a given day_label D is 8:00 AM (D) -> 8:00 AM (D+1)
+            d_start = vessel["discharge_started"]
+            d_end   = vessel["discharge_completed_dt"]  # may be None if still discharging
+            vessel_id = vessel["ldud_id"]
+            vessel_delays = delay_map.get(vessel_id, [])
+
+            total_ww_hours = 0.0  # running total in decimal hours, for the TOTAL row
+
+            for day in vessel["daily_data"]:
+                day_win_start = datetime.strptime(day["date_day"], "%d-%m-%Y").replace(
+                    hour=8, minute=0, second=0, microsecond=0
+                )
+                day_win_end = day_win_start + timedelta(hours=24)
+
+                if d_start is None:
+                    day["ww_hrs"] = "-"
+                    continue
+
+                gross_start = max(d_start, day_win_start)
+                gross_end = min(d_end, day_win_end) if d_end else day_win_end
+
+                gross_seconds = (gross_end - gross_start).total_seconds()
+                gross_hours = max(gross_seconds / 3600, 0)
+                gross_hours = min(gross_hours, 24)
+
+                # --- Subtract delay hours (Mother Vessel Agent / Force Majeure / MBP) ---
+                deduction_hours = 0
+                for delay_start, delay_end in vessel_delays:
+                    clip_start = max(delay_start, day_win_start)
+                    clip_end = min(delay_end, day_win_end)
+                    overlap = (clip_end - clip_start).total_seconds() / 3600
+                    if overlap > 0:
+                        deduction_hours += overlap
+
+                ww_hours = max(gross_hours - deduction_hours, 0)
+
+                total_ww_hours += ww_hours
+                day["ww_hrs"] = format_hrs_to_hms(ww_hours)
+
+            # TOTAL row value for this vessel, same HH:MM:SS format
+            vessel["ww_hrs_total"] = format_hrs_to_hms(total_ww_hours) if total_ww_hours > 0 else "-"
+
+            # ---------- AVG DISCHARGE RATE PWWD ----------
+            # = total discharged quantity / total W/W hours
+            if total_ww_hours > 0:
+                vessel["avg_discharge_rate"] = round(total_discharged / total_ww_hours, 2)
+            else:
+                vessel["avg_discharge_rate"] = 0
+
             del vessel["cargo_names"]
+            del vessel["discharge_started"]
+            del vessel["discharge_completed_dt"]
+            del vessel["ldud_id"]
 
         final_data = sorted(
             report_data.values(),
@@ -746,8 +848,12 @@ def monthly_cargo_report():
                 item['cargo_name'],
                 "BL:", item['bl_quantity'],
                 "Discharged:", item['discharged_quantity'],
-                "Balance:", item['balance_on_board']
+                "Balance:", item['balance_on_board'],
+                "WW Total:", item['ww_hrs_total'],
+                "Avg Rate:", item['avg_discharge_rate']
             )
+            for d in item['daily_data']:
+                print("   ", d['date_day'], "qty:", d['total_qty'], "ww_hrs:", d['ww_hrs'])
 
         print("\n========== MONTHLY REPORT END ==========\n")
 
