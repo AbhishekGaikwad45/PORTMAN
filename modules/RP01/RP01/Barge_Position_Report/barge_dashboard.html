@@ -1232,14 +1232,13 @@
                         <tr data-mv-row="eta_to_dharamtar">
                             <td><b>ETA TO DHARAMTAR</b></td>
                             {% for vessel in mother_vessels %}
-                            <td data-vessel="{{ vessel.vessel_name }}"
-                                data-field="eta_to_dharamtar"">
+                            <td data-vessel="{{ vessel.vessel_name }}" data-field="eta_to_dharamtar"">
                                 {{ vessel.eta_to_dharamtar }}
                             </td>
                             {% endfor %}
                         </tr>
                         <!-- WT @ R19 — editable, keyed by vessel name -->
-                        <tr data-mv-row="wt_r19">
+                        <tr data-mv-row=" wt_r19">
                             <td><b>WT @ R19</b></td>
                             {% for vessel in mother_vessels %}
                             <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="wt_r19"
@@ -1354,19 +1353,22 @@
                 <tr>
                     <td>A</td>
                     <td id="aDischarge">0</td>
-                    <td><input type="number" id="aPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td><input type="number" id="aPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="aDiff">0</td>
                 </tr>
                 <tr>
                     <td>B</td>
                     <td id="bDischarge">0</td>
-                    <td><input type="number" id="bPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td><input type="number" id="bPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="bDiff">0</td>
                 </tr>
                 <tr>
                     <td>C</td>
                     <td id="cDischarge">0</td>
-                    <td><input type="number" id="cPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td><input type="number" id="cPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="cDiff">0</td>
                 </tr>
                 <tr class="total-row">
@@ -1405,8 +1407,12 @@
 <div id="logsModal" class="logs-modal">
     <div class="logs-modal-content">
         <div class="logs-modal-header">
-            <span>Movement Logs</span>
-            <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
+            <span id="logsModalTitle">Movement Logs</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;"
+                    onclick="downloadModalExcel()">↓ Download Excel</button>
+                <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
+            </div>
         </div>
         <div id="logsModalBody" class="logs-modal-body"></div>
     </div>
@@ -1451,6 +1457,8 @@
     let SHIFT_INCHARGE_LIST = [];
     let CRANE_OPERATOR_LIST = [];
     let _movementLogs = [];
+    let _modalExcelMode = null;   // 'logs' | 'completed'
+    let _modalExcelData = [];
 
     // Tracks whether any unsaved edits exist
     let _unsaved = false;
@@ -1517,40 +1525,58 @@
     //  MAIN PREVIEW
     // ══════════════════════════════════════════════════════════════════════════════
     async function applyDateRangeFilter() {
-        const range = getShiftDateRange();
-        if (!range) { alert("Please select a date."); return; }
+    const range = getShiftDateRange();
+    if (!range) { alert("Please select a date."); return; }
 
-        document.getElementById("previewLoader").style.display = "flex";
+    document.getElementById("previewLoader").style.display = "flex";
 
-        // ── Reset logs for new date/shift selection ──
-        _movementLogs = [];
-        document.getElementById('logConsole').innerHTML = '';
-        document.getElementById('logCount').textContent = '0';
+    _movementLogs = [];
+    document.getElementById('logConsole').innerHTML = '';
+    document.getElementById('logCount').textContent = '0';
 
+    try {
+        document.getElementById("reportContent").style.display = "block";
+        document.getElementById("saveReportBtn").disabled = false;
+
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+
+        // Run the board/summary loaders — if ANY of these fail, log it but
+        // don't let it block the saved-report fetch below.
+        const results = await Promise.allSettled([
+            loadBerthOccupancy(range.fromISO, range.toISO),
+            loadMotherVesselData(range.fromISO, range.toISO),
+            loadTideData(range.fromISO, range.toISO),
+            loadShiftWiseDischarge(),
+            loadShiftSummary(),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+        });
+
+        // Saved-report fetch is isolated so a failure elsewhere never
+        // prevents your saved data from being applied.
+        let savedData = null;
         try {
-            document.getElementById("reportContent").style.display = "block";
-            document.getElementById("saveReportBtn").disabled = false;
-
-            const reportDate = document.getElementById('report-date').value;
-            const shift = document.getElementById('report-shift').value;
-
-            const [, , , , , savedData] = await Promise.all([
-                loadBerthOccupancy(range.fromISO, range.toISO),
-                loadMotherVesselData(range.fromISO, range.toISO),
-                loadTideData(range.fromISO, range.toISO),
-                loadShiftWiseDischarge(),
-                loadShiftSummary(),
-                loadSavedReport(reportDate, shift),
-            ]);
-
-            if (savedData && savedData.found) {
-                applySavedOverlay(savedData);
-            }
-
-        } finally {
-            document.getElementById("previewLoader").style.display = "none";
+            savedData = await loadSavedReport(reportDate, shift);
+            console.log('Saved report lookup:', reportDate, shift, savedData);
+        } catch (e) {
+            console.error('loadSavedReport failed:', e);
         }
+
+        if (savedData && savedData.found) {
+            applySavedOverlay(savedData);
+        } else {
+            console.warn('No saved report found for', reportDate, shift);
+        }
+
+    } catch (err) {
+        console.error('Preview failed:', err);
+        alert('Something went wrong loading the preview. Check console for details.');
+    } finally {
+        document.getElementById("previewLoader").style.display = "none";
     }
+}
 
     // ══════════════════════════════════════════════════════════════════════════════
     //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
@@ -1609,7 +1635,7 @@
             const wtR19 = {};
             const mbcEta = {};
             const etaToDharamtar = {};
-            const onTheWayGull = {}; 
+            const onTheWayGull = {};
 
             document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
                 wtR19[td.dataset.vessel] = td.textContent.trim();
@@ -1622,7 +1648,7 @@
                 etaToDharamtar[td.dataset.vessel] = td.textContent.trim();
             });
             document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {   // NEW
-            onTheWayGull[td.dataset.vessel] = td.textContent.trim();
+                onTheWayGull[td.dataset.vessel] = td.textContent.trim();
             });
 
             // ── 4. Notes ────────────────────────────────────────────────────────────
@@ -2185,7 +2211,9 @@
             logConsoleHtml
                 ? header + logConsoleHtml
                 : header + '<div style="padding:20px;text-align:center;color:#94a3b8;">No movement logs yet.</div>';
-
+        document.getElementById('logsModalTitle').textContent = 'Movement Logs';
+        _modalExcelMode = 'logs';
+        _modalExcelData = [..._movementLogs];
         document.getElementById('logsModal').style.display = 'block';
     }
 
@@ -2240,6 +2268,9 @@
             const params = new URLSearchParams({ date: reportDate, shift: shift, completed: '1' });
             const res = await fetch(`/api/module/RP01/berth-occupancy?${params}`);
             const items = await res.json();
+            document.getElementById('logsModalTitle').textContent = 'Completed Barges & MBC';
+            _modalExcelMode = 'completed';
+            _modalExcelData = items;
 
             const header = `
         <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;
@@ -2641,6 +2672,51 @@
         // Initial dropzone binding
         bindDropzones();
     });
+    async function downloadModalExcel() {
+    if (!_modalExcelMode) return;
+    const reportDate = document.getElementById('report-date').value;
+    const shift = document.getElementById('report-shift').value;
+
+    try {
+        let response;
+        if (_modalExcelMode === 'logs') {
+            response = await fetch('/api/module/RP01/download-movement-logs-excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    movement_logs: _modalExcelData,
+                    report_date: reportDate,
+                    shift: shift
+                }),
+            });
+        } else {
+            const params = new URLSearchParams({ date: reportDate, shift });
+            response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+        }
+
+        if (!response.ok) throw new Error('Download failed');
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'export.xlsx';
+        if (disposition) {
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            if (match) filename = match[1];
+        }
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error(err);
+        alert('Excel download failed.');
+    }
+}
 </script>
 {% endraw %}
 
