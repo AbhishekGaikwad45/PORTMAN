@@ -98,7 +98,7 @@ def _fetch_mv_monthly_data(
 
         CASE
             WHEN l.source_type = 'VCN'
-                THEN vc.cargo_name
+                THEN l.cargo_name
 
             WHEN l.source_type = 'MBC'
                 THEN COALESCE(m.cargo_name, l.cargo_name)
@@ -110,7 +110,7 @@ def _fetch_mv_monthly_data(
             WHEN l.source_type = 'VCN'
                 THEN COALESCE(
                     vcargo.cargo_type,
-                    vc.cargo_name
+                    l.cargo_name
                 )
 
             WHEN l.source_type = 'MBC'
@@ -157,16 +157,12 @@ def _fetch_mv_monthly_data(
         ON l.source_type = 'VCN'
        AND l.source_id = v.id
 
-    LEFT JOIN vcn_cargo_declaration vc
-        ON v.id = vc.vcn_id
-       AND vc.cargo_name = l.cargo_name
-
     LEFT JOIN LATERAL (
         SELECT cargo_type
         FROM vessel_cargo
-        WHERE cargo_name = vc.cargo_name
+        WHERE cargo_name = l.cargo_name
         LIMIT 1
-    ) vcargo ON TRUE
+    ) vcargo ON l.source_type = 'VCN'
 
     LEFT JOIN (
         SELECT
@@ -256,11 +252,19 @@ def _fetch_mv_monthly_data(
                 'vessel_name':        v_name,
                 'cargo_name':         r['cargo_name'] or r['lueu_cargo'] or '-',
                 'cargo_type':         r['cargo_type'] or r['lueu_cargo'] or '-',
+
+                'cargo_names': [],
+
                 'bl_qty': _safe_float(r['bl_qty']),
                 'company':            r['company'] or 'Mother Vessel',
                 'source_type':        r['source_type'],
                 'previous_month_qty': 0
             }
+
+        cn = (r['cargo_name'] or '').strip()
+
+        if cn and cn not in vessel_meta[v_name]['cargo_names']:
+            vessel_meta[v_name]['cargo_names'].append(cn)
             
 
     # ─────────────────────────────────────────────
@@ -385,6 +389,11 @@ def _fetch_mv_monthly_data(
             num = int(m.group(1)) if m else 999999999
             return (1, num)
 
+    for v in vessel_meta.values():
+
+        if v['cargo_names']:
+            v['cargo_name'] = ' / '.join(v['cargo_names'])
+
     sorted_vessels = sorted(vessels_with_data, key=_vessel_sort_key)
 
     return {
@@ -413,7 +422,6 @@ def _fetch_cargo_summary(from_date=None, to_date=None):
                 WHEN l.source_type = 'VCN'
                     THEN COALESCE(
                         vcargo.cargo_type,
-                        vc.cargo_name,
                         l.cargo_name
                     )
 
@@ -451,16 +459,12 @@ def _fetch_cargo_summary(from_date=None, to_date=None):
             ON l.source_type = 'VCN'
            AND l.source_id = v.id
 
-        LEFT JOIN vcn_cargo_declaration vc
-            ON v.id = vc.vcn_id
-           AND vc.cargo_name = l.cargo_name
-
         LEFT JOIN LATERAL (
             SELECT cargo_type
             FROM vessel_cargo
-            WHERE cargo_name = vc.cargo_name
+            WHERE cargo_name = l.cargo_name
             LIMIT 1
-        ) vcargo ON TRUE
+        ) vcargo ON l.source_type = 'VCN'
 
         LEFT JOIN mbc_header m
             ON l.source_type = 'MBC'
@@ -597,7 +601,12 @@ def _write_mv_monthly_sheet(ws, report_data):
         cell.border    = _bdr
 
         for idx, v in enumerate(vessels, start=2):
+
             value = v.get(key, '-')
+
+            if key == 'cargo_name':
+                value = str(value).replace('<br>', ' / ')
+
             c = ws.cell(current_row, idx, value)
             c.font      = _font(bold=False)
             c.alignment = _ctr

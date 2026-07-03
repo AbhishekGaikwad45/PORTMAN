@@ -3,6 +3,62 @@ from datetime import datetime
 import sap_builder
 
 
+def get_outbound_logs(page=1, size=50, type_filter=None):
+    """Every OUTBOUND SAP interaction, regardless of doc type.
+
+    Covers postings (source_type='Invoice'), FB08 reversals ('InvoiceReversal'),
+    cancellation CNs ('InvoiceCreditNote'), the admin SAP playground
+    ('Playground') and IRN fetches — i.e. everything written to integration_logs
+    except the inbound callbacks. This is the single place that shows the raw
+    request/response payload of a cancellation or a playground send, which the
+    per-doc tabs filter out.
+    """
+    conn = get_db()
+    cur = get_cursor(conn)
+    where = ["integration_type <> 'SAP_INBOUND'"]
+    params = []
+    if type_filter:
+        where.append('source_type = %s')
+        params.append(type_filter)
+    where_sql = 'WHERE ' + ' AND '.join(where)
+    cur.execute(f'SELECT COUNT(*) AS cnt FROM integration_logs {where_sql}', params)
+    total = cur.fetchone()['cnt']
+    cur.execute(f'''
+        SELECT id, integration_type, source_type, source_id, source_reference,
+               request_url, request_body, response_status_code, response_body,
+               status, error_message, duration_ms, created_by, created_date
+        FROM integration_logs {where_sql}
+        ORDER BY id DESC LIMIT %s OFFSET %s
+    ''', params + [size, (page - 1) * size])
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows, total
+
+
+def get_sap_queue(page=1, size=50, status_filter=None):
+    """The async SAP outbound queue (pending / processing / sent / failed)."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    where = ''
+    params = []
+    if status_filter:
+        where = 'WHERE status = %s'
+        params.append(status_filter)
+    cur.execute(f'SELECT COUNT(*) AS cnt FROM sap_outbound_queue {where}', params)
+    total = cur.fetchone()['cnt']
+    cur.execute(f'''
+        SELECT id, job_type, invoice_id, reference_type, reference_number,
+               status, retry_count, max_retries, next_attempt_at,
+               sap_document_number, last_error, payload, created_by,
+               created_date, updated_date
+        FROM sap_outbound_queue {where}
+        ORDER BY id DESC LIMIT %s OFFSET %s
+    ''', params + [size, (page - 1) * size])
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows, total
+
+
 def get_sap_invoice_logs(page=1, size=50):
     """Invoices with SAP posting data."""
     conn = get_db()

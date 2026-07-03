@@ -818,11 +818,24 @@
             return;
         }
 
+        function cargoCellHtml(v, field) {
+
+            if (field !== 'cargo_name') {
+                return v[field] || '-';
+            }
+
+            if (v.cargo_names && v.cargo_names.length) {
+                return v.cargo_names.join('<br>');
+            }
+
+            return v.cargo_name || '-';
+            }
+
         // Row 1: Cargo Name — LABEL in Col A
         let tr1 = document.createElement('tr'); tr1.className = 'meta-row';
         tr1.innerHTML = '<th class="title-block">Cargo Name</th>';
         vessels.forEach(v => {
-            tr1.innerHTML += `<th>${v.cargo_name || '-'}</th>`;
+            tr1.innerHTML += `<th>${cargoCellHtml(v, 'cargo_name')}</th>`;
         });
         // Add 3 empty cells for MV Total, MBC Total, Grand Total columns
         tr1.innerHTML += '<th></th><th></th><th></th>';
@@ -832,7 +845,13 @@
         let tr2 = document.createElement('tr'); tr2.className = 'meta-row';
         tr2.innerHTML = '<th class="title-block">Cargo Type</th>';
         vessels.forEach(v => {
-            tr2.innerHTML += `<th>${v.cargo_type || '-'}</th>`;
+            const types = (v.cargo_types && v.cargo_types.length)
+                ? v.cargo_types
+                : (v.cargo_type ? String(v.cargo_type).split(' / ') : []);
+            const html = types.length
+                ? types.map(n => String(n).replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br>')
+                : '-';
+            tr2.innerHTML += `<th>${html}</th>`;
         });
         // Add 3 empty cells for alignment
         tr2.innerHTML += '<th></th><th></th><th></th>';

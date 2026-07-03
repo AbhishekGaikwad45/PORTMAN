@@ -295,35 +295,36 @@ def upload_proof_docs():
     if not mbc_id:
         return jsonify({'error': 'Missing mbc_id'}), 400
 
+    # One proof document per MBC — take a single file and replace any existing one.
     files = request.files.getlist('files')
-    if not files:
-        return jsonify({'error': 'No files provided'}), 400
+    f = files[0] if files else None
+    if not f or not f.filename:
+        return jsonify({'error': 'No file provided'}), 400
+
+    original = f.filename
+    ext = os.path.splitext(original)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({'error': 'Invalid file type (allowed: pdf, jpg, png, xlsx, csv, doc)'}), 400
+    file_bytes = f.read()
+    if not file_bytes:
+        return jsonify({'error': 'Empty file'}), 400
+    mime_type = f.mimetype or mimetypes.guess_type(original)[0] or 'application/octet-stream'
 
     conn = get_db()
     cur = get_cursor(conn)
-    saved = []
-    for f in files:
-        original = f.filename or ''
-        ext = os.path.splitext(original)[1].lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            continue
-        file_bytes = f.read()
-        if not file_bytes:
-            continue
-        mime_type = f.mimetype or mimetypes.guess_type(original)[0] or 'application/octet-stream'
-        cur.execute('''
-            INSERT INTO mbc_proof_documents (mbc_id, original_filename, file_bytes, mime_type, uploaded_by)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id, original_filename, uploaded_at
-        ''', [mbc_id, original, file_bytes, mime_type, session.get('username')])
-        row = cur.fetchone()
-        saved.append({'id': row['id'], 'original_filename': row['original_filename'],
-                      'uploaded_at': str(row['uploaded_at'])[:16]})
+    # Replace: the old file is not retained.
+    cur.execute('DELETE FROM mbc_proof_documents WHERE mbc_id=%s', [mbc_id])
+    cur.execute('''
+        INSERT INTO mbc_proof_documents (mbc_id, original_filename, file_bytes, mime_type, uploaded_by)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id, original_filename, uploaded_at
+    ''', [mbc_id, original, file_bytes, mime_type, session.get('username')])
+    row = cur.fetchone()
     conn.commit()
     conn.close()
 
-    if not saved:
-        return jsonify({'error': 'No valid files uploaded (allowed: pdf, jpg, png, xlsx, csv, doc)'}), 400
-    return jsonify({'success': True, 'docs': saved})
+    return jsonify({'success': True, 'docs': [{'id': row['id'],
+                    'original_filename': row['original_filename'],
+                    'uploaded_at': str(row['uploaded_at'])[:16]}]})
 
 
 @bp.route('/api/module/MBC01/proof_docs/<int:mbc_id>')

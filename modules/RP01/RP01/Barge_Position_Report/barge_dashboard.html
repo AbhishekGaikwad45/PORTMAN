@@ -1,0 +1,2647 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/css/bootstrap-multiselect.min.css">
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/js/bootstrap-multiselect.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+    :root {
+        --app-bg: #f8fafc;
+        --surface-bg: #ffffff;
+        --border-clr: #cbd5e1;
+        --text-primary: #0f172a;
+        --text-muted: #64748b;
+        --state-waiting-bg: #fef08a;
+        --state-waiting-text: #713f12;
+        --state-waiting-border: #fde68a;
+        --state-discharging-bg: #bbf7d0;
+        --state-discharging-text: #14532d;
+        --state-discharging-border: #86efac;
+        --matrix-empty-bg: #f1f5f9;
+        --matrix-stripe-bg: #e2e8f0;
+    }
+
+    body {
+        background-color: var(--app-bg);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text-primary);
+        margin: 0;
+        box-sizing: border-box;
+    }
+
+    .metrics-ribbon-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+
+    .metric-card-tile {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    .metric-card-tile .info-group label {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+        letter-spacing: .8px;
+        margin-bottom: 6px;
+    }
+
+    .metric-card-tile .info-group span {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-primary);
+    }
+
+    .filtering-toolbar-deck {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 14px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    .filter-input-wrap {
+        position: relative;
+        flex: 1;
+    }
+
+    .filter-input-wrap input,
+    .filter-input-wrap select {
+        width: 100%;
+        background: var(--app-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-size: 13px;
+        color: var(--text-primary);
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color .2s, box-shadow .2s;
+    }
+
+    .filter-input-wrap input:focus,
+    .filter-input-wrap select:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, .1);
+    }
+
+    .dashboard-viewport {
+        display: grid;
+        grid-template-columns: 220px 1.4fr 1.4fr;
+        gap: 16px;
+        height: calc(100vh - 210px);
+        width: 100%;
+    }
+
+    .panel-frame {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    .panel-header {
+        padding: 14px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .5px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--border-clr);
+        background: #f8fafc;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .panel-header span.title-tag {
+        color: #b45309;
+    }
+
+    .badge-count {
+        background: #e2e8f0;
+        color: #1e3a8a;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 700;
+    }
+
+    .waiting-list-flow {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        background: #f8fafc;
+    }
+
+    .waiting-list-flow.drag-active {
+        background: #fef9c3;
+        border: 2px dashed #eab308;
+    }
+
+    .barge-pill-container {
+        background: var(--state-waiting-bg);
+        border: 1px solid var(--state-waiting-border);
+        border-radius: 6px;
+        padding: 14px;
+        cursor: grab;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, .05);
+        transition: transform .1s ease;
+    }
+
+    .barge-pill-container:active {
+        cursor: grabbing;
+        transform: scale(0.98);
+    }
+
+    .barge-pill-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        font-weight: 800;
+        color: var(--state-waiting-text);
+        text-transform: uppercase;
+    }
+
+    .barge-pill-cargo {
+        font-size: 12px;
+        color: var(--state-waiting-text);
+        font-weight: 600;
+        opacity: .9;
+    }
+
+    .barge-pill-metrics {
+        font-size: 12px;
+        color: var(--state-waiting-text);
+        font-weight: 700;
+        margin-top: 4px;
+    }
+
+    .matrix-wrapper {
+        overflow-x: auto;
+        overflow-y: auto;
+    }
+
+    .vessel-panel-frame .matrix-wrapper {
+        overflow-x: auto;
+        overflow-y: hidden;
+        width: 100%;
+    }
+
+    .matrix-table {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+    }
+
+    .matrix-table th {
+        position: sticky;
+        top: 0;
+        background: #f8fafc;
+        z-index: 10;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-muted);
+        padding: 12px 6px;
+        border-bottom: 1px solid var(--border-clr);
+        text-align: center;
+        letter-spacing: .5px;
+    }
+
+    .matrix-table th:first-child {
+        text-align: left;
+        padding-left: 16px;
+    }
+
+    .matrix-table tr:nth-child(even) .matrix-dropzone.empty-slot {
+        background: var(--matrix-stripe-bg);
+    }
+
+    .matrix-table td {
+        border-bottom: 1px solid var(--border-clr);
+        padding: 6px 4px;
+        text-align: center;
+        vertical-align: middle;
+    }
+
+    .jetty-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-primary);
+        text-align: left !important;
+        padding-left: 10px !important;
+        width: 85px;
+        min-width: 85px;
+        max-width: 85px;
+        letter-spacing: .2px;
+        line-height: 14px;
+    }
+
+    .matrix-dropzone {
+        width: 100%;
+        height: 110px;
+        min-height: 110px;
+        box-sizing: border-box;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        display: flex;
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 2px;
+    }
+
+    .matrix-dropzone.empty-slot {
+        background: var(--matrix-empty-bg);
+        color: #94a3b8;
+        font-weight: 500;
+        font-size: 11px;
+    }
+
+    .matrix-dropzone.drag-active {
+        background: #dbeafe !important;
+        border: 1px dashed #3b82f6;
+    }
+
+    .berth-allocated-card {
+        width: 100%;
+        border-radius: 10px;
+        min-width: 80px;
+        min-height: 105px;
+        padding: 8px;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    .berth-allocated-card.discharging {
+        background: #32df6e;
+    }
+
+    .berth-allocated-card.waiting-discharge {
+        background: #43e6f1;
+    }
+
+    .berth-allocated-card.completed-discharge {
+        background: #75e67e;
+    }
+
+    .berth-card-title {
+        font-size: 11px;
+        line-height: 14px;
+        word-break: break-word;
+    }
+
+    .berth-card-cargo {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--state-discharging-text);
+        opacity: .9;
+    }
+
+    .berth-card-metrics {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--state-discharging-text);
+        margin-top: 2px;
+    }
+
+    .vessel-panel-frame,
+    .tide-panel-frame,
+    .notes-panel-frame {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    .vessel-panel-frame {
+        width: 100%;
+        max-width: 100%;
+        margin-bottom: 15px;
+    }
+
+    .tide-panel-frame {
+        width: 320px;
+        max-width: 320px;
+    }
+
+    .notes-panel-frame {
+        margin-top: 0;
+    }
+
+    .vessel-info-table th,
+    .vessel-info-table td {
+        font-size: 11px;
+        padding: 8px;
+        word-break: break-word;
+    }
+
+    .tide-panel-frame {
+        width: 320px;
+    }
+
+    .shift-meta-bar {
+        background: var(--surface-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 6px;
+        padding: 14px 16px;
+        margin-top: 16px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    }
+
+    .meta-field-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        min-width: 180px;
+    }
+
+    .meta-field-group label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+        letter-spacing: .6px;
+    }
+
+    .meta-field-group input,
+    .meta-field-group select {
+        background: var(--app-bg);
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+        padding: 9px 10px;
+        font-size: 13px;
+        color: var(--text-primary);
+        font-weight: 600;
+        outline: none;
+        transition: border-color .2s, box-shadow .2s;
+    }
+
+    .meta-field-group input:focus,
+    .meta-field-group select:focus {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, .1);
+    }
+
+    .vessel-info-table,
+    .tide-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vessel-info-table th,
+    .tide-table th {
+        position: sticky;
+        top: 0;
+        background: #f8fafc;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text-muted);
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--border-clr);
+        text-align: left;
+        letter-spacing: .4px;
+        text-transform: uppercase;
+    }
+
+    .vessel-info-table td,
+    .tide-table td {
+        border-bottom: 1px solid var(--border-clr);
+        padding: 10px 8px;
+        font-size: 12px;
+        color: var(--text-primary);
+        vertical-align: top;
+    }
+
+    .vessel-info-table td[contenteditable="true"]:hover,
+    .vessel-info-table td[contenteditable="true"]:focus {
+        background: #f8fafc;
+        outline: 1px dashed #93c5fd;
+        outline-offset: -2px;
+    }
+
+    .tide-type-tag {
+        font-size: 10px;
+        font-weight: 800;
+        padding: 2px 7px;
+        border-radius: 10px;
+        letter-spacing: .4px;
+    }
+
+    .tide-type-tag.lw {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .tide-type-tag.hw {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .notes-log-list {
+        padding: 12px 16px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+
+    .note-entry-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 8px 10px;
+        background: #f8fafc;
+        border: 1px solid var(--border-clr);
+        border-radius: 4px;
+    }
+
+    .note-index {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #e2e8f0;
+        color: #1e3a8a;
+        font-size: 11px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 1px;
+    }
+
+    .note-text {
+        flex: 1;
+        font-size: 12.5px;
+        line-height: 1.5;
+        color: var(--text-primary);
+    }
+
+    .secondary-panels-stack {
+        width: 100%;
+        display: block;
+        margin-top: 15px;
+        margin-bottom: 15px;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .page-header {
+        margin-bottom: 15px;
+    }
+
+    .page-header h2 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .breadcrumb-wrapper {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 15px;
+    }
+
+    .breadcrumb-wrapper a {
+        color: #3b82f6;
+        text-decoration: none;
+    }
+
+    .filter-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        background: #fff;
+        border: 1px solid #d9e2ec;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+    }
+
+    .logs-toolbar {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .logs-toolbar .title {
+        font-size: 14px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .filter-group label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        color: #6b7280;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+    }
+
+    .filter-group input[type="date"] {
+        width: 190px;
+        height: 34px;
+        padding: 6px 10px;
+        border: 1px solid #d9e2ec;
+        border-radius: 4px;
+        background: #fff;
+        font-size: 13px;
+    }
+
+    .filter-btn {
+        height: 32px;
+        padding: 0 20px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .filter-btn.primary {
+        background: #4a90e2;
+        color: #fff;
+        height: 34px;
+        padding: 0 18px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .filter-btn.primary:hover {
+        background: #357abd;
+    }
+
+    .filter-btn.save-btn {
+        background: #16a34a;
+        color: #fff;
+        height: 34px;
+        padding: 0 18px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .filter-btn.save-btn:hover {
+        background: #15803d;
+    }
+
+    .filter-btn.save-btn:disabled {
+        background: #86efac;
+        cursor: not-allowed;
+    }
+
+    .vessel-horizontal-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+    }
+
+    .vessel-horizontal-table th {
+        background: #4d8ccd;
+        color: #fff;
+        padding: 10px;
+        min-width: 110px;
+        text-align: center;
+    }
+
+    .vessel-horizontal-table td {
+        padding: 8px;
+        border: 1px solid #d1d5db;
+        font-size: 12px;
+        word-break: break-word;
+    }
+
+    .vessel-horizontal-table td:first-child {
+        font-weight: 700;
+        width: 220px;
+        background: #fafafa;
+    }
+
+    .vessel-horizontal-table td[contenteditable="true"]:hover,
+    .vessel-horizontal-table td[contenteditable="true"]:focus {
+        background: #f0f9ff;
+        outline: 1px dashed #60a5fa;
+        outline-offset: -2px;
+    }
+
+    .logs-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, .45);
+        z-index: 9999;
+    }
+
+    .logs-modal-content {
+        width: 900px;
+        max-width: 95%;
+        height: 80vh;
+        margin: 40px auto;
+        background: #fff;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .logs-modal-header {
+        padding: 15px;
+        border-bottom: 1px solid #cbd5e1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-weight: 700;
+    }
+
+    .logs-modal-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+    }
+
+    .logs-modal-body .log-item {
+        padding: 10px 0;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .notes-tide-row {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 12px;
+        margin-top: 15px;
+    }
+
+    .add-row-btn {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        color: #1d4ed8;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background .15s;
+    }
+
+    .add-row-btn:hover {
+        background: #dbeafe;
+    }
+
+    .remove-row-btn {
+        background: none;
+        border: none;
+        color: #94a3b8;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: color .15s, background .15s;
+    }
+
+    .remove-row-btn:hover {
+        color: #dc2626;
+        background: #fef2f2;
+    }
+
+    .reset-btn {
+        background: #f8fafc;
+        color: #64748b;
+        border: 1px solid #d9e2ec;
+    }
+
+    .shift-discharge-panel {
+        margin-top: 15px;
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    .shift-discharge-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+
+    .shift-discharge-table th {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        padding: 8px;
+        text-align: center;
+        font-weight: 700;
+    }
+
+    .shift-discharge-table td {
+        border: 1px solid #cbd5e1;
+        padding: 6px 8px;
+        height: 32px;
+    }
+
+    .total-row {
+        background: #f8fafc;
+        font-weight: 700;
+    }
+
+    .shift-summary-wrapper {
+        display: flex;
+        gap: 20px;
+        margin-top: 15px;
+        align-items: flex-start;
+    }
+
+    .shift-summary-table {
+        border-collapse: collapse;
+        background: #fff;
+        width: 420px;
+    }
+
+    .shift-summary-table th,
+    .shift-summary-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        height: 32px;
+        font-size: 12px;
+    }
+
+    .slag-table {
+        border-collapse: collapse;
+        width: 140px;
+        background: #fff;
+    }
+
+    .slag-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        height: 32px;
+        font-size: 12px;
+        color: #0f172a;
+        background: #fff;
+    }
+
+    .plan-input {
+        width: 100%;
+        border: none;
+        outline: none;
+        text-align: center;
+        font-size: 12px;
+    }
+
+    /* Save status indicator */
+    .save-status {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .save-status.saved {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .save-status.unsaved {
+        background: #fef9c3;
+        color: #92400e;
+    }
+
+    .save-status.saving {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .save-status.error {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    /* Saved-date indicator badge */
+    .saved-date-badge {
+        font-size: 10px;
+        background: #f0fdf4;
+        border: 1px solid #86efac;
+        color: #166534;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    .preview-loader {
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, .75);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+        backdrop-filter: blur(2px);
+    }
+
+    .loader-box {
+        text-align: center;
+    }
+
+    .loader-spinner {
+        width: 60px;
+        height: 60px;
+        border: 6px solid #dbeafe;
+        border-top: 6px solid #2563eb;
+        border-radius: 50%;
+        animation: spin .8s linear infinite;
+        margin: auto;
+    }
+
+    .loader-text {
+        margin-top: 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #1e3a8a;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .excel-loader-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, .35);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 999999;
+    }
+
+    .excel-loader-box {
+        width: 220px;
+        background: #fff;
+        border-radius: 12px;
+        padding: 28px 20px;
+        text-align: center;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, .2);
+    }
+
+    .excel-loader-spinner {
+        width: 42px;
+        height: 42px;
+        margin: auto;
+        border: 4px solid #dbeafe;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: excelSpin .8s linear infinite;
+    }
+
+    .excel-loader-title {
+        margin-top: 18px;
+        font-size: 20px;
+        font-weight: 600;
+        color: #374151;
+    }
+
+    .excel-loader-subtitle {
+        margin-top: 8px;
+        font-size: 14px;
+        color: #6b7280;
+    }
+
+    @keyframes excelSpin {
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+<!-- ═══════════════════════════════ PAGE HEADER ═══════════════════════════════ -->
+<div class="page-header">
+    <h2>
+        Daily Barge Position Report
+        <span class="badge badge-primary">RP01</span>
+    </h2>
+    <hr>
+    <div class="breadcrumb-wrapper">
+        <a href="/module/RP01/">Reports</a> &rsaquo;
+        <span>Daily Barge Position</span>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ FILTER BAR ════════════════════════════════ -->
+<div class="filter-bar">
+
+    <div class="filter-group">
+        <label for="report-date">DATE</label>
+        <input type="date" id="report-date"
+            style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;">
+    </div>
+
+    <div class="filter-group">
+        <label for="report-shift">SHIFT</label>
+        <select id="report-shift"
+            style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;font-weight:600;">
+            <option value="ALL" selected>All Shift</option>
+            <option value="A">A Shift</option>
+            <option value="B">B Shift</option>
+            <option value="C">C Shift</option>
+        </select>
+    </div>
+
+    <button type="button" class="filter-btn primary" onclick="applyDateRangeFilter()">
+        👁 Preview
+    </button>
+    <button type="button" class="filter-btn reset-btn" onclick="resetReport()">
+        Reset
+    </button>
+    <button type="button" class="filter-btn save-btn" id="saveReportBtn" onclick="saveReport()" disabled>
+        💾 Save Report
+    </button>
+    <button type="button" class="filter-btn primary" onclick="downloadExcel()">
+        ↓ Download Excel
+    </button>
+
+    <!-- Save status -->
+    <span id="saveStatusBadge" class="save-status" style="display:none;"></span>
+    <span id="savedDateBadge" class="saved-date-badge" style="display:none;"></span>
+
+    <div class="logs-toolbar">
+        <span class="title">Movement Logs</span>
+        <span class="badge-count" id="logCount">0</span>
+        <button type="button" class="add-row-btn" onclick="showMovementLogs()">View All</button>
+    </div>
+
+</div>
+
+<div id="logConsole" style="display:none;"></div>
+
+<!-- ══════════════════════════ REPORT CONTENT ════════════════════════════════ -->
+<div id="reportContent" style="display:none;">
+
+    <!-- Shift meta bar -->
+    <div class="shift-meta-bar">
+        <div class="meta-field-group">
+            <label>Shift Incharge</label>
+            <input type="text" id="shiftInchargeName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftInchargeName', () => SHIFT_INCHARGE_LIST)">
+        </div>
+        <div class="meta-field-group">
+            <label>BPO / Portbird</label>
+            <input type="text" id="shiftBpoName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftBpoName', () => PORTBIRD_LIST)">
+        </div>
+        <div class="meta-field-group">
+            <label>Crane Operator</label>
+            <input type="text" id="shiftIportName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftIportName', () => CRANE_OPERATOR_LIST)">
+        </div>
+    </div>
+
+    <!-- Metrics ribbon -->
+    <div class="metrics-ribbon-grid">
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Total MBC &amp; Barges In Port</label>
+                <span id="metricTotal">{{ total_barges }}</span>
+            </div>
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Waiting</label>
+                <span id="metricWaiting" style="color:#b45309">{{ waiting_count }}</span>
+            </div>
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Discharging</label>
+                <span id="metricDischarging" style="color:#166534">{{ discharging_count }}</span>
+            </div>
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Occupied Berths</label>
+                <span id="metricOccupied" style="color:#1d4ed8">{{ occupied_berths }}</span>
+            </div>
+        </div>
+        <div class="metric-card-tile">
+            <div class="info-group">
+                <label>Available Berths</label>
+                <span id="metricFree" style="color:var(--text-muted)">{{ available_berths }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="filtering-toolbar-deck">
+        <div class="filter-input-wrap">
+            <input type="text" id="searchBargeName" placeholder=" Search barge name…" oninput="triggerClientFilter()">
+        </div>
+        <div class="filter-input-wrap">
+            <input type="text" id="searchCargo" placeholder=" Search cargo…" oninput="triggerClientFilter()">
+        </div>
+        <div class="filter-input-wrap">
+            <select id="selectJettyFilter" onchange="triggerClientFilter()">
+                <option value="ALL">All Berth</option>
+                {% for num in berths %}
+                <option value="{{ num }}">{{ num }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-input-wrap">
+            <select id="selectStatusFilter" onchange="triggerClientFilter()">
+                <option value="ALL">All Status</option>
+                <option value="WAITING">Waiting</option>
+                <option value="DISCHARGING">Discharging</option>
+                <option value="COMPLETED">Completed</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Berth board -->
+    <div class="dashboard-viewport">
+
+        <!-- Waiting area -->
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span class="title-tag">Waiting Area</span>
+                <span class="badge-count" id="waitingCount">{{ waiting_count }}</span>
+            </div>
+            <div class="waiting-list-flow" id="waitingAreaZone" data-location="Waiting Area">
+                {% for barge in waiting %}
+                <div class="barge-pill-container draggable-node" draggable="true" data-id="{{ barge.id }}"
+                    data-name="{{ barge.barge_name }}" data-cargo="{{ barge.cargo }}" data-qty="{{ barge.qty }}"
+                    data-balance="{{ barge.balance_qty }}" data-total="{{ barge.total_qty or barge.qty }}"
+                    data-type="{{ barge.type }}" data-unloading-commenced="" data-commencedischarge-berth="">
+                    <div class="barge-pill-header">{{ barge.type }} — {{ barge.name }}</div>
+                    <div class="barge-pill-cargo">{{ barge.cargo }}</div>
+                    <div class="barge-pill-metrics"><b>BL :</b> {{ "{:,.0f}".format(barge.total_qty or barge.qty or 0)
+                        }} MT</div>
+                    <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal :</b> {{
+                        "{:,.0f}".format(barge.balance_qty or barge.qty or 0) }} MT</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Old berths matrix -->
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span>OLD BERTH</span>
+                <span style="color:var(--text-muted);font-size:11px;">6 BERTH</span>
+            </div>
+            <div class="matrix-wrapper">
+                <table class="matrix-table" id="leftMatrixTable">
+                    <thead>
+                        <tr>
+                            <th style="width:85px;">BERTH</th>
+                            <th>Alongside</th>
+                            <th>Double<br>Bank</th>
+                            <th>Triple<br>Bank</th>
+                            <th>Fourth<br>Bank</th>
+                            <th>Fifth<br>Bank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for num in old_berths %}
+                        <tr data-jetty-row="{{ num }}">
+                            <td class="jetty-label">{{ num }}</td>
+                            {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
+                            <td>
+                                <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
+                                    data-position="{{ pos }}">—</div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- New berths matrix -->
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span>NEW BERTHS</span>
+                <span style="color:var(--text-muted);font-size:11px;">8 BERTH</span>
+            </div>
+            <div class="matrix-wrapper">
+                <table class="matrix-table" id="rightMatrixTable">
+                    <thead>
+                        <tr>
+                            <th style="width:85px;">BERTH</th>
+                            <th>Alongside</th>
+                            <th>Double<br>Bank</th>
+                            <th>Triple<br>Bank</th>
+                            <th>Fourth<br>Bank</th>
+                            <th>Fifth<br>Bank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for num in new_berths %}
+                        <tr data-jetty-row="{{ num }}">
+                            <td class="jetty-label">{{ num }}</td>
+                            {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
+                            <td>
+                                <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
+                                    data-position="{{ pos }}">—</div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mother vessel table -->
+    <div class="secondary-panels-stack">
+        <div class="vessel-panel-frame">
+            <div class="panel-header">
+                <span style="color:#1d4ed8;">Mother Vessel</span>
+            </div>
+            <div class="matrix-wrapper">
+                <table class="vessel-horizontal-table">
+                    <thead id="motherVesselHead">
+                        <tr>
+                            <th>Parameter</th>
+                            {% for vessel in mother_vessels %}
+                            <th>Vessel {{ loop.index }}<br>{{ vessel.vessel_name }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody id="motherVesselBody">
+                        <tr>
+                            <td><b>VSL DISCH COMMNACED</b></td>
+                            {% for vessel in mother_vessels %}<td>{{ vessel.discharge_commenced }}</td>{% endfor %}
+                        </tr>
+                        <tr>
+                            <td><b>VSL DISCHARGE COMPLITED</b></td>
+                            {% for vessel in mother_vessels %}<td>{{ vessel.discharge_completed }}</td>{% endfor %}
+                        </tr>
+                        <tr>
+                            <td><b>UNDER LOADING</b></td>
+                            {% for vessel in mother_vessels %}<td>{{ vessel.under_loading }}</td>{% endfor %}
+                        </tr>
+                        <tr data-mv-row="eta_to_dharamtar">
+                            <td><b>ETA TO DHARAMTAR</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td data-vessel="{{ vessel.vessel_name }}"
+                                data-field="eta_to_dharamtar"">
+                                {{ vessel.eta_to_dharamtar }}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        <!-- WT @ R19 — editable, keyed by vessel name -->
+                        <tr data-mv-row="wt_r19">
+                            <td><b>WT @ R19</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="wt_r19"
+                                oninput="markUnsaved()"></td>
+                            {% endfor %}
+                        </tr>
+                        <tr>
+                            <td><b>ON THE WAY TO GULL</b></td>
+                            {% for vessel in mother_vessels %}<td>{{ vessel.at_gull_loaded }}</td>{% endfor %}
+                        </tr>
+                        <!-- MBC ETA — editable -->
+                        <tr data-mv-row="mbc_eta">
+                            <td><b>MBC ETA</b></td>
+                            {% for vessel in mother_vessels %}
+                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="mbc_eta"
+                                oninput="markUnsaved()">{{ vessel.mbc_eta }}</td>
+                            {% endfor %}
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notes + Tide row -->
+    <div class="notes-tide-row">
+        <div class="notes-panel-frame">
+            <div class="panel-header">
+                <span style="color:#1d4ed8;">Notes</span>
+                <button class="add-row-btn" onclick="addNoteRow()">+ Add Note</button>
+            </div>
+            <div class="notes-log-list" id="notesLogList">
+                <!-- Default notes pre-loaded; overwritten by backend on load -->
+                <div class="note-entry-row">
+                    <span class="note-index">1</span>
+                    <div class="note-text" contenteditable="true" oninput="markUnsaved()">3B to 5A plug problem —
+                        informed electrical Mr. Koli.</div>
+                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="tide-panel-frame">
+            <div class="panel-header"><span style="color:#1d4ed8;">Tide Table</span></div>
+            <div class="matrix-wrapper">
+                <table class="tide-table" id="tideTable">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Time</th>
+                            <th>Height (m)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tideTableBody">
+                        {% for tide in tide_data %}
+                        <tr>
+                            <td><span class="tide-type-tag {{ tide.type|lower }}">{{ tide.type }}</span></td>
+                            <td>{{ tide.time }}</td>
+                            <td>{{ tide.height }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shift wise discharge -->
+    <div class="shift-discharge-panel">
+        <div class="panel-header">
+            <span style="color:#1d4ed8;">Shift Wise Discharge Report</span>
+        </div>
+        <table class="shift-discharge-table" id="shiftDischargeTable">
+            <thead>
+                <tr>
+                    <th colspan="2">SHIFT JETTY DISCHARGE</th>
+                    <th colspan="6">BARGE DISCHARGE</th>
+                </tr>
+                <tr>
+                    <th>CARGO</th>
+                    <th>QTY</th>
+                    <th>BARGES AND MBC</th>
+                    <th>CARGO</th>
+                    <th>BL QTY</th>
+                    <th>ACTUAL DISCHARGE</th>
+                    <th>PAYLOADER CL</th>
+                    <th>LABOUR CLEANED</th>
+                </tr>
+            </thead>
+            <tbody id="shiftDischargeBody">
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">
+                        Select date and click Preview to load data
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Shift summary -->
+    <div class="shift-summary-wrapper">
+        <table class="shift-summary-table">
+            <thead>
+                <tr>
+                    <th>SHIFT</th>
+                    <th>DISCHARGE</th>
+                    <th>PLAN</th>
+                    <th>DIFF</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>A</td>
+                    <td id="aDischarge">0</td>
+                    <td><input type="number" id="aPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td id="aDiff">0</td>
+                </tr>
+                <tr>
+                    <td>B</td>
+                    <td id="bDischarge">0</td>
+                    <td><input type="number" id="bPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td id="bDiff">0</td>
+                </tr>
+                <tr>
+                    <td>C</td>
+                    <td id="cDischarge">0</td>
+                    <td><input type="number" id="cPlan" class="plan-input" oninput="calculateShiftDiff(); markUnsaved();""></td>
+                    <td id="cDiff">0</td>
+                </tr>
+                <tr class="total-row">
+                    <td>TOTAL</td>
+                    <td id="totalDischarge">0</td>
+                    <td id="totalPlan">0</td>
+                    <td id="totalDiff">0</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <table class="slag-table">
+            <tbody>
+                <tr>
+                    <td>SLAG</td>
+                    <td id="slagQty">0</td>
+                </tr>
+                <tr>
+                    <td>CLINKER</td>
+                    <td id="clinkerQty">0</td>
+                </tr>
+                <tr>
+                    <td>TOTAL</td>
+                    <td id="totalQty">0</td>
+                </tr>
+                <tr>
+                    <td>STEEL PLANT</td>
+                    <td id="steelPlantQty">0</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Movement Logs Modal -->
+<div id="logsModal" class="logs-modal">
+    <div class="logs-modal-content">
+        <div class="logs-modal-header">
+            <span>Movement Logs</span>
+            <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
+        </div>
+        <div id="logsModalBody" class="logs-modal-body"></div>
+    </div>
+</div>
+
+<div id="previewLoader" class="preview-loader" style="display:none;">
+    <div class="loader-box">
+        <div class="loader-spinner"></div>
+        <div class="loader-text">Loading Preview…</div>
+    </div>
+</div>
+
+<div id="excelLoader" style="display:none;">
+    <div class="excel-loader-overlay">
+        <div class="excel-loader-box">
+            <div class="excel-loader-spinner"></div>
+            <div class="excel-loader-title">Preparing Download…</div>
+            <div class="excel-loader-subtitle">Fetching data…</div>
+        </div>
+    </div>
+</div>
+
+<iframe id="downloadFrame" style="display:none;"></iframe>
+
+{% raw %}
+<script>
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  CONSTANTS & STATE
+    // ══════════════════════════════════════════════════════════════════════════════
+    const SHIFT_WINDOWS = {
+        ALL: { fromHour: 6, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
+        A: { fromHour: 6, fromMin: 0, toHour: 14, toMin: 0, nextDay: false },
+        B: { fromHour: 14, fromMin: 0, toHour: 22, toMin: 0, nextDay: false },
+        C: { fromHour: 22, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
+    };
+
+    const PORTBIRD_LIST = [
+        "Rajendra Mhatre", "Bhushan Patil", "Vinit Thale", "Kedar Patil",
+        "Siddhesh Patil", "Vrutant Shirke", "Rhitik Adsule", "Nikit Mhatre"
+    ];
+
+    let SHIFT_INCHARGE_LIST = [];
+    let CRANE_OPERATOR_LIST = [];
+    let _movementLogs = [];
+
+    // Tracks whether any unsaved edits exist
+    let _unsaved = false;
+
+    // Current live items fetched from server (used for save snapshot)
+    let _currentItems = [];
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SAVE STATUS HELPERS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function setSaveStatus(state, text) {
+        const badge = document.getElementById('saveStatusBadge');
+        badge.className = `save-status ${state}`;
+        badge.textContent = text;
+        badge.style.display = 'inline-flex';
+    }
+
+    function markUnsaved() {
+        _unsaved = true;
+        setSaveStatus('unsaved', '● Unsaved changes');
+        document.getElementById('saveReportBtn').disabled = false;
+    }
+
+    function markSaved(updatedAt) {
+        _unsaved = false;
+        setSaveStatus('saved', '✓ Saved');
+        document.getElementById('saveReportBtn').disabled = false;
+
+        if (updatedAt) {
+            const d = new Date(updatedAt);
+            const badge = document.getElementById('savedDateBadge');
+            badge.textContent = `Last saved: ${d.toLocaleString()}`;
+            badge.style.display = 'inline-flex';
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT DATE RANGE
+    // ══════════════════════════════════════════════════════════════════════════════
+    function getShiftDateRange() {
+        const dateVal = document.getElementById('report-date').value;
+        const shiftKey = document.getElementById('report-shift').value;
+        if (!dateVal) return null;
+
+        const win = SHIFT_WINDOWS[shiftKey];
+        const base = new Date(dateVal + 'T00:00:00');
+
+        const from = new Date(base);
+        from.setHours(win.fromHour, win.fromMin, 0, 0);
+
+        const toBase = win.nextDay ? new Date(base.getTime() + 86400000) : base;
+        const to = new Date(toBase);
+        to.setHours(win.toHour, win.toMin, 0, 0);
+
+        const fmt = d =>
+            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+        return { fromISO: fmt(from), toISO: fmt(to) };
+    }
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MAIN PREVIEW
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function applyDateRangeFilter() {
+        const range = getShiftDateRange();
+        if (!range) { alert("Please select a date."); return; }
+
+        document.getElementById("previewLoader").style.display = "flex";
+
+        // ── Reset logs for new date/shift selection ──
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
+
+        try {
+            document.getElementById("reportContent").style.display = "block";
+            document.getElementById("saveReportBtn").disabled = false;
+
+            const reportDate = document.getElementById('report-date').value;
+            const shift = document.getElementById('report-shift').value;
+
+            const [, , , , , savedData] = await Promise.all([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary(),
+                loadSavedReport(reportDate, shift),
+            ]);
+
+            if (savedData && savedData.found) {
+                applySavedOverlay(savedData);
+            }
+
+        } finally {
+            document.getElementById("previewLoader").style.display = "none";
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function saveReport() {
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+
+        if (!reportDate) { alert("Select a date first."); return; }
+
+        const btn = document.getElementById('saveReportBtn');
+        btn.disabled = true;
+        setSaveStatus('saving', '⏳ Saving…');
+
+        try {
+            // ── 1. Berth layout: collect all cards currently placed in a dropzone ──
+            const berthLayout = [];
+            document.querySelectorAll('.matrix-dropzone:not(.empty-slot)').forEach(zone => {
+                const card = zone.querySelector('.berth-allocated-card, .draggable-node');
+                if (!card) return;
+                berthLayout.push({
+                    id: card.dataset.id || '',
+                    name: card.dataset.name || '',
+                    cargo: card.dataset.cargo || '',
+                    qty: parseFloat(card.dataset.qty || 0),
+                    balance: parseFloat(card.dataset.balance || 0),
+                    discharge: parseFloat(card.dataset.discharge || 0),
+                    total: parseFloat(card.dataset.total || card.dataset.qty || 0),
+                    berth: zone.dataset.berth,
+                    position: zone.dataset.position,
+                    type: card.dataset.type || 'BARGE',
+                    unloading_commenced: card.dataset.unloadingCommenced || '',
+                    commence_discharge_berth: card.dataset.commencedischargeBerth || '',
+                });
+            });
+
+            // ── 2. Waiting area items (order matters) ──────────────────────────────
+            const waitingItems = [];
+            document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(pill => {
+                waitingItems.push({
+                    id: pill.dataset.id || '',
+                    name: pill.dataset.name || '',
+                    cargo: pill.dataset.cargo || '',
+                    qty: parseFloat(pill.dataset.qty || 0),
+                    balance: parseFloat(pill.dataset.balance || 0),
+                    total: parseFloat(pill.dataset.total || pill.dataset.qty || 0),
+                    type: pill.dataset.type || 'BARGE',
+                    berth: 'WAITING',
+                    position: '',
+                    unloading_commenced: pill.dataset.unloadingCommenced || '',
+                    commence_discharge_berth: pill.dataset.commencedischargeBerth || '',
+                });
+            });
+
+            // ── 3. WT @ R19 and MBC ETA — keyed by vessel name ─────────────────────
+            const wtR19 = {};
+            const mbcEta = {};
+            const etaToDharamtar = {};
+            const onTheWayGull = {}; 
+
+            document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
+                wtR19[td.dataset.vessel] = td.textContent.trim();
+            });
+
+            document.querySelectorAll('[data-field="mbc_eta"]').forEach(td => {
+                mbcEta[td.dataset.vessel] = td.textContent.trim();
+            });
+            document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
+                etaToDharamtar[td.dataset.vessel] = td.textContent.trim();
+            });
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {   // NEW
+            onTheWayGull[td.dataset.vessel] = td.textContent.trim();
+            });
+
+            // ── 4. Notes ────────────────────────────────────────────────────────────
+            const notes = [];
+            document.querySelectorAll('#notesLogList .note-text').forEach(el => {
+                const t = el.textContent.trim();
+                if (t) notes.push(t);
+            });
+
+            const shiftPlan = {
+                a_plan: parseFloat(document.getElementById('aPlan').value) || 0,
+                b_plan: parseFloat(document.getElementById('bPlan').value) || 0,
+                c_plan: parseFloat(document.getElementById('cPlan').value) || 0,
+            };
+
+            // ── 5. Meta fields ───────────────────────────────────────────────────────
+            const payload = {
+                report_date: reportDate,
+                shift: shift,
+                shift_incharge: document.getElementById('shiftInchargeName').value || '',
+                bpo: document.getElementById('shiftBpoName').value || '',
+                crane_operator: document.getElementById('shiftIportName').value || '',
+                berth_layout: [...berthLayout, ...waitingItems],
+                wt_r19: wtR19,
+                eta_to_dharamtar: etaToDharamtar,
+                mbc_eta: mbcEta,
+                on_the_way_gull: onTheWayGull,
+                shift_plan: shiftPlan,
+                notes: notes,
+                movement_logs: _movementLogs,
+            };
+
+            const res = await fetch('/api/module/RP01/shift-report/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) throw new Error(await res.text());
+
+            const data = await res.json();
+            markSaved(new Date().toISOString());
+
+        } catch (err) {
+            console.error('Save failed:', err);
+            setSaveStatus('error', '✕ Save failed');
+            btn.disabled = false;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  LOAD SAVED REPORT  →  GET /api/module/RP01/shift-report/load
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadSavedReport(reportDate, shift) {
+        try {
+            const params = new URLSearchParams({ date: reportDate, shift });
+            const res = await fetch(`/api/module/RP01/shift-report/load?${params}`);
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (e) {
+            console.warn('Could not load saved report:', e);
+            return null;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  APPLY SAVED OVERLAY
+    // ══════════════════════════════════════════════════════════════════════════════
+    function applySavedOverlay(savedData) {
+
+        // ── Meta fields ─────────────────────────────────────────────────────────
+        if (savedData.shift_incharge) document.getElementById('shiftInchargeName').value = savedData.shift_incharge;
+        if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
+        if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
+
+        // ── Berth layout ────────────────────────────────────────────────────────
+        if (savedData.berth_layout && savedData.berth_layout.length > 0) {
+            // Clear current board
+            document.querySelectorAll('.matrix-dropzone').forEach(z => {
+                z.classList.add('empty-slot');
+                z.innerHTML = '—';
+            });
+            document.getElementById('waitingAreaZone').innerHTML = '';
+
+            savedData.berth_layout.forEach(item => {
+                if (item.berth === 'WAITING') {
+                    // Restore to waiting area
+                    const pill = buildWaitingPill(item);
+                    document.getElementById('waitingAreaZone').appendChild(pill);
+                } else {
+                    // Restore to berth cell
+                    const zone = document.querySelector(
+                        `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+                    );
+                    if (!zone) return;
+                    zone.classList.remove('empty-slot');
+                    zone.innerHTML = buildBerthCard(item, item.balance);
+                }
+            });
+
+            updateInterfaceMetrics();
+        }
+
+        // ── WT @ R19 ────────────────────────────────────────────────────────────
+        if (savedData.wt_r19) {
+            document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
+                const val = savedData.wt_r19[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+
+        // ── MBC ETA ─────────────────────────────────────────────────────────────
+        if (savedData.mbc_eta) {
+            document.querySelectorAll('[data-field="mbc_eta"]').forEach(td => {
+                const val = savedData.mbc_eta[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+        //on the way to dharamtar
+        if (savedData.eta_to_dharamtar) {
+            document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
+                const val = savedData.eta_to_dharamtar[td.dataset.vessel];
+                if (val !== undefined) {
+                    td.textContent = val;
+                }
+            });
+        }
+        // ── On the way to Gull (NEW, alongside existing WT@R19 / MBC ETA / ETA blocks) ──
+        if (savedData.on_the_way_gull) {
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {
+                const val = savedData.on_the_way_gull[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+
+        // ── Notes ────────────────────────────────────────────────────────────────
+        if (savedData.notes && savedData.notes.length > 0) {
+            const list = document.getElementById('notesLogList');
+            list.innerHTML = '';
+            savedData.notes.forEach((text, i) => {
+                const row = document.createElement('div');
+                row.className = 'note-entry-row';
+                row.innerHTML = `
+                <span class="note-index">${i + 1}</span>
+                <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
+                <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+                list.appendChild(row);
+            });
+        }
+
+        // ── Movement Logs ────────────────────────────────────────────────────────
+        if (savedData.movement_logs && savedData.movement_logs.length > 0) {
+            _movementLogs = savedData.movement_logs;
+            const logConsole = document.getElementById('logConsole');
+            logConsole.innerHTML = '';
+            // Restore in reverse so newest shows on top (prepend order)
+            [...savedData.movement_logs].reverse().forEach(log => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                item.innerHTML = `
+                    <strong>${log.name}</strong> — Moved<br>
+                    <span>${log.from} → ${log.to}</span><br>
+                    <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
+                    <span>Shift Incharge: ${log.shiftIncharge}</span>`;
+                logConsole.prepend(item);
+            });
+            document.getElementById('logCount').textContent = _movementLogs.length;
+        }
+        // ── Shift Plan ───────────────────────────────────────────────
+        if (savedData.shift_plan) {
+
+            document.getElementById('aPlan').value =
+                savedData.shift_plan.a_plan ?? '';
+
+            document.getElementById('bPlan').value =
+                savedData.shift_plan.b_plan ?? '';
+
+            document.getElementById('cPlan').value =
+                savedData.shift_plan.c_plan ?? '';
+
+            calculateShiftDiff();
+        }
+
+        // ── Show saved timestamp ────────────────────────────────────────────────
+        markSaved(savedData.updated_at);
+
+        // Mark as clean (no unsaved changes yet)
+        _unsaved = false;
+        setSaveStatus('saved', '✓ Loaded from saved report');
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  BUILD DOM ELEMENTS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function buildWaitingPill(item) {
+        const bl = parseFloat(item.total || item.qty || 0);
+        const bal = parseFloat(item.balance || bl);
+        const pill = document.createElement('div');
+        pill.className = 'barge-pill-container draggable-node';
+        pill.setAttribute('draggable', 'true');
+        pill.dataset.id = item.id || '';
+        pill.dataset.name = item.name || '';
+        pill.dataset.cargo = item.cargo || '';
+        pill.dataset.qty = item.qty || 0;
+        pill.dataset.balance = item.balance || 0;
+        pill.dataset.total = item.total || item.qty || 0;
+        pill.dataset.type = item.type || 'BARGE';
+        pill.dataset.unloadingCommenced = item.unloading_commenced || '';
+        pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
+
+        pill.innerHTML = `
+        <div class="barge-pill-header">${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="barge-pill-cargo">${item.cargo || ''}</div>
+        <div class="barge-pill-metrics"><b>BL:</b> ${bl.toLocaleString()} MT</div>
+        <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal:</b> ${bal.toLocaleString()} MT</div>`;
+        return pill;
+    }
+
+    function buildBerthCard(item, balance) {
+        const bal = parseFloat(balance || 0);
+        const unloadStarted =
+            (item.unloading_commenced && String(item.unloading_commenced).trim() !== '') ||
+            (item.commence_discharge_berth && String(item.commence_discharge_berth).trim() !== '');
+
+        const cardClass = unloadStarted ? 'discharging' : 'waiting-discharge';
+        const bl = parseFloat(item.total || item.qty || 0);
+
+        return `
+    <div class="berth-allocated-card ${cardClass} draggable-node"
+         draggable="true"
+         data-id="${item.id || ''}"
+         data-name="${item.name || ''}"
+         data-cargo="${item.cargo || ''}"
+         data-qty="${bl}"
+         data-total="${bl}"
+         data-balance="${bal}"
+         data-discharge="${item.discharge || 0}"
+         data-type="${item.type || 'BARGE'}"
+         data-unloading-commenced="${item.unloading_commenced || ''}"
+         data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
+        <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="berth-card-cargo">${item.cargo || ''}</div>
+        <div class="berth-card-metrics"><b>BL :</b> ${bl.toLocaleString()} MT</div>
+        <div class="berth-card-metrics" style="color:#b45309;"><b>Bal :</b> ${bal.toLocaleString()} MT</div>
+    </div>`;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOTHER VESSEL  (live refresh)
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadMotherVesselData(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const vessels = await (await fetch(`/api/module/RP01/mother-vessel-data?${params}`)).json();
+
+        const headRow = document.querySelector('#motherVesselHead tr');
+        const body = document.getElementById('motherVesselBody');
+
+        headRow.innerHTML = '<th>Parameter</th>';
+        vessels.forEach((v, i) => {
+            headRow.innerHTML += `<th>Vessel ${i + 1}<br>${v.vessel_name || ''}</th>`;
+        });
+
+        const rows = [
+            ['VSL DISCH COMMNACED', 'discharge_commenced', false],
+            ['VSL DISCHARGE COMPLITED', 'discharge_completed', false],
+            ['UNDER LOADING', 'under_loading', false],
+            ['ETA TO DHARAMTAR', 'at_gull_loaded', false],
+            ['WT @ R19', 'wt_r19', true],  // editable
+            ['ON THE WAY TO GULL', 'on_the_way_gull', true, 'on_the_way_gull', false],
+            ['MBC ETA', 'mbc_eta', true],  // editable
+        ];
+
+        body.innerHTML = '';
+        rows.forEach(([label, key, editable]) => {
+            const attr = editable
+                ? `contenteditable="true" data-vessel="{VESSEL}" data-field="${key}" oninput="markUnsaved()"`
+                : '';
+            let rowHtml = `<tr data-mv-row="${key}"><td><b>${label}</b></td>`;
+            vessels.forEach(v => {
+                rowHtml += `<td ${editable ? attr.replace('{VESSEL}', (v.vessel_name || '')) : ''}>${v[key] || ''}</td>`;
+            });
+            rowHtml += '</tr>';
+            body.innerHTML += rowHtml;
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  TIDE
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadTideData(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const tides = await (await fetch(`/api/module/RP01/tide-data?${params}`)).json();
+        const body = document.getElementById('tideTableBody');
+        body.innerHTML = '';
+        tides.forEach(t => {
+            body.innerHTML += `
+        <tr>
+            <td><span class="tide-type-tag ${(t.type || '').toLowerCase()}">${t.type || ''}</span></td>
+            <td>${t.time || ''}</td>
+            <td>${t.height ?? ''}</td>
+        </tr>`;
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  BERTH OCCUPANCY
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadBerthOccupancy(fromDateTime, toDateTime) {
+        const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
+        const items = await (await fetch(`/api/module/RP01/berth-occupancy?${params}`)).json();
+        _currentItems = items;
+        renderBerthBoard(items);
+    }
+
+    function renderBerthBoard(items) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+        document.getElementById('waitingAreaZone').innerHTML = '';
+
+        (items || []).forEach(item => {
+            if (item.status === 'Completed') return;
+
+            if (item.status === 'Discharging' && item.berth) {
+                const zone = document.querySelector(
+                    `.matrix-dropzone[data-berth="${item.berth.toUpperCase()}"][data-position="${(item.position || 'A/S').toUpperCase()}"]`
+                );
+                if (!zone) return;
+                zone.classList.remove('empty-slot');
+                zone.innerHTML = buildBerthCard(item, parseFloat(item.balance_qty || 0));
+            } else {
+                document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
+                    ...item,
+                    balance: item.balance_qty || item.qty,
+                    total: item.total_qty || item.qty,
+                }));
+            }
+        });
+
+        updateInterfaceMetrics();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  DRAG & DROP
+    // ══════════════════════════════════════════════════════════════════════════════
+    let activeDragData = null;
+    let sourceOriginElement = null;
+    let autoScrollInterval = null;
+
+    document.addEventListener('dragstart', function (e) {
+        const node = e.target.closest('.draggable-node, .berth-allocated-card');
+        if (node) {
+            activeDragData = {
+                id: node.dataset.id,
+                name: node.dataset.name,
+                cargo: node.dataset.cargo,
+                qty: node.dataset.qty,
+                balance: node.dataset.balance || node.dataset.qty,
+                total: node.dataset.total || node.dataset.qty,
+                discharge: node.dataset.discharge || 0,
+                type: node.dataset.type || 'BARGE',
+                unloading_commenced: node.dataset.unloadingCommenced || '',
+                commence_discharge_berth: node.dataset.commencedischargeBerth || '',
+            };
+            sourceOriginElement = node;
+        }
+    });
+
+    document.addEventListener('dragover', function (e) {
+        const wrapper = document.elementFromPoint(e.clientX, e.clientY)?.closest('.matrix-wrapper');
+        if (!wrapper) { clearInterval(autoScrollInterval); return; }
+        const rect = wrapper.getBoundingClientRect();
+        clearInterval(autoScrollInterval);
+        if (e.clientY < rect.top + 100) autoScrollInterval = setInterval(() => wrapper.scrollTop -= 15, 15);
+        else if (e.clientY > rect.bottom - 100) autoScrollInterval = setInterval(() => wrapper.scrollTop += 15, 15);
+    });
+
+    document.addEventListener('dragend', () => clearInterval(autoScrollInterval));
+    document.addEventListener('drop', () => clearInterval(autoScrollInterval));
+
+    // Re-bind dropzones (called after DOM re-renders)
+    function bindDropzones() {
+        document.querySelectorAll('.matrix-dropzone').forEach(zone => {
+            zone.addEventListener('dragover', e => e.preventDefault());
+            zone.addEventListener('dragenter', function () {
+                if (this.classList.contains('empty-slot')) this.classList.add('drag-active');
+            });
+            zone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+            zone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                this.classList.remove('drag-active');
+                if (!activeDragData || !this.classList.contains('empty-slot')) return;
+
+                const berth = this.dataset.berth;
+                const position = this.dataset.position;
+                let fromLocation = 'WAITING AREA';
+                const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
+                if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+
+                cleanSourceOrigin();
+                this.classList.remove('empty-slot');
+                this.innerHTML = buildBerthCard({
+                    ...activeDragData,
+                    unloading_commenced: activeDragData.unloading_commenced,
+                    commence_discharge_berth: activeDragData.commence_discharge_berth,
+                }, parseFloat(activeDragData.balance || activeDragData.qty || 0));
+
+                writeLog(activeDragData.name, fromLocation, `${berth} → ${position}`);
+                resetDragVars();
+                updateInterfaceMetrics();
+                markUnsaved();
+            });
+        });
+    }
+
+    const waitingZone = document.getElementById('waitingAreaZone');
+    waitingZone.addEventListener('dragover', e => e.preventDefault());
+    waitingZone.addEventListener('dragenter', function () { this.classList.add('drag-active'); });
+    waitingZone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+    waitingZone.addEventListener('drop', function (e) {
+        e.preventDefault();
+        this.classList.remove('drag-active');
+        if (!activeDragData) return;
+        if (sourceOriginElement?.parentElement === this) return;
+
+        let fromLocation = 'WAITING AREA';
+        const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
+        if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+
+        cleanSourceOrigin();
+        this.appendChild(buildWaitingPill({
+            ...activeDragData,
+            balance: activeDragData.balance || activeDragData.qty,
+            total: activeDragData.total || activeDragData.qty,
+        }));
+
+        writeLog(activeDragData.name, fromLocation, 'WAITING AREA');
+        resetDragVars();
+        updateInterfaceMetrics();
+        markUnsaved();
+    });
+
+    function cleanSourceOrigin() {
+        if (!sourceOriginElement) return;
+        const pz = sourceOriginElement.closest('.matrix-dropzone');
+        if (pz) { pz.innerHTML = '—'; pz.classList.add('empty-slot'); }
+        else sourceOriginElement.remove();
+    }
+
+    function resetDragVars() { activeDragData = null; sourceOriginElement = null; }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  FILTERS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function triggerClientFilter() {
+        const nameQ = document.getElementById('searchBargeName').value.toLowerCase().trim();
+        const cargoQ = document.getElementById('searchCargo').value.toLowerCase().trim();
+        const jettyF = document.getElementById('selectJettyFilter').value;
+        const statusF = document.getElementById('selectStatusFilter').value;
+
+        if (statusF === 'COMPLETED') { showCompletedPopup(); return; }
+
+        document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(card => {
+            const ok = card.dataset.name.toLowerCase().includes(nameQ)
+                && card.dataset.cargo.toLowerCase().includes(cargoQ)
+                && (statusF === 'ALL' || statusF === 'WAITING')
+                && jettyF === 'ALL';
+            card.style.display = ok ? 'flex' : 'none';
+        });
+
+        document.querySelectorAll('tr[data-jetty-row]').forEach(row => {
+            const matchJetty = jettyF === 'ALL' || jettyF.toUpperCase() === row.dataset.jettyRow.toUpperCase();
+            row.style.display = matchJetty ? '' : 'none';
+            row.querySelectorAll('.berth-allocated-card').forEach(card => {
+                const mn = card.dataset.name.toLowerCase().includes(nameQ);
+                const mc = card.dataset.cargo.toLowerCase().includes(cargoQ);
+                let ms = true;
+                if (statusF === 'WAITING') ms = false;
+                if (statusF === 'DISCHARGING') ms = parseFloat(card.dataset.balance || 0) > 0;
+                card.style.opacity = (mn && mc && ms) ? '1' : '0.15';
+                card.style.pointerEvents = (mn && mc && ms) ? 'auto' : 'none';
+            });
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  METRICS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function updateInterfaceMetrics() {
+        const waitingCount = document.querySelectorAll('#waitingAreaZone .barge-pill-container').length;
+        const dischargingCount = document.querySelectorAll('.berth-allocated-card').length;
+        const occupiedBerths = new Set();
+
+        document.querySelectorAll('.berth-allocated-card').forEach(c => {
+            const z = c.closest('.matrix-dropzone');
+            if (z) occupiedBerths.add(z.dataset.berth);
+        });
+
+        const occ = occupiedBerths.size;
+        const totalBerths = document.querySelectorAll("tr[data-jetty-row]").length;
+
+        document.getElementById('waitingCount').innerText = waitingCount;
+        document.getElementById('metricTotal').innerText = waitingCount + dischargingCount;
+        document.getElementById('metricWaiting').innerText = waitingCount;
+        document.getElementById('metricDischarging').innerText = dischargingCount;
+        document.getElementById('metricOccupied').innerText = occ;
+        document.getElementById('metricFree').innerText = Math.max(0, totalBerths - occ);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOVEMENT LOGS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function writeLog(name, from, to) {
+        const reportDate = document.getElementById("report-date").value;
+        const shift = document.getElementById("report-shift").value;
+        const shiftIncharge = document.getElementById("shiftInchargeName").value || "—";
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // ── Only log for the currently selected date & shift ──
+        const logEntry = { name, from, to, reportDate, shift, shiftIncharge, time };
+        _movementLogs.push(logEntry);
+
+        const item = document.createElement("div");
+        item.className = "log-item";
+        item.innerHTML = `
+        <strong>${name}</strong> — Moved<br>
+        <span>${from} → ${to}</span><br>
+        <span>📅 ${reportDate} &nbsp;|&nbsp; 🕒 ${time} &nbsp;|&nbsp; Shift: ${shift}</span><br>
+        <span>Shift Incharge: ${shiftIncharge}</span>`;
+        document.getElementById("logConsole").prepend(item);
+        document.getElementById("logCount").textContent = _movementLogs.length;
+    }
+
+    function showMovementLogs() {
+        const reportDate = document.getElementById("report-date").value;
+        const shift = document.getElementById("report-shift").value;
+
+        const logConsoleHtml = document.getElementById('logConsole').innerHTML;
+
+        const header = `
+        <div style="background:#f0f9ff;border:1px solid #bfdbfe;border-radius:6px;
+                    padding:10px 14px;margin-bottom:14px;font-size:12px;">
+            <span style="font-weight:700;color:#1e40af;">📅 Date:</span>
+            <span style="margin-right:16px;">${reportDate}</span>
+            <span style="font-weight:700;color:#1e40af;">🔄 Shift:</span>
+            <span>${shift === 'ALL' ? 'All Shifts' : shift + ' Shift'}</span>
+            <span style="margin-left:16px;font-weight:700;color:#1e40af;">Total Logs:</span>
+            <span>${_movementLogs.length}</span>
+        </div>`;
+
+        document.getElementById('logsModalBody').innerHTML =
+            logConsoleHtml
+                ? header + logConsoleHtml
+                : header + '<div style="padding:20px;text-align:center;color:#94a3b8;">No movement logs yet.</div>';
+
+        document.getElementById('logsModal').style.display = 'block';
+    }
+
+    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+
+    window.addEventListener('click', e => {
+        const m = document.getElementById('logsModal');
+        if (e.target === m) m.style.display = 'none';
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  NOTES
+    // ══════════════════════════════════════════════════════════════════════════════
+    function addNoteRow() {
+        const list = document.getElementById('notesLogList');
+        const row = document.createElement('div');
+        row.className = 'note-entry-row';
+        row.innerHTML = `
+        <span class="note-index">${list.children.length + 1}</span>
+        <div class="note-text" contenteditable="true" oninput="markUnsaved()">New note…</div>
+        <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+        list.appendChild(row);
+        markUnsaved();
+    }
+
+    function removeNoteRow(btn) {
+        btn.parentElement.remove();
+        renumberNotes();
+        markUnsaved();
+    }
+
+    function renumberNotes() {
+        Array.from(document.getElementById('notesLogList').children)
+            .forEach((r, i) => r.querySelector('.note-index').textContent = i + 1);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  COMPLETED POPUP
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function showCompletedPopup() {
+        const reportDate = document.getElementById('report-date').value;
+
+        document.getElementById('logsModalBody').innerHTML = `
+        <div style="padding:30px;text-align:center;color:#94a3b8;">
+            <div style="font-size:22px;margin-bottom:8px;">⏳</div>
+            Loading completed barges…
+        </div>`;
+        document.getElementById('logsModal').style.display = 'block';
+
+        try {
+            const shift = document.getElementById('report-shift').value;
+            const params = new URLSearchParams({ date: reportDate, shift: shift, completed: '1' });
+            const res = await fetch(`/api/module/RP01/berth-occupancy?${params}`);
+            const items = await res.json();
+
+            const header = `
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;
+                    padding:10px 14px;margin-bottom:14px;font-size:12px;">
+            <span style="font-weight:700;color:#166534;">✓ Completed Barges & MBC</span>
+            <span style="margin-left:12px;color:#166534;">Date: ${reportDate}</span>
+            <span style="margin-left:12px;font-weight:700;color:#166534;">Total: ${items.length}</span>
+        </div>`;
+
+            if (!items.length) {
+                document.getElementById('logsModalBody').innerHTML =
+                    header + '<div style="padding:20px;text-align:center;color:#94a3b8;">No completed barges / MBC found.</div>';
+                return;
+            }
+
+            let tableHtml = `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+                <tr style="background:#f8fafc;">
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Type</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Name</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Cargo</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:right;color:#64748b;text-transform:uppercase;font-size:11px;">BL Qty (MT)</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Commenced</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Completed</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:center;color:#64748b;text-transform:uppercase;font-size:11px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+            items.forEach((item, idx) => {
+                const typeBadge = item.type === 'MBC'
+                    ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:#dbeafe;color:#1e40af;">MBC</span>`
+                    : `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fef9c3;color:#92400e;">BARGE</span>`;
+
+                tableHtml += `
+            <tr style="background:${idx % 2 === 0 ? '#fff' : '#f8fafc'};">
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;">${typeBadge}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;font-weight:700;">${item.name || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;">${item.cargo || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;text-align:right;">${(item.bl_qty || 0).toLocaleString()}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;color:#1d4ed8;">${item.commenced || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;color:#166534;font-weight:600;">${item.completed || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;text-align:center;">
+                    <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;background:#dcfce7;color:#166534;">✓ Completed</span>
+                </td>
+            </tr>`;
+            });
+
+            tableHtml += `</tbody></table>`;
+            document.getElementById('logsModalBody').innerHTML = header + tableHtml;
+
+        } catch (err) {
+            console.error('Completed barges load error:', err);
+            document.getElementById('logsModalBody').innerHTML =
+                '<div style="padding:20px;text-align:center;color:#dc2626;">Failed to load. Please try again.</div>';
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT DETAILS — multi-select dropdowns
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadShiftDetails() {
+        const data = await (await fetch("/api/module/RP01/shift-details")).json();
+        SHIFT_INCHARGE_LIST = data.shift_incharge_list || [];
+        CRANE_OPERATOR_LIST = data.crane_operator_list || [];
+    }
+
+    function openMultiPicker(inputId, getList) {
+        const inp = document.getElementById(inputId);
+        const optList = getList();
+        const current = inp.value ? inp.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        // Build dropdown
+        const dd = document.createElement('div');
+        dd.style.cssText = `
+        position:fixed;z-index:99999;background:#fff;border:1px solid #cbd5e0;
+        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.18);padding:8px;
+        min-width:220px;max-height:280px;overflow-y:auto;`;
+
+        const sb = document.createElement('input');
+        sb.type = 'text';
+        sb.placeholder = 'Search…';
+        sb.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
+        dd.appendChild(sb);
+
+        const lc = document.createElement('div');
+        dd.appendChild(lc);
+
+        let selected = [...current];
+
+        function renderOpts(filter) {
+            lc.innerHTML = '';
+            optList.filter(i => !filter || i.toLowerCase().includes(filter.toLowerCase()))
+                .forEach(item => {
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                    label.onmouseenter = () => label.style.background = '#f1f5f9';
+                    label.onmouseleave = () => label.style.background = 'none';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = item;
+                    cb.checked = selected.includes(item);
+                    cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;accent-color:#4a90d9;';
+                    cb.addEventListener('change', () => {
+                        if (cb.checked) { if (!selected.includes(item)) selected.push(item); }
+                        else { selected = selected.filter(s => s !== item); }
+                    });
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(item));
+                    lc.appendChild(label);
+                });
+        }
+
+        renderOpts('');
+        sb.addEventListener('input', () => renderOpts(sb.value));
+
+        // Buttons
+        const br = document.createElement('div');
+        br.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+
+        const applyBtn = document.createElement('button');
+        applyBtn.textContent = 'Apply';
+        applyBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+        applyBtn.onclick = e => { e.stopPropagation(); cleanup(); inp.value = selected.join(', '); markUnsaved(); };
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+        cancelBtn.onclick = e => { e.stopPropagation(); cleanup(); };
+
+        br.appendChild(applyBtn);
+        br.appendChild(cancelBtn);
+        dd.appendChild(br);
+        document.body.appendChild(dd);
+
+        // Position under input
+        const rect = inp.getBoundingClientRect();
+        dd.style.left = rect.left + 'px';
+        dd.style.top = (rect.bottom + 2) + 'px';
+        dd.style.display = 'block';
+        sb.focus();
+
+        function cleanup() { if (dd.parentNode) dd.parentNode.removeChild(dd); document.removeEventListener('mousedown', outside); }
+        function outside(e) { if (!dd.contains(e.target) && !inp.contains(e.target)) { cleanup(); } }
+        setTimeout(() => document.addEventListener('mousedown', outside), 10);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT WISE DISCHARGE
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadShiftWiseDischarge() {
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+        if (!reportDate) return;
+
+        const params = new URLSearchParams({ date: reportDate, shift: shift });
+
+        let data;
+        try {
+            const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+            data = await res.json();
+        } catch (e) {
+            console.error('shift-wise-discharge error:', e);
+            return;
+        }
+
+        const tbody = document.getElementById('shiftDischargeBody');
+        tbody.innerHTML = '';
+
+        const jetty = data.jetty_discharge || [];
+        const barges = data.barge_discharge || [];
+        const mbcs = data.mbc_discharge || [];
+
+        // Left table: all barges first, then all MBCs
+        const bargeRows = [...barges, ...mbcs];
+
+        // Payloader column: collect all names from barges and MBCs
+        const payloaderRows = [...barges, ...mbcs]
+            .filter(r => r.payloader_cl)
+            .map(r => r.payloader_cl);
+
+        // Labour column: collect all names from barges and MBCs
+        const labourRows = [...barges, ...mbcs]
+            .filter(r => r.labour_cleaned)
+            .map(r => r.labour_cleaned);
+
+        const maxRows = Math.max(jetty.length, bargeRows.length, 1);
+
+        let jettyTotal = 0, blTotal = 0, actualTotal = 0;
+
+
+        for (let i = 0; i < maxRows; i++) {
+            const j = jetty[i];
+            const b = bargeRows[i];
+
+            if (j) jettyTotal += j.qty || 0;
+            if (b) blTotal += b.bl_qty || 0;
+            if (b) actualTotal += b.actual_discharge || 0;
+
+            const typeBadge = b ? `<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
+            background:${b.type === 'MBC' ? '#dbeafe' : '#fef9c3'};
+            color:${b.type === 'MBC' ? '#1e40af' : '#92400e'};">${b.type}</span>` : '';
+
+            tbody.innerHTML += `<tr>
+            <td>${j ? (j.cargo_name || '') : ''}</td>
+            <td style="text-align:right;">${j ? j.qty.toLocaleString() : ''}</td>
+            <td>${b ? typeBadge + ' ' + b.name : ''}</td>
+            <td>${b ? b.cargo : ''}</td>
+            <td style="text-align:right;">${b && b.bl_qty ? b.bl_qty.toLocaleString() : ''}</td>
+            <td style="text-align:right;font-weight:600;">${b && b.actual_discharge ? b.actual_discharge.toLocaleString() : ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${payloaderRows[i] || ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${labourRows[i] || ''}</td>
+        </tr>`;
+        }
+
+        tbody.innerHTML += `<tr class="total-row">
+        <td><b>TOTAL</b></td>
+        <td style="text-align:right;"><b>${jettyTotal.toLocaleString()}</b></td>
+        <td></td><td></td>
+        <td style="text-align:right;"><b>${blTotal.toLocaleString()}</b></td>
+        <td style="text-align:right;"><b>${actualTotal.toLocaleString()}</b></td>
+        <td></td><td></td>
+        </tr>`;
+        // ✅ DO NOT call updateSlagClinkerSummary() here
+        // loadShiftSummary() will call it after totalDischarge is ready
+    }
+
+    async function loadShiftSummary() {
+        const reportDate = document.getElementById('report-date').value;
+        const shifts = ['A', 'B', 'C'];
+        const discharge = { A: 0, B: 0, C: 0 };
+
+        for (const shift of shifts) {
+            const params = new URLSearchParams({ date: reportDate, shift: shift });
+            const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+            const data = await res.json();
+
+            let total = 0;
+            [...(data.barge_discharge || []), ...(data.mbc_discharge || [])].forEach(row => {
+                total += Number(row.actual_discharge || 0);
+            });
+            discharge[shift] = total;
+        }
+
+        document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
+        document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
+        document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
+
+        calculateShiftDiff();
+        updateSlagClinkerSummary();
+    }
+
+    function updateSlagClinkerSummary() {
+        let slagQty = 0;
+        let clinkerQty = 0;
+
+        document.querySelectorAll("#shiftDischargeBody tr").forEach(row => {
+            // ✅ Skip the TOTAL footer row
+            if (row.classList.contains('total-row')) return;
+
+            const cargo = (row.cells[3]?.textContent || "").trim().toLowerCase();
+            const qty = parseFloat((row.cells[5]?.textContent || "0").replace(/,/g, "")) || 0;
+
+            // ✅ catches brbf fines, vizag fines, goa fines, or any "fines" variant
+            if (cargo.includes("slag")) {
+                slagQty += qty;
+            }
+
+            if (cargo === "clinker") {
+                clinkerQty += qty;
+            }
+        });
+
+        // ✅ Read totalDischarge AFTER calculateShiftDiff() has written it to DOM
+        const totalDischarge = parseFloat(
+            (document.getElementById("totalDischarge").textContent || "0").replace(/,/g, "")
+        ) || 0;
+
+        const slagClinkerTotal = slagQty + clinkerQty;
+
+        // ✅ STEEL PLANT = Total Discharge - (Slag + Clinker)
+        // e.g. 57,174 - 28,370 = 28,804
+        const steelPlant = totalDischarge - slagClinkerTotal;
+
+        document.getElementById("slagQty").textContent = slagQty.toLocaleString();
+        document.getElementById("clinkerQty").textContent = clinkerQty.toLocaleString();
+        document.getElementById("totalQty").textContent = slagClinkerTotal.toLocaleString();
+        document.getElementById("steelPlantQty").textContent = steelPlant.toLocaleString();
+    }
+
+    function getNumber(id) {
+        return parseFloat(document.getElementById(id).textContent.replace(/,/g, '')) || 0;
+    }
+
+    function formatNumber(value) {
+        return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    }
+
+    function calculateShiftDiff() {
+        const aDis = getNumber('aDischarge');
+        const bDis = getNumber('bDischarge');
+        const cDis = getNumber('cDischarge');
+
+        const aPlan = parseFloat(document.getElementById('aPlan').value) || 0;
+        const bPlan = parseFloat(document.getElementById('bPlan').value) || 0;
+        const cPlan = parseFloat(document.getElementById('cPlan').value) || 0;
+
+        document.getElementById('aDiff').textContent = document.getElementById('aPlan').value ? formatNumber(aPlan - aDis) : '';
+        document.getElementById('bDiff').textContent = document.getElementById('bPlan').value ? formatNumber(bPlan - bDis) : '';
+        document.getElementById('cDiff').textContent = document.getElementById('cPlan').value ? formatNumber(cPlan - cDis) : '';
+
+        const totalDischarge = aDis + bDis + cDis;
+        const totalPlan = aPlan + bPlan + cPlan;
+
+        document.getElementById('totalDischarge').textContent = formatNumber(totalDischarge);
+        document.getElementById('totalPlan').textContent = totalPlan > 0 ? formatNumber(totalPlan) : '';
+        document.getElementById('totalDiff').textContent = totalPlan > 0 ? formatNumber(totalPlan - totalDischarge) : '';
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  EXCEL DOWNLOAD
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function downloadExcel() {
+        const reportDate = document.getElementById('report-date').value;
+        const shiftVal = document.getElementById('report-shift').value;
+        const shiftIncharge = encodeURIComponent(document.getElementById('shiftInchargeName').value || '');
+        const bpo = encodeURIComponent(document.getElementById('shiftBpoName').value || '');
+        const operator = encodeURIComponent(document.getElementById('shiftIportName').value || '');
+
+        document.getElementById("excelLoader").style.display = "flex";
+
+        try {
+            const response = await fetch(
+                `/api/module/RP01/download-barge-position-excel?date=${reportDate}&shift=${shiftVal}&shift_incharge=${shiftIncharge}&bpo=${bpo}&operator=${operator}`
+            );
+
+            if (!response.ok) throw new Error("Download failed");
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+
+            const disposition = response.headers.get("Content-Disposition");
+            let filename = "Daily_Barge_Position_Report.xlsx";
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+        } catch (err) {
+            console.error(err);
+            alert("Excel download failed.");
+        } finally {
+            document.getElementById("excelLoader").style.display = "none";
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  RESET
+    // ══════════════════════════════════════════════════════════════════════════════
+    function resetReport() {
+        document.getElementById('reportContent').style.display = 'none';
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
+        document.getElementById('saveReportBtn').disabled = true;
+        _unsaved = false;
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  INIT
+    // ══════════════════════════════════════════════════════════════════════════════
+    document.addEventListener("DOMContentLoaded", () => {
+        loadShiftDetails();
+
+        const dateInput = document.getElementById('report-date');
+        const shiftInput = document.getElementById('report-shift');
+        dateInput.value = new Date().toISOString().slice(0, 10);
+        shiftInput.value = 'ALL';
+
+        // Warn before leaving with unsaved changes
+        window.addEventListener('beforeunload', e => {
+            if (_unsaved) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
+        // Initial dropzone binding
+        bindDropzones();
+    });
+</script>
+{% endraw %}
+
+{% endblock %}
