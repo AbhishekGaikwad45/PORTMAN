@@ -1426,24 +1426,21 @@ function renderBargeDischargeReport(data) {
 
     console.log("BARGE REPORT DATA:", data);
 
-    const container =
-        document.getElementById('report-container');
+    const container = document.getElementById('report-container');
 
     if (!data) {
         return;
     }
 
-    const cargoTypes =
-        data.cargo_types || {};
+    const cargoHierarchy = data.cargo_hierarchy || {};   // cargo_type -> [cargo_categories]
+    const equipmentRows = data.equipment_rows || {};      // equipment -> "type||category" -> qty
+    const equipmentTotals = data.equipment_totals || {};
+    const monthTotals = data.month_totals || {};
+    const fyTotals = data.fy_totals || {};
+    const cumulativeTotals = data.cumulative_totals || {};
 
-    const equipmentRows =
-        data.equipment_rows || {};
-    
-    const monthTotals =
-    data.month_totals || {};
-
-    const yearTotals =
-    data.year_totals || {};
+    const catKey = (type, cat) => `${type}||${cat}`;
+    const fmt = (n) => (n ? Number(n).toLocaleString('en-IN') : '0');
 
     let html = `
 
@@ -1473,14 +1470,12 @@ function renderBargeDischargeReport(data) {
                         </th>
     `;
 
-    // TOP HEADER → CARGO TYPES
-    Object.keys(cargoTypes).forEach(type => {
+    // TOP HEADER -> CARGO TYPES
+    Object.keys(cargoHierarchy).forEach(type => {
 
         html += `
 
-            <th colspan="
-                ${cargoTypes[type].length}
-            "
+            <th colspan="${cargoHierarchy[type].length}"
             style="
                 text-align:center;
                 font-size:18px;
@@ -1492,12 +1487,20 @@ function renderBargeDischargeReport(data) {
         `;
     });
 
-    html += `</tr><tr>`;
+    // TOP HEADER -> Total / Total-This-Month (span both header rows)
+    html += `
+        <th rowspan="2" style="min-width:100px; text-align:center; vertical-align:middle;">
+            Total
+        </th>
+        <th rowspan="2" style="min-width:100px; text-align:center; vertical-align:middle;">
+            Total -<br/>This Month
+        </th>
+    </tr><tr>`;
 
-    // SECOND HEADER → CARGO NAMES
-    Object.keys(cargoTypes).forEach(type => {
+    // SECOND HEADER -> CARGO CATEGORIES (no cargo_name row)
+    Object.keys(cargoHierarchy).forEach(type => {
 
-        cargoTypes[type].forEach(cargo => {
+        cargoHierarchy[type].forEach(category => {
 
             html += `
 
@@ -1506,7 +1509,7 @@ function renderBargeDischargeReport(data) {
                     text-align:center;
                 ">
 
-                    ${cargo}
+                    ${category}
 
                 </th>
             `;
@@ -1531,12 +1534,12 @@ function renderBargeDischargeReport(data) {
                 </td>
         `;
 
-        Object.keys(cargoTypes).forEach(type => {
+        Object.keys(cargoHierarchy).forEach(type => {
 
-            cargoTypes[type].forEach(cargo => {
+            cargoHierarchy[type].forEach(category => {
 
-                const qty =
-                    equipmentRows[equipment][cargo];
+                const key = catKey(type, category);
+                const qty = equipmentRows[equipment][key];
 
                 html += `
 
@@ -1544,132 +1547,139 @@ function renderBargeDischargeReport(data) {
                         text-align:center;
                     ">
 
-                        ${qty
-                            ? qty.toLocaleString('en-IN')
-                            : ''
-                        }
+                        ${qty ? qty.toLocaleString('en-IN') : ''}
 
                     </td>
                 `;
             });
         });
 
-        html += `</tr>`;
+        const rowTotals = equipmentTotals[equipment] || {};
+
+        html += `
+                <td style="text-align:center; font-weight:600;">
+                    ${fmt(rowTotals.total_day)}
+                </td>
+                <td style="text-align:center; font-weight:600;">
+                    ${fmt(rowTotals.total_month)}
+                </td>
+            </tr>
+        `;
     });
 
-
-
-html += `</tr>`;
-
-    // TOTAL ROW
+    // ---- TOTAL FOR THE DAY ---- (grand total under "Total")
     html += `
-
-        <tr style="
-            background:#f5f5f5;
-            font-weight:700;
-        ">
-
-            <td>
-                Total For The Day
-            </td>
+        <tr style="background:#f5f5f5; font-weight:700;">
+            <td>Total For The Day</td>
     `;
 
-    Object.keys(cargoTypes).forEach(type => {
+    let dayGrandTotal = 0;
 
-        cargoTypes[type].forEach(cargo => {
+    Object.keys(cargoHierarchy).forEach(type => {
 
+        cargoHierarchy[type].forEach(category => {
+
+            const key = catKey(type, category);
             let total = 0;
 
             Object.keys(equipmentRows).forEach(equipment => {
-
-                total += Number(
-                    equipmentRows[equipment][cargo] || 0
-                );
+                total += Number(equipmentRows[equipment][key] || 0);
             });
 
+            dayGrandTotal += total;
+
             html += `
-
-                <td style="
-                    text-align:center;
-                ">
-
-                    ${total.toLocaleString('en-IN')}
-
+                <td style="text-align:center;">
+                    ${fmt(total)}
                 </td>
             `;
         });
     });
 
     html += `
+        <td style="text-align:center;">${fmt(dayGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
 
-    <tr style="
-        background:#fff8dc;
-        font-weight:700;
-    ">
+    // ---- TOTAL RECEIPTS FOR THE MONTH ---- (grand total under "Total - This Month")
+    html += `
+        <tr style="background:#fff8dc; font-weight:700;">
+            <td>Total Receipts for the Month</td>
+    `;
 
-        <td>
-            Month Total
-        </td>
-`;
+    let monthGrandTotal = 0;
 
-Object.keys(cargoTypes).forEach(type => {
-
-    cargoTypes[type].forEach(cargo => {
-
-        html += `
-
-            <td style="
-                text-align:center;
-            ">
-
-                ${(
-                    monthTotals[cargo] || 0
-                ).toLocaleString('en-IN')}
-
-            </td>
-        `;
+    Object.keys(cargoHierarchy).forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = monthTotals[key] || 0;
+            monthGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
     });
-});
-
-html += `
-
-    <tr style="
-        background:#e8f5e9;
-        font-weight:700;
-    ">
-
-        <td>
-            Year Total
-        </td>
-`;
-
-Object.keys(cargoTypes).forEach(type => {
-
-    cargoTypes[type].forEach(cargo => {
-
-        html += `
-
-            <td style="
-                text-align:center;
-            ">
-
-                ${(
-                    yearTotals[cargo] || 0
-                ).toLocaleString('en-IN')}
-
-            </td>
-        `;
-    });
-});
-
-html += `</tr>`;
-
-html += `</tr>`;
 
     html += `
+        <td style="text-align:center;"></td>
+        <td style="text-align:center;">${fmt(monthGrandTotal)}</td>
+    </tr>`;
 
-                </tr>
+    // ---- TOTAL RECEIPTS FY ---- (grand total under "Total", NOT "Total - This Month")
+    html += `
+        <tr style="background:#e8f5e9; font-weight:700;">
+            <td>Total Receipts FY</td>
+    `;
 
+    let fyGrandTotal = 0;
+
+    Object.keys(cargoHierarchy).forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = fyTotals[key] || 0;
+            fyGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;">${fmt(fyGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
+
+    // ---- TOTAL CUMULATIVE TILL DATE ---- (grand total under "Total", NOT "Total - This Month")
+    html += `
+        <tr style="background:#eef2f5; font-weight:700;">
+            <td>Total Cumulative till date</td>
+    `;
+
+    let cumulativeGrandTotal = 0;
+
+    Object.keys(cargoHierarchy).forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = cumulativeTotals[key] || 0;
+            cumulativeGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;">${fmt(cumulativeGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
+
+    html += `
                 </table>
 
             </div>
@@ -1679,8 +1689,6 @@ html += `</tr>`;
 
     container.innerHTML += html;
 }
-
-
 async function loadMbcReport(reportDate) {
 
     try {

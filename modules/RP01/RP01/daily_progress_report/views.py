@@ -1415,172 +1415,211 @@ def barge_discharge_report():
 
     report_date = request.args.get('report_date')
 
-    print("\n========== BARGE REPORT START ==========")
-    print("REPORT DATE:", report_date)
-
     if not report_date:
-        print("ERROR: REPORT DATE MISSING")
         return jsonify({"success": False, "message": "Report date required"})
 
-    # Window: previous day 06:00 -> report_date 06:00
-    window_start = (
-        datetime.strptime(report_date, "%Y-%m-%d") - timedelta(days=1)
-    ).strftime("%Y-%m-%d") + " 06:00:00"
-    window_end = f"{report_date} 06:00:00"
+    try:
+        report_date_obj = datetime.strptime(report_date, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"success": False, "message": "Invalid report_date format, expected YYYY-MM-DD"})
 
-    print("WINDOW START:", window_start)
-    print("WINDOW END:", window_end)
+    # Selecting "13" means: show data for 12th (report_date - 1 day)
+    data_date_obj = report_date_obj - timedelta(days=1)
+    data_date = data_date_obj.strftime("%Y-%m-%d")
+
+    # Month-to-date: 1st of that month -> data_date
+    month_start = data_date_obj.replace(day=1).strftime("%Y-%m-%d")
+
+    # Fiscal year start (assumption: Apr 1)
+    fy_start_year = data_date_obj.year if data_date_obj.month >= 4 else data_date_obj.year - 1
+    fy_start = f"{fy_start_year}-04-01"
+
+    # Historic table (rp01_historical_lueu) covers April only.
+    # Live table (lueu_lines) covers May 1 onward for this FY.
+    historic_cutoff = f"{fy_start_year}-04-30"
+    live_start = f"{fy_start_year}-05-01"
+
+    EQUIP_EXPR = """
+        CASE TRIM(equipment_name)
+            WHEN 'Barge Unloader 1' THEN 'BUL-01'
+            WHEN 'Barge Unloader 2' THEN 'BUL-02'
+            ELSE COALESCE(TRIM(equipment_name), 'Others')
+        END
+    """
+
+    def cat_key(ctype, ccat):
+        return f"{ctype}||{ccat}"
 
     conn = get_db()
     cur = get_cursor(conn)
 
     try:
-        query = """
-        SELECT
-            COALESCE(vc.cargo_type, 'Others') AS cargo_type,
-            COALESCE(TRIM(lbl.cargo_name), '-') AS cargo_name,
-            COALESCE(lbl.port_crane, 'Others') AS equipment_used,
+        # 0) FULL master list of cargo_type -> cargo_category
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category
+            FROM vessel_cargo vc
+            GROUP BY vc.cargo_type, vc.cargo_category
+            ORDER BY vc.cargo_type, vc.cargo_category
+        """)
+        master_cargo_rows = cur.fetchall()
 
-            SUM(COALESCE(lbl.discharge_quantity, 0)) AS total_qty,
+        # 0b) FULL master list of equipment (live table only)
+        cur.execute(f"""
+            SELECT DISTINCT {EQUIP_EXPR} AS equipment
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE
+            ORDER BY 1
+        """)
+        master_equipment_rows = cur.fetchall()
 
-            (
-                SELECT SUM(COALESCE(lbl2.discharge_quantity, 0))
-                FROM ldud_barge_lines lbl2
-                WHERE LOWER(TRIM(lbl2.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
-                  AND lbl2.completed_loading::timestamp
-                      BETWEEN DATE_TRUNC('month', %(report_date)s::date)::timestamp
-                          AND (%(report_date)s::date + INTERVAL '1 day' - INTERVAL '1 second')
-            ) AS month_total,
+        # 1) Day-level matrix: equipment x (cargo_type, cargo_category) for entry_date = data_date ONLY (live table only)
+        cur.execute(f"""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')} AS equipment,
+                SUM(lbl.quantity) AS day_qty
+            FROM lueu_lines lbl
+            LEFT JOIN vessel_cargo vc
+                ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+            WHERE lbl.is_deleted IS NOT TRUE
+              AND lbl.quantity IS NOT NULL
+              AND lbl.entry_date::date = %(data_date)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category, {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')}
+        """, {"data_date": data_date})
+        day_rows = cur.fetchall()
 
-            (
-                SELECT SUM(COALESCE(lbl3.discharge_quantity, 0))
-                FROM ldud_barge_lines lbl3
-                WHERE LOWER(TRIM(lbl3.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
-                  AND lbl3.completed_loading::timestamp
-                      BETWEEN DATE_TRUNC('year', %(report_date)s::date)::timestamp
-                          AND (%(report_date)s::date + INTERVAL '1 day' - INTERVAL '1 second')
-            ) AS year_total
+        # 2a) Historic total (rp01_historical_lueu): fy_start -> historic_cutoff (April 1 - April 30)
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(h.quantity, 0)) AS historic_total
+            FROM rp01_historical_lueu h
+            LEFT JOIN vessel_cargo vc
+                ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(h.cargo_name))
+            WHERE h.quantity IS NOT NULL
+              AND h.entry_date BETWEEN %(fy_start)s::date AND %(historic_cutoff)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"fy_start": fy_start, "historic_cutoff": historic_cutoff})
+        historic_rows = cur.fetchall()
 
-        FROM ldud_barge_lines lbl
+        # 2b) Live total (lueu_lines): month_total (calendar month -> data_date),
+        #     live_fy_total (live_start -> data_date), live_cumulative_total (live_start -> data_date)
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(lbl.quantity, 0)) AS live_fy_total,
+                SUM(CASE WHEN lbl.entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total,
+                SUM(CASE WHEN lbl.entry_date::date <= %(data_date)s::date
+                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS live_cumulative_total
+            FROM lueu_lines lbl
+            LEFT JOIN vessel_cargo vc
+                ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+            WHERE lbl.is_deleted IS NOT TRUE
+              AND lbl.quantity IS NOT NULL
+              AND lbl.entry_date::date BETWEEN %(live_start)s::date AND %(data_date)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
+        live_rows = cur.fetchall()
 
-        LEFT JOIN vessel_cargo vc
-            ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+        # 3) Per-equipment totals: day total (live only) and month total (live only)
+        cur.execute(f"""
+            SELECT
+                {EQUIP_EXPR} AS equipment,
+                SUM(CASE WHEN entry_date::date = %(data_date)s::date
+                    THEN quantity ELSE 0 END) AS day_total,
+                SUM(CASE WHEN entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+                    THEN quantity ELSE 0 END) AS month_total
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND quantity IS NOT NULL
+            GROUP BY {EQUIP_EXPR}
+        """, {"data_date": data_date, "month_start": month_start})
+        equipment_totals_rows = cur.fetchall()
 
-        WHERE
-            lbl.completed_loading::timestamp >= %(window_start)s::timestamp
-            AND lbl.completed_loading::timestamp < %(window_end)s::timestamp
+        # ---- Build FULL cargo hierarchy: cargo_type -> [cargo_categories] ----
+        cargo_hierarchy = {}
+        for row in master_cargo_rows:
+            ctype = row['cargo_type']
+            ccat = row['cargo_category']
+            cargo_hierarchy.setdefault(ctype, [])
+            if ccat not in cargo_hierarchy[ctype]:
+                cargo_hierarchy[ctype].append(ccat)
 
-        GROUP BY
-            vc.cargo_type,
-            lbl.cargo_name,
-            lbl.port_crane
+        all_keys = [cat_key(row['cargo_type'], row['cargo_category']) for row in master_cargo_rows]
 
-        ORDER BY
-            vc.cargo_type,
-            lbl.cargo_name,
-            lbl.port_crane
-        """
-
-        params = {
-            "report_date": report_date,
-            "window_start": window_start,
-            "window_end": window_end,
-        }
-
-        print("\nEXECUTING QUERY:")
-        print(query)
-        print("\nQUERY PARAMS:")
-        print(params)
-
-        cur.execute(query, params)
-
-        print("\nQUERY EXECUTED SUCCESSFULLY")
-
-        rows = cur.fetchall()
-
-        print("\nTOTAL ROWS:")
-        print(len(rows))
-
-        cargo_types = {}
+        # ---- Seed equipment_rows with the FULL equipment list (zeros by default) ----
         equipment_rows = {}
+        for row in master_equipment_rows:
+            equipment_rows[row['equipment']] = {k: 0 for k in all_keys}
+
+        for row in day_rows:
+            equip = row['equipment']
+            key = cat_key(row['cargo_type'], row['cargo_category'])
+            equipment_rows.setdefault(equip, {k: 0 for k in all_keys})
+            equipment_rows[equip][key] = int(row['day_qty'] or 0)
+
+        # ---- Historic totals (April) per category ----
+        historic_totals = {}
+        for row in historic_rows:
+            key = cat_key(row['cargo_type'], row['cargo_category'])
+            historic_totals[key] = int(row['historic_total'] or 0)
+
+        # ---- Live totals (May onward) merged with historic to form FY / cumulative ----
         month_totals = {}
-        year_totals = {}
+        fy_totals = {}
+        cumulative_totals = {}
+        for row in live_rows:
+            key = cat_key(row['cargo_type'], row['cargo_category'])
+            month_totals[key] = int(row['month_total'] or 0)
+            live_fy = int(row['live_fy_total'] or 0)
+            live_cum = int(row['live_cumulative_total'] or 0)
+            hist = historic_totals.get(key, 0)
+            fy_totals[key] = hist + live_fy
+            cumulative_totals[key] = hist + live_cum
 
-        for row in rows:
+        # Categories that ONLY had historic (April) activity, with nothing live yet
+        for key, hist_val in historic_totals.items():
+            if key not in fy_totals:
+                fy_totals[key] = hist_val
+                cumulative_totals[key] = hist_val
+                month_totals.setdefault(key, 0)
 
-            print("\nCURRENT ROW:")
-            print(row)
-
-            cargo_type = row['cargo_type'] or 'Others'
-            cargo_name = row['cargo_name'] or '-'
-            equipment = row['equipment_used'] or 'Others'
-            qty = int(row['total_qty'] or 0)
-            month_total = int(row['month_total'] or 0)
-            year_total = int(row['year_total'] or 0)
-
-            print("CARGO TYPE:", cargo_type)
-            print("CARGO:", cargo_name)
-            print("EQUIPMENT:", equipment)
-            print("DAY QTY:", qty)
-            print("MONTH TOTAL:", month_total)
-            print("YEAR TOTAL:", year_total)
-
-            month_totals[cargo_name] = month_total
-            year_totals[cargo_name] = year_total
-
-            if cargo_type not in cargo_types:
-                cargo_types[cargo_type] = []
-                print("NEW CARGO TYPE ADDED:", cargo_type)
-
-            if cargo_name not in cargo_types[cargo_type]:
-                cargo_types[cargo_type].append(cargo_name)
-                print("CARGO NAME ADDED TO TYPE:", cargo_name, "->", cargo_type)
-
-            if equipment not in equipment_rows:
-                equipment_rows[equipment] = {}
-                print("NEW EQUIPMENT ROW ADDED:", equipment)
-
-            equipment_rows[equipment][cargo_name] = qty
+        # ---- Seed equipment_totals with full equipment list too ----
+        equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
+        for row in equipment_totals_rows:
+            equipment_totals[row['equipment']] = {
+                "total_day": int(row['day_total'] or 0),
+                "total_month": int(row['month_total'] or 0),
+            }
 
         final_data = {
-            "cargo_types": cargo_types,
+            "cargo_hierarchy": cargo_hierarchy,
             "equipment_rows": equipment_rows,
+            "equipment_totals": equipment_totals,
             "month_totals": month_totals,
-            "year_totals": year_totals,
+            "fy_totals": fy_totals,
+            "cumulative_totals": cumulative_totals,
         }
-
-        print("\nFINAL CARGO TYPES:")
-        print(cargo_types)
-
-        print("\nFINAL EQUIPMENT ROWS:")
-        print(equipment_rows)
-
-        print("\nFINAL MONTH TOTALS:")
-        print(month_totals)
-
-        print("\nFINAL YEAR TOTALS:")
-        print(year_totals)
-
-        print("\n========== BARGE REPORT END ==========\n")
 
         return jsonify({"success": True, "data": final_data})
 
     except Exception as e:
-        print("\n========== BARGE REPORT ERROR ==========")
         import traceback
         traceback.print_exc()
-        print(str(e))
-        print("========== ERROR END ==========\n")
         return jsonify({"success": False, "message": str(e)})
 
     finally:
-        print("\nCLOSING DB CONNECTION")
         cur.close()
         conn.close()
 
-from flask import request, jsonify
-from datetime import datetime, timedelta
-# from your_app import bp, login_required, get_db, get_cursor  # keep your existing imports
+# from flask import request, jsonify
+# from datetime import datetime, timedelta
+# # from your_app import bp, login_required, get_db, get_cursor  # keep your existing imports
 
 
         
@@ -2754,76 +2793,76 @@ def vessel_discharge_summary():
 )
 @login_required
 def daily_progress_report_excel():
- 
+
     report_date = request.args.get('report_date')
- 
+
     if not report_date:
         return jsonify({
             "success": False,
             "message": "Report date required"
         })
- 
+
     conn = get_db()
     cur = get_cursor(conn)
- 
+
     try:
         report_dt = datetime.strptime(report_date, "%Y-%m-%d")
- 
+
         window_end = datetime(
             report_dt.year, report_dt.month, report_dt.day, 8, 0, 0
         )
         window_start = window_end - timedelta(hours=24)
         month_start = report_dt.replace(day=1).date()
- 
+
         # =====================================================
         # STYLES — matched cell-by-cell against the reference
         # workbook (see header comment above for the mapping).
         # =====================================================
- 
+
         thin = Side(style='thin', color='000000')
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
- 
+
         yellow_fill = PatternFill('solid', fgColor='FFFF00')
         white_fill = PatternFill('solid', fgColor='FFFFFF')
- 
+
         center = Alignment(horizontal='center', vertical='center', wrap_text=True)
         left = Alignment(horizontal='left', vertical='center', wrap_text=True)
- 
+
         # Main title bar: "DAILY REPORT OF JSW DHARAMTAR PORT OPERATIONS"
         title_font = Font(name='Calibri', bold=True, size=16)
- 
+
         # Plain row captions ("Vessel Name", dates, barge-status
         # labels) — NOT bold, NOT red, white fill.
         caption_font = Font(name='Calibri', bold=False, size=16)
- 
+
         # Bold black values inside the vessel grid (vessel name,
         # cargo, quantities, timestamps).
         value_font = Font(name='Calibri', bold=False, size=12)
- 
+
         # Section headers that open a new block: "Date / Day",
         # "Mother Vessel Name", "Remarks:", "MBC'S DISCHARGE
         # COMPLETED", "Vessel Completed for The Month …" — bold
         # RED text on YELLOW fill.
         section_font = Font(name='Calibri', bold=True, size=16, color='FF0000')
- 
+
         # Delay-row text ("Bad Weather : ...", "Want of Barge : ...")
         # sits on the same yellow fill as a section header, but the
         # text itself should be BLACK, not red.
         delay_font = Font(name='Calibri', bold=True, size=16, color='000000')
- 
+
         # Row height (in points) used for the delay row and for the
         # whole "Mother Vessel Name" -> barge-status -> "Remarks:"
         # block below it, so multi-line delay text and long barge
         # name lists aren't clipped.
         TALL_ROW_HEIGHT = 60
- 
+
         # Column headers inside data tables (MBC Name, Cargo,
         # Source, Qty …) — bold black, no fill.
         header_font = Font(name='Calibri', bold=True, size=13)
- 
+
         # Ordinary table data rows.
         data_font = Font(name='Calibri', bold=False, size=11)
- 
+
         def caption(row, col, text, span=1, font=caption_font, fill=white_fill, align=left):
             """Plain (non-highlighted) row/column caption."""
             if span > 1:
@@ -2840,20 +2879,20 @@ def daily_progress_report_excel():
                     ec.fill = fill
                     ec.border = border
             return c
- 
+
         def section(row, col, text, span=1, align=left):
             """Bold red-on-yellow section header."""
             return caption(row, col, text, span=span, font=section_font,
                             fill=yellow_fill, align=align)
- 
+
         def value(row, col, val, span=1, font=value_font, align=center):
             return caption(row, col, val, span=span, font=font,
                             fill=white_fill, align=align)
- 
+
         def header(row, col, text, span=1, align=center):
             return caption(row, col, text, span=span, font=header_font,
                             fill=yellow_fill, align=align)
- 
+
         def data(row, col, val, align=center, span=1):
             """Data cell. When span>1 the caller is expected to have
             already merged the range (ws.merge_cells) — this applies
@@ -2873,14 +2912,14 @@ def daily_progress_report_excel():
                     ec.fill = white_fill
                     ec.border = border
             return c
- 
+
         def fmt_dt(dt_value):
             if not dt_value:
                 return ''
             if hasattr(dt_value, 'strftime'):
                 return dt_value.strftime('%d-%m-%Y %H:%M')
             return _parse_flexible(str(dt_value), '%d-%m-%Y %H:%M')
- 
+
         def _parse_flexible(raw, out_fmt):
             """Parse a stored timestamp string that may or may not include
             seconds/microseconds, and format it for display. Falls back to
@@ -2898,16 +2937,16 @@ def daily_progress_report_excel():
                 return datetime.strptime(s[:16], '%Y-%m-%d %H:%M').strftime(out_fmt)
             except ValueError:
                 return s
- 
+
         wb = Workbook()
         ws = wb.active
         ws.title = "MIS"
- 
+
         # =====================================================
         # TITLE BAR (matches reference row 1: yellow fill, bold,
         # 16pt, plus "Document No.OPE/0100/F/10" at the far right)
         # =====================================================
- 
+
         ws.merge_cells('A1:W1')
         t = ws.cell(1, 1, 'DAILY REPORT OF JSW DHARAMTAR PORT OPERATIONS')
         t.font = title_font
@@ -2919,11 +2958,11 @@ def daily_progress_report_excel():
             cc.fill = yellow_fill
             cc.border = border
         caption(1, 24, 'Document No.OPE/0100/F/10', span=6, font=title_font, align=center)
- 
+
         # =====================================================
         # REPORT DATE + DOCUMENT CONTROL ROW (reference row 2)
         # =====================================================
- 
+
         row_no = 2
         caption(row_no, 1, 'Report Date :', font=title_font)
         value(row_no, 16,
@@ -2932,14 +2971,14 @@ def daily_progress_report_excel():
         caption(row_no, 22, 'Rev. No: 00', span=2, font=title_font, align=center)
         caption(row_no, 24, 'Issue No: 01', span=4, font=title_font, align=center)
         caption(row_no, 28, 'Issue Date:10.12.2022', span=6, font=title_font, align=left)
- 
+
         row_no = 3
- 
+
         # =====================================================
         # STEP 1: VESSEL LIST FOR THIS REPORT WINDOW
         # (same selection rule used by daily_progress_report_data)
         # =====================================================
- 
+
         vessel_query = """
         SELECT
             lh.id,
@@ -2999,45 +3038,45 @@ def daily_progress_report_excel():
             )
         ORDER BY first_anchor.discharge_started, lh.id
         """
- 
+
         cur.execute(vessel_query, (window_end, window_start))
         vessels = cur.fetchall()
         vessel_ids = [v['id'] for v in vessels]
- 
+
         # =====================================================
         # VESSEL DAILY GRID
         # Row captions match the reference EXACTLY, including
         # trailing spaces ("B/L QTY.(MT) ", "Discharge Commenced ",
         # "Discharge Completed ").
         # =====================================================
- 
+
         row_labels = [
             'Vessel Name', 'Cargo / Source', 'B/L QTY.(MT) ',
             'Arrived at MFL', 'Arrived at MbPT', 'Discharge Commenced ',
             'Pre-Berthing Delay', 'Discharge Completed '
         ]
- 
+
         VESSEL_BLOCK_WIDTH = 3
- 
+
         grid_start = row_no
         for i, label in enumerate(row_labels):
             caption(grid_start + i, 1, label, span=2)
- 
+
         col = 3
         vessel_col_map = {}
         for v in vessels:
             vessel_col_map[v['id']] = col
- 
+
             arrival_for_delay = v['arrived_mfl'] or v['arrived_mbpt']
             pre_delay = ''
             if v['discharge_started'] and arrival_for_delay:
                 hrs = round((v['discharge_started'] - arrival_for_delay).total_seconds() / 3600, 2)
                 pre_delay = f"{hrs} Hrs"
- 
+
             discharge_completed_disp = ''
             if v['discharge_commenced'] and window_start <= v['discharge_commenced'] < window_end:
                 discharge_completed_disp = fmt_dt(v['discharge_commenced'])
- 
+
             values = [
                 v['vessel_name'] or '',
                 v['cargo_name'] or '',
@@ -3048,21 +3087,21 @@ def daily_progress_report_excel():
                 pre_delay,
                 discharge_completed_disp,
             ]
- 
+
             # Vessel name (row 0 of the block) — bold black, white fill,
             # same as every other row (the reference does NOT highlight
             # the vessel-name cell itself, only the true section headers).
             for r_off, v2 in enumerate(values):
                 value(grid_start + r_off, col, v2, span=VESSEL_BLOCK_WIDTH)
- 
+
             col += VESSEL_BLOCK_WIDTH
- 
+
         row_no = grid_start + len(row_labels) + 1
- 
+
         # =====================================================
         # STEP 2: DAILY CARGO QUANTITY PER VESSEL
         # =====================================================
- 
+
         daily_query = """
         SELECT
             lh.id AS ldud_id,
@@ -3080,9 +3119,9 @@ def daily_progress_report_excel():
         GROUP BY lh.id, TRIM(vcd.cargo_name), DATE(lco.start_time)
         ORDER BY DATE(lco.start_time)
         """
- 
+
         daily_by_vessel = {v['id']: {} for v in vessels}
- 
+
         if vessel_ids:
             cur.execute(daily_query, (report_date, report_date, vessel_ids))
             for r in cur.fetchall():
@@ -3098,36 +3137,36 @@ def daily_progress_report_excel():
                 cname = r['cargo_name'] or ''
                 if cname and cname not in entry['cargoes']:
                     entry['cargoes'].append(cname)
- 
+
         all_days = sorted(
             {d for bucket in daily_by_vessel.values() for d in bucket},
             key=lambda s: datetime.strptime(s, '%d-%m-%Y')
         )
- 
+
         # =====================================================
         # DATE / DAY MATRIX
         # "Date / Day" is a true section header in the reference
         # (bold red on yellow) — the per-vessel "Cargo / Source /
         # Qty in MT / W/W Hrs." sub-headers are plain bold black.
         # =====================================================
- 
+
         matrix_header_row = row_no
         section(matrix_header_row, 1, 'Date / Day')
         caption(matrix_header_row, 2, 'Total MV Disch', font=header_font)
- 
+
         for v in vessels:
             c = vessel_col_map[v['id']]
             header(matrix_header_row, c, 'Cargo / Source')
             header(matrix_header_row, c + 1, 'Qty in MT')
             header(matrix_header_row, c + 2, 'W/W Hrs.')
- 
+
         matrix_row = matrix_header_row + 1
         vessel_totals = {v['id']: 0.0 for v in vessels}
- 
+
         for i, day in enumerate(all_days, start=1):
             day_total = 0.0
             caption(matrix_row, 1, f"{day}/{i:02d}", align=left)
- 
+
             for v in vessels:
                 c = vessel_col_map[v['id']]
                 entry = daily_by_vessel.get(v['id'], {}).get(day)
@@ -3143,10 +3182,10 @@ def daily_progress_report_excel():
                     data(matrix_row, c + 1, '')
                 # W/W Hrs — not tracked in the schema, left blank
                 data(matrix_row, c + 2, '')
- 
+
             data(matrix_row, 2, day_total)
             matrix_row += 1
- 
+
         # TOTAL row
         caption(matrix_row, 2, 'TOTAL', font=header_font)
         for v in vessels:
@@ -3155,7 +3194,7 @@ def daily_progress_report_excel():
             data(matrix_row, c + 1, vessel_totals[v['id']])
             data(matrix_row, c + 2, '')
         matrix_row += 1
- 
+
         # BALANCE ON BOARD row
         caption(matrix_row, 2, 'Balance on Board', font=header_font)
         for v in vessels:
@@ -3166,7 +3205,7 @@ def daily_progress_report_excel():
             data(matrix_row, c + 1, balance)
             data(matrix_row, c + 2, '')
         matrix_row += 1
- 
+
         # AVG DISCHARGE RATE PWWD row — no working-hours data source
         # in the schema, so this cannot be computed; left as NA.
         caption(matrix_row, 2, 'Avg Discharge Rate PWWD', font=header_font)
@@ -3176,7 +3215,7 @@ def daily_progress_report_excel():
             data(matrix_row, c + 1, 'NA')
             data(matrix_row, c + 2, '')
         matrix_row += 1
- 
+
         # HOOKS AVAILABLE row — no data source in schema; left as NA.
         caption(matrix_row, 2, 'Hooks Available', font=header_font)
         for v in vessels:
@@ -3185,12 +3224,12 @@ def daily_progress_report_excel():
             data(matrix_row, c + 1, 'NA')
             data(matrix_row, c + 2, '')
         matrix_row += 1
- 
+
         # =====================================================
         # DELAYS (per vessel) — this whole row is a section
         # header row in the reference: bold red on yellow.
         # =====================================================
- 
+
         delay_query = """
         SELECT
             ld.ldud_id,
@@ -3207,9 +3246,9 @@ def daily_progress_report_excel():
         GROUP BY ld.ldud_id, ld.delay_name, ld.crane_number
         ORDER BY ld.ldud_id, ld.delay_name, ld.crane_number
         """
- 
+
         delay_text_by_vessel = {v['id']: [] for v in vessels}
- 
+
         if vessel_ids:
             cur.execute(delay_query, (vessel_ids, window_end, window_start))
             grouped = {}
@@ -3224,7 +3263,7 @@ def daily_progress_report_excel():
                     delay_text_by_vessel[ldud_id].append(
                         f"{delay_name} :  " + "  ".join(parts) + "."
                     )
- 
+
         for v in vessels:
             c = vessel_col_map[v['id']]
             ws.merge_cells(start_row=matrix_row, start_column=c,
@@ -3239,23 +3278,23 @@ def daily_progress_report_excel():
                 ec = ws.cell(matrix_row, extra)
                 ec.fill = yellow_fill
                 ec.border = border
- 
+
         # Taller row so multi-line delay text isn't clipped.
         ws.row_dimensions[matrix_row].height = TALL_ROW_HEIGHT
- 
+
         matrix_row += 1
- 
+
         row_no = matrix_row
- 
+
         # =====================================================
         # MOTHER VESSEL NAME ROW — section header (red/yellow)
         # =====================================================
- 
+
         # Start of the "tall block" (Mother Vessel Name -> last barge
         # status row) whose row height gets bumped to match the delay
         # row above, once we know where it ends.
         tall_block_start = row_no
- 
+
         section(row_no, 1, 'Mother Vessel Name', span=2)
         for i, v in enumerate(vessels, start=1):
             c = vessel_col_map[v['id']]
@@ -3268,7 +3307,7 @@ def daily_progress_report_excel():
             # borderless.
             value(row_no, c + 1, v['vessel_name'] or '', span=VESSEL_BLOCK_WIDTH - 1, align=left)
         row_no += 1
- 
+
         # =====================================================
         # BARGE STATUS — captions copied verbatim from the
         # reference (note exact spacing/hyphenation quirks below
@@ -3276,7 +3315,7 @@ def daily_progress_report_excel():
         # are plain captions, NOT section headers, in the
         # reference — white fill, not bold, not red.
         # =====================================================
- 
+
         barge_status_rows = [
             ('At Jetty -Under Discharge / Loading', 'at_jetty'),
             ('At Jetty - Waiting for Discharge', 'waiting_discharge'),
@@ -3290,7 +3329,7 @@ def daily_progress_report_excel():
             ('In transit - from Jetty to  MV', 'in_transit_jetty_to_mv'),
             ('Breakdown / Off Hired/ Coastal', 'breakdown'),
         ]
- 
+
         barge_stats = {
             lid: {
                 'at_jetty': [], 'waiting_discharge': [], 'waiting_empty_jetty': [],
@@ -3299,7 +3338,7 @@ def daily_progress_report_excel():
             }
             for lid in vessel_ids
         }
- 
+
         if vessel_ids:
             ws_str = window_start.strftime('%Y-%m-%dT%H:%M')
             cur.execute("""
@@ -3312,7 +3351,7 @@ def daily_progress_report_excel():
                 WHERE b.ldud_id = ANY(%s)
                 AND (b.cast_off_port IS NULL OR b.cast_off_port > %s)
             """, (vessel_ids, ws_str))
- 
+
             for r in cur.fetchall():
                 bn = (r['barge_name'] or '').strip()
                 if not bn:
@@ -3335,7 +3374,7 @@ def daily_progress_report_excel():
                     status = None
                 if status:
                     barge_stats[r['ldud_id']][status].append(bn)
- 
+
         for label, key in barge_status_rows:
             caption(row_no, 1, label, span=2)
             for v in vessels:
@@ -3350,14 +3389,14 @@ def daily_progress_report_excel():
                 # issue as above for every barge-status row.
                 data(row_no, c, text, align=left, span=VESSEL_BLOCK_WIDTH)
             row_no += 1
- 
+
         # End of the tall block: bump every row from "Mother Vessel
         # Name" through the last barge-status row to the same height
         # as the delay row above, so long barge lists aren't clipped.
         tall_block_end = row_no - 1
         for r in range(tall_block_start, tall_block_end + 1):
             ws.row_dimensions[r].height = TALL_ROW_HEIGHT
- 
+
         # "Remarks:" — section header (red/yellow), exact trailing
         # space kept to match the reference.
         # Merge the Remarks row across all columns (change 6 to your last column)
@@ -3376,134 +3415,230 @@ def daily_progress_report_excel():
 
         # Apply border to all cells
         for col in range(1, 15):   # Columns A to N
-            ws.cell(row=row_no, column=col).border = thin_border
+            ws.cell(row=row_no, column=col).border = thin
 
         row_no += 2
- 
+
         # =====================================================
-        # CARGO TYPE WISE DISCHARGE — grouped exactly like the
-        # reference's IBRM / CBRM / Fluxes / Clinker / Material
-        # Loading From Jetty / Scrap / MOP & A/Sulphate / GBFS
-        # (Slag) Unloading / HBI category blocks, with a category
-        # header row (bold, yellow) above the individual cargo
-        # column headers (bold black).
+        # CARGO TYPE WISE DISCHARGE
+        # Rebuilt on lueu_lines (live) + rp01_historical_lueu
+        # (historic, April only) — the old ldud_barge_lines /
+        # discharge_quantity / completed_loading columns do not
+        # exist on this schema.
+        #
+        # Columns are now cargo_type + cargo_category (NOT
+        # cargo_name) to match the barge_discharge_report API.
+        # Equipment names are normalized the same way (legacy
+        # "Barge Unloader 1/2" labels merged into "BUL-01/02").
+        #
+        # Day total   = entry_date = data_date (report_date - 1)
+        # Month total = 1st of that month -> data_date  (live only)
+        # FY total    = historic (Apr 1 - Apr 30, rp01_historical_lueu)
+        #               + live (May 1 -> data_date, lueu_lines)
         # =====================================================
- 
-        barge_window_start = (
-            (report_dt - timedelta(days=1)).strftime('%Y-%m-%d') + ' 06:00:00'
-        )
-        barge_window_end = f"{report_date} 06:00:00"
- 
+
+        data_date_obj = report_dt - timedelta(days=1)
+        data_date = data_date_obj.strftime("%Y-%m-%d")
+        cargo_month_start = data_date_obj.replace(day=1).strftime("%Y-%m-%d")
+
+        fy_start_year = data_date_obj.year if data_date_obj.month >= 4 else data_date_obj.year - 1
+        fy_start = f"{fy_start_year}-04-01"
+        historic_cutoff = f"{fy_start_year}-04-30"
+        live_start = f"{fy_start_year}-05-01"
+
+        EQUIP_EXPR = """
+            CASE TRIM(equipment_name)
+                WHEN 'Barge Unloader 1' THEN 'BUL-01'
+                WHEN 'Barge Unloader 2' THEN 'BUL-02'
+                ELSE COALESCE(TRIM(equipment_name), 'Others')
+            END
+        """
+
+        def cat_key(ctype, ccat):
+            return f"{ctype}||{ccat}"
+
+        # 0) FULL master list of cargo_type -> cargo_category
         cur.execute("""
             SELECT
                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
-                COALESCE(TRIM(lbl.cargo_name), '-') AS cargo_name,
-                COALESCE(lbl.port_crane, 'Others') AS equipment_used,
-                SUM(COALESCE(lbl.discharge_quantity, 0)) AS total_qty,
-                (
-                    SELECT SUM(COALESCE(lbl2.discharge_quantity, 0))
-                    FROM ldud_barge_lines lbl2
-                    WHERE LOWER(TRIM(lbl2.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
-                    AND lbl2.completed_loading::timestamp
-                        BETWEEN DATE_TRUNC('month', %(report_date)s::date)::timestamp
-                            AND (%(report_date)s::date + INTERVAL '1 day' - INTERVAL '1 second')
-                ) AS month_total,
-                (
-                    SELECT SUM(COALESCE(lbl3.discharge_quantity, 0))
-                    FROM ldud_barge_lines lbl3
-                    WHERE LOWER(TRIM(lbl3.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
-                    AND lbl3.completed_loading::timestamp
-                        BETWEEN DATE_TRUNC('year', %(report_date)s::date)::timestamp
-                            AND (%(report_date)s::date + INTERVAL '1 day' - INTERVAL '1 second')
-                ) AS year_total
-            FROM ldud_barge_lines lbl
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category
+            FROM vessel_cargo vc
+            GROUP BY vc.cargo_type, vc.cargo_category
+            ORDER BY vc.cargo_type, vc.cargo_category
+        """)
+        master_cargo_rows = cur.fetchall()
+
+        # 0b) FULL master list of equipment (live table only)
+        cur.execute(f"""
+            SELECT DISTINCT {EQUIP_EXPR} AS equipment
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE
+            ORDER BY 1
+        """)
+        master_equipment_rows = cur.fetchall()
+
+        # 1) Day-level matrix: equipment x (cargo_type, cargo_category), entry_date = data_date ONLY (live only)
+        cur.execute(f"""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')} AS equipment,
+                SUM(lbl.quantity) AS day_qty
+            FROM lueu_lines lbl
             LEFT JOIN vessel_cargo vc
                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
-            WHERE
-                lbl.completed_loading::timestamp >= %(window_start)s::timestamp
-                AND lbl.completed_loading::timestamp < %(window_end)s::timestamp
-            GROUP BY vc.cargo_type, lbl.cargo_name, lbl.port_crane
-            ORDER BY vc.cargo_type, lbl.cargo_name, lbl.port_crane
-        """, {
-            "report_date": report_date,
-            "window_start": barge_window_start,
-            "window_end": barge_window_end,
-        })
- 
-        cargo_rows = cur.fetchall()
- 
-        cargo_types = {}
+            WHERE lbl.is_deleted IS NOT TRUE
+              AND lbl.quantity IS NOT NULL
+              AND lbl.entry_date::date = %(data_date)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category, {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')}
+        """, {"data_date": data_date})
+        cargo_day_rows = cur.fetchall()
+
+        # 2a) Historic total (rp01_historical_lueu): fy_start -> historic_cutoff (April 1 - April 30)
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(h.quantity, 0)) AS historic_total
+            FROM rp01_historical_lueu h
+            LEFT JOIN vessel_cargo vc
+                ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(h.cargo_name))
+            WHERE h.quantity IS NOT NULL
+              AND h.entry_date BETWEEN %(fy_start)s::date AND %(historic_cutoff)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"fy_start": fy_start, "historic_cutoff": historic_cutoff})
+        cargo_historic_rows = cur.fetchall()
+
+        # 2b) Live total (lueu_lines): month_total, live_fy_total, live_cumulative_total
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(lbl.quantity, 0)) AS live_fy_total,
+                SUM(CASE WHEN lbl.entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total
+            FROM lueu_lines lbl
+            LEFT JOIN vessel_cargo vc
+                ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+            WHERE lbl.is_deleted IS NOT TRUE
+              AND lbl.quantity IS NOT NULL
+              AND lbl.entry_date::date BETWEEN %(live_start)s::date AND %(data_date)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"live_start": live_start, "data_date": data_date, "month_start": cargo_month_start})
+        cargo_live_rows = cur.fetchall()
+
+        # ---- Build FULL cargo hierarchy: cargo_type -> [cargo_categories] ----
+        cargo_hierarchy = {}
+        for r in master_cargo_rows:
+            ctype = r['cargo_type']
+            ccat = r['cargo_category']
+            cargo_hierarchy.setdefault(ctype, [])
+            if ccat not in cargo_hierarchy[ctype]:
+                cargo_hierarchy[ctype].append(ccat)
+
+        all_keys = [cat_key(r['cargo_type'], r['cargo_category']) for r in master_cargo_rows]
+
+        # ---- Seed equipment_rows with the FULL equipment list (zeros by default) ----
         equipment_rows = {}
+        for r in master_equipment_rows:
+            equipment_rows[r['equipment']] = {k: 0 for k in all_keys}
+
+        for r in cargo_day_rows:
+            equip = r['equipment']
+            key = cat_key(r['cargo_type'], r['cargo_category'])
+            equipment_rows.setdefault(equip, {k: 0 for k in all_keys})
+            equipment_rows[equip][key] = int(r['day_qty'] or 0)
+
+        # ---- Historic totals (April) per category ----
+        historic_totals = {}
+        for r in cargo_historic_rows:
+            key = cat_key(r['cargo_type'], r['cargo_category'])
+            historic_totals[key] = int(r['historic_total'] or 0)
+
+        # ---- Live totals (May onward) merged with historic to form FY total ----
         month_totals = {}
         year_totals = {}
- 
-        for r in cargo_rows:
-            cargo_type = r['cargo_type'] or 'Others'
-            cargo_name = r['cargo_name'] or '-'
-            equipment = r['equipment_used'] or 'Others'
-            cargo_types.setdefault(cargo_type, [])
-            if cargo_name not in cargo_types[cargo_type]:
-                cargo_types[cargo_type].append(cargo_name)
-            equipment_rows.setdefault(equipment, {})[cargo_name] = int(r['total_qty'] or 0)
-            month_totals[cargo_name] = int(r['month_total'] or 0)
-            year_totals[cargo_name] = int(r['year_total'] or 0)
- 
-        cargo_columns = [c for cols in cargo_types.values() for c in cols]
- 
+        for r in cargo_live_rows:
+            key = cat_key(r['cargo_type'], r['cargo_category'])
+            month_totals[key] = int(r['month_total'] or 0)
+            live_fy = int(r['live_fy_total'] or 0)
+            hist = historic_totals.get(key, 0)
+            year_totals[key] = hist + live_fy
+
+        # Categories that ONLY had historic (April) activity, nothing live yet
+        for key, hist_val in historic_totals.items():
+            if key not in year_totals:
+                year_totals[key] = hist_val
+                month_totals.setdefault(key, 0)
+
+        # cargo_columns is now a flat list of (type, category) keys, in
+        # cargo_hierarchy order, replacing the old cargo_name list.
+        cargo_columns = [
+            cat_key(ctype, ccat)
+            for ctype, ccats in cargo_hierarchy.items()
+            for ccat in ccats
+        ]
+        cargo_column_labels = {
+            cat_key(ctype, ccat): ccat
+            for ctype, ccats in cargo_hierarchy.items()
+            for ccat in ccats
+        }
+
         if cargo_columns:
             type_row = row_no
             cname_row = row_no + 1
             cur_col = 3
-            for ctype, cnames in cargo_types.items():
-                span = len(cnames)
+            for ctype, ccats in cargo_hierarchy.items():
+                span = len(ccats)
                 if span:
                     # Category header ("IBRM", "CBRM", "Fluxes" …) —
                     # bold on yellow, black text (not red — this is a
                     # column-group header, not a section header).
                     caption(type_row, cur_col, ctype, span=span,
                             font=header_font, fill=yellow_fill)
-                for cname in cnames:
-                    header(cname_row, cur_col, cname)
+                for ccat in ccats:
+                    header(cname_row, cur_col, ccat)
                     cur_col += 1
- 
+
             row_no = cname_row + 1
             for equipment, qty_map in equipment_rows.items():
                 caption(row_no, 1, equipment, span=2)
                 cur_col = 3
-                for cname in cargo_columns:
-                    data(row_no, cur_col, qty_map.get(cname, 0))
+                for key in cargo_columns:
+                    data(row_no, cur_col, qty_map.get(key, 0))
                     cur_col += 1
                 row_no += 1
- 
+
             caption(row_no, 1, 'Total For The Day', span=2, font=header_font)
             cur_col = 3
-            for cname in cargo_columns:
-                header(row_no, cur_col, sum(qm.get(cname, 0) for qm in equipment_rows.values()))
+            for key in cargo_columns:
+                header(row_no, cur_col, sum(qm.get(key, 0) for qm in equipment_rows.values()))
                 cur_col += 1
             row_no += 1
- 
+
             caption(row_no, 1, 'Total Receipts for the Month', span=2, font=header_font)
             cur_col = 3
-            for cname in cargo_columns:
-                header(row_no, cur_col, month_totals.get(cname, 0))
+            for key in cargo_columns:
+                header(row_no, cur_col, month_totals.get(key, 0))
                 cur_col += 1
             row_no += 1
- 
-            caption(row_no, 1, 'Total Receipts FY 25-26', span=2, font=header_font)
+
+            fy_label = f"FY {str(fy_start_year)[-2:]}-{str(fy_start_year + 1)[-2:]}"
+            caption(row_no, 1, f'Total Receipts {fy_label}', span=2, font=header_font)
             cur_col = 3
-            for cname in cargo_columns:
-                header(row_no, cur_col, year_totals.get(cname, 0))
+            for key in cargo_columns:
+                header(row_no, cur_col, year_totals.get(key, 0))
                 cur_col += 1
             row_no += 2
         else:
             caption(row_no, 1, 'No barge discharge recorded for this window', span=2)
             row_no += 2
- 
+
         # =====================================================
         # MBC'S DISCHARGE COMPLETED — section header, exact
         # trailing space kept ("...COMPLETED ").
         # =====================================================
- 
+
         cur.execute("""
             SELECT
                 mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
@@ -3518,12 +3653,12 @@ def daily_progress_report_excel():
                 AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
             ORDER BY NULLIF(TRIM(dpl.unloading_completed), '')::timestamp
         """, (window_start, window_end))
- 
+
         mbc_completed = cur.fetchall()
- 
+
         def str_to_disp(v):
             return _parse_flexible(v, '%d-%m-%Y : %H:%M')
- 
+
         section(row_no, 1, "MBC'S DISCHARGE COMPLETED ", span=8)
         row_no += 1
         headers = ['MBC Name', 'Cargo', 'Source', 'Qty', 'Arrived at Jetty',
@@ -3548,13 +3683,13 @@ def daily_progress_report_excel():
                 data(row_no, 1 + i, v2)
             row_no += 1
         row_no += 1
- 
+
         # =====================================================
         # VESSELS / MBC — ARRIVED, EXPECTED (row-based tables)
         # Titles are plain captions in the reference for these
         # sub-tables (not the red/yellow section style).
         # =====================================================
- 
+
         def simple_table(title, rows, headers, keys):
             nonlocal row_no
             caption(row_no, 1, title, span=len(headers), font=header_font)
@@ -3573,7 +3708,7 @@ def daily_progress_report_excel():
                     data(row_no, 2 + i, r.get(k, ''), align=left)
                 row_no += 1
             row_no += 1
- 
+
         cur.execute("""
             SELECT
                 lh.vessel_name,
@@ -3590,7 +3725,7 @@ def daily_progress_report_excel():
             GROUP BY lh.id, lh.vessel_name, vh.load_port, lh.nor_accepted
             ORDER BY NULLIF(TRIM(lh.nor_accepted), '')::timestamp
         """, (report_date, report_date))
- 
+
         arrived_rows = [{
             "vessel_name": r["vessel_name"] or "",
             "cargo": r["cargo"] or "",
@@ -3598,14 +3733,14 @@ def daily_progress_report_excel():
             "load_port": r["load_port"] or "",
             "arrived_mumbai": _parse_flexible(r["nor_accepted"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
- 
+
         simple_table(
             "VESSELS ARRIVED AT MUMBAI",
             arrived_rows,
             ["SR.NO.", "M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "arrived_mumbai"],
         )
- 
+
         cur.execute("""
             SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
                    dpl.vessel_arrival_port
@@ -3617,7 +3752,7 @@ def daily_progress_report_excel():
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
             ORDER BY NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp
         """, (report_date, report_date))
- 
+
         mbc_arrived_rows = [{
             "mbc_name": r["mbc_name"] or "",
             "cargo": r["cargo_name"] or "",
@@ -3625,14 +3760,14 @@ def daily_progress_report_excel():
             "load_port": r["load_port"] or "",
             "arrived_dharamtar": _parse_flexible(r["vessel_arrival_port"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
- 
+
         simple_table(
             "MBC ARRIVED AT DHARAMTAR",
             mbc_arrived_rows,
             ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived  @ Dharamtar"],
             ["mbc_name", "cargo", "bl_qty", "load_port", "arrived_dharamtar"],
         )
- 
+
         cur.execute("""
             SELECT vn.id, vh.vessel_name,
                    STRING_AGG(DISTINCT TRIM(vcd.cargo_name), ', ' ORDER BY TRIM(vcd.cargo_name)) AS cargo,
@@ -3645,7 +3780,7 @@ def daily_progress_report_excel():
             GROUP BY vn.id, vh.vessel_name, vh.load_port, vn.eta
             ORDER BY vn.eta
         """, (report_date,))
- 
+
         upcoming_rows = [{
             "vessel_name": r["vessel_name"] or "",
             "cargo": r["cargo"] or "",
@@ -3653,14 +3788,14 @@ def daily_progress_report_excel():
             "load_port": r["load_port"] or "",
             "eta_mumbai": _parse_flexible(r["eta"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
- 
+
         simple_table(
             "VESSELS EXPECTED AT MUMBAI",
             upcoming_rows,
             ["SR.NO.","M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
- 
+
         cur.execute("""
             SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
                    dpl.arrival_gull_island
@@ -3672,7 +3807,7 @@ def daily_progress_report_excel():
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
             ORDER BY NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
         """, (report_date, report_date))
- 
+
         mbc_expected_rows = [{
             "mbc_name": r["mbc_name"] or "",
             "cargo": r["cargo_name"] or "",
@@ -3680,18 +3815,18 @@ def daily_progress_report_excel():
             "load_port": r["load_port"] or "",
             "eta_mumbai": _parse_flexible(r["arrival_gull_island"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
- 
+
         simple_table(
             "MBC EXPECTED AT MUMBAI",
             mbc_expected_rows,
             ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
             ["mbc_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
- 
+
         # =====================================================
         # TIDE TABLE
         # =====================================================
- 
+
         cur.execute("""
             SELECT tide_datetime, tide_meters
             FROM tide_master
@@ -3700,14 +3835,14 @@ def daily_progress_report_excel():
                 AND DATE(NULLIF(TRIM(tide_datetime), '')::timestamp) = %s
             ORDER BY NULLIF(TRIM(tide_datetime), '')::timestamp
         """, (report_date,))
- 
+
         tide_rows = cur.fetchall()
- 
+
         caption(row_no, 1, 'Tide Table', span=3, font=header_font)
         row_no += 1
         header(row_no, 1, 'Type'); header(row_no, 2, 'Time'); header(row_no, 3, 'Mtrs')
         row_no += 1
- 
+
         if tide_rows:
             heights = [float(r['tide_meters'] or 0) for r in tide_rows]
             current = 'HW' if len(heights) >= 2 and heights[0] > heights[1] else 'HW'
@@ -3723,11 +3858,11 @@ def daily_progress_report_excel():
             caption(row_no, 1, 'No tide data for this date', span=3)
             row_no += 1
         row_no += 1
- 
+
         # =====================================================
         # VESSELS COMPLETED FOR THE MONTH — section header
         # =====================================================
- 
+
         cur.execute("""
             SELECT
                 lh.vessel_name,
@@ -3749,7 +3884,7 @@ def daily_progress_report_excel():
             GROUP BY lh.id, lh.vessel_name, vh.load_port, vh.vcn_doc_num
             ORDER BY MAX(la.discharge_commenced)
         """, (month_start, report_date))
- 
+
         completed_rows = [{
             "vessel_name": r["vessel_name"] or "",
             "cargo": r["cargo_name"] or "",
@@ -3760,9 +3895,9 @@ def daily_progress_report_excel():
             "discharge_completed": fmt_dt(r["discharge_completed"]),
             "time_taken_hrs": float(r["time_taken_hrs"] or 0),
         } for r in cur.fetchall() if r["discharge_completed"]]
- 
+
         month_label = report_dt.strftime('%B')
- 
+
         section(row_no, 1, f'Vessel Completed for The Month {month_label}', span=9)
         row_no += 1
         headers = ['SR.NO.', 'M.Vessel Name', 'Cargo ', 'B/L Qty. (MT)', 'Load  Port',
@@ -3784,13 +3919,13 @@ def daily_progress_report_excel():
             data(row_no, 7, r['discharge_completed'])
             data(row_no, 8, r['time_taken_hrs'])
             row_no += 1
- 
+
         # =====================================================
         # COLUMN WIDTHS — match the reference's actual widths for
         # the fixed left-hand columns; remaining vessel columns
         # get a consistent, readable width.
         # =====================================================
- 
+
         fixed_widths = {
             'A': 28.33, 'B': 17.44, 'C': 34.66, 'D': 17.55, 'E': 21.0,
             'F': 22.89, 'G': 19.55, 'H': 26.66, 'I': 22.33,
@@ -3799,28 +3934,28 @@ def daily_progress_report_excel():
             ws.column_dimensions[letter].width = w
         for c in range(10, 60):
             ws.column_dimensions[get_column_letter(c)].width = 20
- 
+
         # =====================================================
         # GENERATE FILE
         # =====================================================
- 
+
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
- 
+
         filename = f"Daily_MIS_Report_{report_date}.xlsx"
- 
+
         return Response(
             output.getvalue(),
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': f'attachment; filename="{filename}"'}
         )
- 
+
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)})
- 
+
     finally:
         cur.close()
         conn.close()
