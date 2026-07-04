@@ -609,15 +609,13 @@ def monthly_cargo_report():
         FROM vessel_list vl
 
         LEFT JOIN ldud_vessel_operations lco
-            ON lco.ldud_id = vl.id
-        AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vl.cargo_name))
-        AND DATE(lco.start_time)
-            BETWEEN DATE_TRUNC('month', %s::date)::date
-                AND %s::date
-        AND (
-                vl.discharge_completed IS NULL
-                OR DATE(lco.start_time) <= DATE(vl.discharge_completed)
-        )
+    ON lco.ldud_id = vl.id
+   AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vl.cargo_name))
+   AND DATE(lco.start_time) BETWEEN DATE(vl.discharge_started) AND %s::date
+   AND (
+        vl.discharge_completed IS NULL
+        OR DATE(lco.start_time) <= DATE(vl.discharge_completed)
+   )
 
         GROUP BY
             vl.id,
@@ -641,7 +639,6 @@ def monthly_cargo_report():
             (
                 window_end,
                 window_start,
-                report_date,
                 cutoff_date
             )
         )
@@ -3278,10 +3275,17 @@ def daily_progress_report_excel():
             COALESCE(SUM(lco.quantity), 0) AS total_qty
         FROM ldud_header lh
         JOIN vcn_cargo_declaration vcd ON vcd.vcn_id = lh.vcn_id
-        LEFT JOIN ldud_vessel_operations lco
-            ON lco.ldud_id = lh.id
-            AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vcd.cargo_name))
-            AND DATE(lco.start_time) BETWEEN DATE_TRUNC('month', %s::date)::date AND %s::date
+        LEFT JOIN LATERAL (
+    SELECT MIN(discharge_started) AS discharge_started
+    FROM ldud_anchorage
+    WHERE ldud_id = lh.id
+) first_anchor ON TRUE
+
+LEFT JOIN ldud_vessel_operations lco
+    ON lco.ldud_id = lh.id
+    AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vcd.cargo_name))
+    AND DATE(lco.start_time)
+        BETWEEN DATE(first_anchor.discharge_started) AND %s::date
         WHERE lh.id = ANY(%s)
         GROUP BY lh.id, TRIM(vcd.cargo_name), DATE(lco.start_time)
         ORDER BY DATE(lco.start_time)
@@ -3290,7 +3294,7 @@ def daily_progress_report_excel():
         daily_by_vessel = {v['id']: {} for v in vessels}
 
         if vessel_ids:
-            cur.execute(daily_query, (report_date, report_date, vessel_ids))
+            cur.execute(daily_query, (report_date, vessel_ids))
             for r in cur.fetchall():
                 if not r['day_label']:
                     continue
