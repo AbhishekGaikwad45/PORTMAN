@@ -3676,6 +3676,31 @@ LEFT JOIN ldud_vessel_operations lco
             if ccat not in cargo_hierarchy[ctype]:
                 cargo_hierarchy[ctype].append(ccat)
 
+        # ---------------------------------------------------
+        # Force sequence for BOTH the top-level cargo_type
+        # groups (e.g. CBRM, Clinker, Finish Goods headers)
+        # and the categories within each group:
+        #   IBRM, CBRM, FLUXES, CLINKER, SLAG  -- in that order,
+        #   then everything else afterwards (alphabetical).
+        # Matching is case-insensitive.
+        # ---------------------------------------------------
+        PRIORITY_ORDER = ['IBRM', 'CBRM', 'FLUXES', 'CLINKER', 'SLAG']
+
+        def priority_sort_key(name):
+            normalized = (name or '').strip().upper()
+            if normalized in PRIORITY_ORDER:
+                return (0, PRIORITY_ORDER.index(normalized))
+            return (1, normalized)
+
+        # Reorder the cargo_type groups themselves
+        cargo_hierarchy = dict(
+            sorted(cargo_hierarchy.items(), key=lambda item: priority_sort_key(item[0]))
+        )
+
+        # Reorder the categories within each cargo_type group
+        for ctype in cargo_hierarchy:
+            cargo_hierarchy[ctype].sort(key=priority_sort_key)
+
         all_keys = [cat_key(r['cargo_type'], r['cargo_category']) for r in master_cargo_rows]
 
         equipment_rows = {}
