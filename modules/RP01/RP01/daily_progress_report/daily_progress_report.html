@@ -1439,6 +1439,24 @@ function renderBargeDischargeReport(data) {
     const fyTotals = data.fy_totals || {};
     const cumulativeTotals = data.cumulative_totals || {};
 
+    const cargoTypeOrder = [
+    "IBRM",
+    "CBRM",
+    "FLUXES",
+    "Clinker",
+    "SLAG",
+    "Other"
+    ];
+
+    const orderedTypes = cargoTypeOrder.filter(type => cargoHierarchy[type]);
+
+    // Include any other cargo types not in the above list
+    Object.keys(cargoHierarchy).forEach(type => {
+        if (!orderedTypes.includes(type)) {
+            orderedTypes.push(type);
+        }
+    });
+
     const catKey = (type, cat) => `${type}||${cat}`;
     const fmt = (n) => (n ? Number(n).toLocaleString('en-IN') : '0');
 
@@ -1471,7 +1489,7 @@ function renderBargeDischargeReport(data) {
     `;
 
     // TOP HEADER -> CARGO TYPES
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
 
         html += `
 
@@ -1498,7 +1516,7 @@ function renderBargeDischargeReport(data) {
     </tr><tr>`;
 
     // SECOND HEADER -> CARGO CATEGORIES (no cargo_name row)
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
 
         cargoHierarchy[type].forEach(category => {
 
@@ -1534,7 +1552,7 @@ function renderBargeDischargeReport(data) {
                 </td>
         `;
 
-        Object.keys(cargoHierarchy).forEach(type => {
+        orderedTypes.forEach(type => {
 
             cargoHierarchy[type].forEach(category => {
 
@@ -1575,7 +1593,7 @@ function renderBargeDischargeReport(data) {
 
     let dayGrandTotal = 0;
 
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
 
         cargoHierarchy[type].forEach(category => {
 
@@ -1609,7 +1627,7 @@ function renderBargeDischargeReport(data) {
 
     let monthGrandTotal = 0;
 
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
         cargoHierarchy[type].forEach(category => {
             const key = catKey(type, category);
             const val = monthTotals[key] || 0;
@@ -1635,7 +1653,7 @@ function renderBargeDischargeReport(data) {
 
     let fyGrandTotal = 0;
 
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
         cargoHierarchy[type].forEach(category => {
             const key = catKey(type, category);
             const val = fyTotals[key] || 0;
@@ -1661,7 +1679,7 @@ function renderBargeDischargeReport(data) {
 
     let cumulativeGrandTotal = 0;
 
-    Object.keys(cargoHierarchy).forEach(type => {
+    orderedTypes.forEach(type => {
         cargoHierarchy[type].forEach(category => {
             const key = catKey(type, category);
             const val = cumulativeTotals[key] || 0;
