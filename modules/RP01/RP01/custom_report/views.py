@@ -450,7 +450,9 @@ def pivot_data(source):
                 return None
 
         for r in rows:
-            r['Diff Hrs'] = _calc_diff_hrs(r.pop('_from_time', ''), r.pop('_to_time', ''))
+            r['From Time'] = r.pop('_from_time', '')
+            r['To Time']   = r.pop('_to_time', '')
+            r['Diff Hrs']  = _calc_diff_hrs(r['From Time'], r['To Time'])
 
     # Post-process mbc-tat: replace raw timestamps with computed duration columns
     if source == 'mbc-tat':
