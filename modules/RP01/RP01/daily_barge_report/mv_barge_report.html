@@ -816,9 +816,9 @@
 <script>
     /* ── Multi-select dropdown editor (same as MBC01) ───────────────────── */
     function makeMultiSelectEditor(optionsList) {
-        return function(cell, onRendered, success, cancel) {
+        return function (cell, onRendered, success, cancel) {
             var currentVal = cell.getValue() || '';
-            var selected   = currentVal
+            var selected = currentVal
                 ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
                 : [];
 
@@ -828,7 +828,7 @@
 
             var dropdown = document.createElement('div');
             dropdown.style.cssText = [
-                'position:fixed','z-index:99999',
+                'position:fixed', 'z-index:99999',
                 'background:white',
                 'border:1px solid #cbd5e0',
                 'border-radius:6px',
@@ -842,7 +842,7 @@
 
             // Search box inside dropdown
             var searchBox = document.createElement('input');
-            searchBox.type        = 'text';
+            searchBox.type = 'text';
             searchBox.placeholder = 'Search...';
             searchBox.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
             dropdown.appendChild(searchBox);
@@ -854,18 +854,18 @@
                 listContainer.innerHTML = '';
                 (optionsList || [])
                     .filter(item => !filter || item.toLowerCase().includes(filter.toLowerCase()))
-                    .forEach(function(item) {
+                    .forEach(function (item) {
                         var label = document.createElement('label');
                         label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
-                        label.addEventListener('mouseenter', function() { label.style.background = '#f1f5f9'; });
-                        label.addEventListener('mouseleave', function() { label.style.background = 'none'; });
+                        label.addEventListener('mouseenter', function () { label.style.background = '#f1f5f9'; });
+                        label.addEventListener('mouseleave', function () { label.style.background = 'none'; });
 
                         var cb = document.createElement('input');
-                        cb.type    = 'checkbox';
-                        cb.value   = item;
+                        cb.type = 'checkbox';
+                        cb.value = item;
                         cb.checked = selected.includes(item);
                         cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;accent-color:#4a90d9;';
-                        cb.addEventListener('change', function() {
+                        cb.addEventListener('change', function () {
                             if (cb.checked) {
                                 if (!selected.includes(item)) selected.push(item);
                             } else {
@@ -880,7 +880,7 @@
             }
 
             renderOptions('');
-            searchBox.addEventListener('input', function() { renderOptions(searchBox.value); });
+            searchBox.addEventListener('input', function () { renderOptions(searchBox.value); });
 
             // Apply / Cancel buttons
             var btnRow = document.createElement('div');
@@ -889,7 +889,7 @@
             var applyBtn = document.createElement('button');
             applyBtn.textContent = 'Apply';
             applyBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
-            applyBtn.addEventListener('click', function(e) {
+            applyBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 cleanup();
                 success(selected.join(', '));
@@ -898,7 +898,7 @@
             var cancelBtn = document.createElement('button');
             cancelBtn.textContent = 'Cancel';
             cancelBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
-            cancelBtn.addEventListener('click', function(e) {
+            cancelBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 cleanup();
                 cancel();
@@ -921,20 +921,20 @@
                 }
             }
 
-            onRendered(function() {
+            onRendered(function () {
                 var rect = cell.getElement().getBoundingClientRect();
-                dropdown.style.left    = rect.left + 'px';
-                dropdown.style.top     = (rect.bottom + 2) + 'px';
+                dropdown.style.left = rect.left + 'px';
+                dropdown.style.top = (rect.bottom + 2) + 'px';
                 dropdown.style.display = 'block';
                 searchBox.focus();
-                setTimeout(function() {
+                setTimeout(function () {
                     document.addEventListener('mousedown', outsideClick);
                 }, 10);
             });
 
-            wrapper.addEventListener('keydown', function(e) {
+            wrapper.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') { cleanup(); cancel(); }
-                if (e.key === 'Enter')  { cleanup(); success(selected.join(', ')); }
+                if (e.key === 'Enter') { cleanup(); success(selected.join(', ')); }
             });
 
             return wrapper;
@@ -943,7 +943,7 @@
 
     // Renders comma-separated values as coloured badge pills
     function multiBadgeFormatter(color) {
-        return function(cell) {
+        return function (cell) {
             var val = cell.getValue();
             if (!val) return '<span style="color:var(--text-secondary)">—</span>';
             return val.split(',')
@@ -983,7 +983,6 @@
 
         input.type = "text";
         input.placeholder = "DD-MM-YYYY HH:MM";
-
         input.style.width = "100%";
         input.style.height = "100%";
         input.style.border = "none";
@@ -995,43 +994,93 @@
 
             let v = input.value.replace(/\D/g, "");
 
-            if (v.length > 12) {
-                v = v.substring(0, 12);
-            }
+            if (v.length > 12) v = v.substring(0, 12);
 
             let formatted = "";
 
-            if (v.length > 0)
-                formatted += v.substring(0, 2);
-
-            if (v.length > 2)
-                formatted += "-" + v.substring(2, 4);
-
-            if (v.length > 4)
-                formatted += "-" + v.substring(4, 8);
-
-            if (v.length > 8)
-                formatted += " " + v.substring(8, 10);
-
-            if (v.length > 10)
-                formatted += ":" + v.substring(10, 12);
+            if (v.length > 0) formatted += v.substring(0, 2);
+            if (v.length > 2) formatted += "-" + v.substring(2, 4);
+            if (v.length > 4) formatted += "-" + v.substring(4, 8);
+            if (v.length > 8) formatted += " " + v.substring(8, 10);
+            if (v.length > 10) formatted += ":" + v.substring(10, 12);
 
             input.value = formatted;
         });
+
+        function validateDate(value) {
+
+            const m = value.match(/^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/);
+
+            if (!m)
+                return "Enter date as DD-MM-YYYY HH:MM";
+
+            const day = parseInt(m[1], 10);
+            const month = parseInt(m[2], 10);
+            const year = parseInt(m[3], 10);
+            const hour = parseInt(m[4], 10);
+            const minute = parseInt(m[5], 10);
+
+            // Selected year from filter
+            const selectedYear = document.getElementById("filter-from")
+                ? new Date(document.getElementById("filter-from").value).getFullYear()
+                : new Date().getFullYear();
+
+            if (month < 1 || month > 12)
+                return "Month must be between 01 and 12.";
+
+            if (year !== selectedYear)
+                return `Year must be ${selectedYear}.`;
+
+            if (hour < 0 || hour > 23)
+                return "Hour must be between 00 and 23.";
+
+            if (minute < 0 || minute > 59)
+                return "Minute must be between 00 and 59.";
+
+            const maxDay = new Date(year, month, 0).getDate();
+
+            if (day < 1 || day > maxDay)
+                return `Invalid day. ${new Intl.DateTimeFormat('en', { month: 'long' }).format(new Date(year, month - 1, 1))} ${year} has only ${maxDay} days.`;
+
+            return null;
+        }
+
+        function saveValue() {
+            // Allow empty value
+            if (input.value.trim() === "") {
+                success("");
+                return;
+            }
+            const error = validateDate(input.value);
+
+            if (error) {
+                Swal.fire({
+                    icon: "error",
+                    title: "Invalid Date",
+                    text: error
+                }).then(() => {
+                    input.removeEventListener("blur", saveValue);
+                    cancel();
+                });
+
+                input.focus();
+                return;
+            }
+
+            success(input.value);
+        }
 
         onRendered(function () {
             input.focus();
             input.select();
         });
 
-        input.addEventListener("blur", function () {
-            success(input.value);
-        });
+        input.addEventListener("blur", saveValue);
 
         input.addEventListener("keydown", function (e) {
 
             if (e.key === "Enter") {
-                success(input.value);
+                saveValue();
             }
 
             if (e.key === "Escape") {
@@ -1243,12 +1292,12 @@
                 formatter: dtFormatter,
                 editor: dateTimeEditor
             },
-{
+            {
                 title: 'Unloaded By',
                 field: 'unloaded_by',
                 width: 220,
                 headerHozAlign: 'center',
-                editor: function(cell, onRendered, success, cancel) {
+                editor: function (cell, onRendered, success, cancel) {
                     return makeMultiSelectEditor(EQUIPMENT_LIST)(cell, onRendered, success, cancel);
                 },
                 formatter: multiBadgeFormatter('#3182ce'),
@@ -1336,19 +1385,19 @@
             { title: 'Cast Off Load Port', field: 'cast_off_mv', width: 170, formatter: mbcDateFormatter },
             { title: 'Arrival Gull Island', field: 'arrival_gull_island', width: 170, formatter: mbcDateFormatter },
             { title: 'Departure Gull Island', field: 'departure_gull_island', width: 170, formatter: mbcDateFormatter },
-            { title: 'MBC Arrival Port', field: 'mbc_arrival_port', width: 170, formatter: mbcDateFormatter,editor: dateTimeEditor },
-            { title: 'MBC AMF At Unloading Berth', field: 'mbc_amf_unloading_berth', width: 190, formatter: mbcDateFormatter,editor: dateTimeEditor },
+            { title: 'MBC Arrival Port', field: 'mbc_arrival_port', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'MBC AMF At Unloading Berth', field: 'mbc_amf_unloading_berth', width: 190, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'Unloading Commenced', field: 'unloading_commenced', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'Cleaning Commenced', field: 'cleaning_commenced', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'Unloading Completed', field: 'unloading_completed', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'MBC Cast Off', field: 'mbc_cast_off', width: 160, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'Sailed Out Load Port', field: 'sailed_out_load_port', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
-{
+            {
                 title: 'Unloaded By',
                 field: 'vessel_unloaded_by',
                 width: 220,
                 headerHozAlign: 'center',
-                editor: function(cell, onRendered, success, cancel) {
+                editor: function (cell, onRendered, success, cancel) {
                     return makeMultiSelectEditor(EQUIPMENT_LIST)(cell, onRendered, success, cancel);
                 },
                 formatter: multiBadgeFormatter('#3182ce'),
@@ -1358,7 +1407,7 @@
                 field: 'unloaded_berth',
                 width: 220,
                 headerHozAlign: 'center',
-                editor: function(cell, onRendered, success, cancel) {
+                editor: function (cell, onRendered, success, cancel) {
                     return makeMultiSelectEditor(BERTH_LIST)(cell, onRendered, success, cancel);
                 },
                 formatter: multiBadgeFormatter('#38a169'),
@@ -1695,99 +1744,99 @@
 
     let _currentController = null;
 
-function applyFilters() {
-    // Cancel previous in-flight request
-    if (_currentController) {
-        _currentController.abort();
-    }
-    _currentController = new AbortController();
+    function applyFilters() {
+        // Cancel previous in-flight request
+        if (_currentController) {
+            _currentController.abort();
+        }
+        _currentController = new AbortController();
 
-    const selectedDate = document.getElementById('filter-from').value;
+        const selectedDate = document.getElementById('filter-from').value;
 
-    if (selectedDate && new Date(selectedDate) < new Date('2026-05-01T00:00')) {
-        Swal.fire({
-            icon: 'info',
-            title: 'Report Not Available',
-            html: `<b>Cutoff Date:</b> 01-May-2026<br><br>Reports before this date are not available.`,
-            confirmButtonText: 'OK',
-            confirmButtonColor: '#4a90d9'
-        });
-        return;
-    }
+        if (selectedDate && new Date(selectedDate) < new Date('2026-05-01T00:00')) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Report Not Available',
+                html: `<b>Cutoff Date:</b> 01-May-2026<br><br>Reports before this date are not available.`,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#4a90d9'
+            });
+            return;
+        }
 
-    const selectedToDate = document.getElementById('filter-to').value;
-    const selectedColumn = document.getElementById('column-filter').value;
+        const selectedToDate = document.getElementById('filter-to').value;
+        const selectedColumn = document.getElementById('column-filter').value;
 
-    const params = new URLSearchParams();
+        const params = new URLSearchParams();
 
-    if (selectedDate) {
-        params.set('from_date', selectedDate);
-    }
+        if (selectedDate) {
+            params.set('from_date', selectedDate);
+        }
 
-    if (selectedToDate) {
-        params.set('to_date', selectedToDate);
-    }
+        if (selectedToDate) {
+            params.set('to_date', selectedToDate);
+        }
 
-    if (selectedColumn) {
-        params.set('column_filter', selectedColumn);
-    }
+        if (selectedColumn) {
+            params.set('column_filter', selectedColumn);
+        }
 
-    const selectedFilter = document.getElementById('status-filter').value;
-    params.set('status_filter', selectedFilter);
-    params.set('view_type', currentView);
+        const selectedFilter = document.getElementById('status-filter').value;
+        params.set('status_filter', selectedFilter);
+        params.set('view_type', currentView);
 
-    document.getElementById('row-count').textContent = 'Loading…';
+        document.getElementById('row-count').textContent = 'Loading…';
 
-    showTableLoader();
+        showTableLoader();
 
-    const apiUrl = currentView === 'mbc'
-        ? '/api/module/RP01/mv-barge-report/mbc-data?'
-        : '/api/module/RP01/mv-barge-report/data?';
+        const apiUrl = currentView === 'mbc'
+            ? '/api/module/RP01/mv-barge-report/mbc-data?'
+            : '/api/module/RP01/mv-barge-report/data?';
 
-    fetch(apiUrl + params.toString(), { signal: _currentController.signal })
-        .then(r => {
-            if (!r.ok) throw new Error('Server error ' + r.status);
-            return r.json();
-        })
-        .then(data => {
-            _currentController = null;
-            hideError();
-            hideTableLoader();
+        fetch(apiUrl + params.toString(), { signal: _currentController.signal })
+            .then(r => {
+                if (!r.ok) throw new Error('Server error ' + r.status);
+                return r.json();
+            })
+            .then(data => {
+                _currentController = null;
+                hideError();
+                hideTableLoader();
 
-            if (table) {
-                if (currentView === 'mbc') {
-                    table.setColumns(buildMbcColumns());
+                if (table) {
+                    if (currentView === 'mbc') {
+                        table.setColumns(buildMbcColumns());
+                    } else {
+                        table.setColumns(buildColumns());
+                    }
+                    table.setData(data);
+                    updateCount(data.length);
                 } else {
-                    table.setColumns(buildColumns());
+                    initTable(data);
                 }
-                table.setData(data);
-                updateCount(data.length);
-            } else {
-                initTable(data);
-            }
 
-            // Always refresh shift preview with BOTH sources
-            fetchAndRenderShiftPreview();
-        })
-        .catch(err => {
-            if (err.name === 'AbortError') return; // Ignore cancelled requests
+                // Always refresh shift preview with BOTH sources
+                fetchAndRenderShiftPreview();
+            })
+            .catch(err => {
+                if (err.name === 'AbortError') return; // Ignore cancelled requests
 
-            hideTableLoader();
-            console.error(err);
+                hideTableLoader();
+                console.error(err);
 
-            if (table) {
-                table.clearData();
-            }
+                if (table) {
+                    table.clearData();
+                }
 
-            showError(
-                currentView === 'mbc'
-                    ? '❌ Error loading MBC data.'
-                    : '❌ Error loading Barges data.'
-            );
+                showError(
+                    currentView === 'mbc'
+                        ? '❌ Error loading MBC data.'
+                        : '❌ Error loading Barges data.'
+                );
 
-            document.getElementById('row-count').textContent = 'Error loading data.';
-        });
-}
+                document.getElementById('row-count').textContent = 'Error loading data.';
+            });
+    }
     function resetFilters() {
 
         const now = new Date();
@@ -2487,7 +2536,7 @@ function applyFilters() {
     }
 
     /* ── On load — auto-fetch current month ──────────────── */
-// ── Dynamic Equipment & Berth lists ──────────────────────────────────
+    // ── Dynamic Equipment & Berth lists ──────────────────────────────────
     let EQUIPMENT_LIST = [];
     let BERTH_LIST = [];
 
@@ -2497,12 +2546,12 @@ function applyFilters() {
                 fetch('/api/module/VEM01/all'),
                 fetch('/api/module/PBM01/all')
             ]);
-            const eqData    = await eqRes.json();
+            const eqData = await eqRes.json();
             const berthData = await berthRes.json();
             // Handle both plain string arrays AND object arrays
             EQUIPMENT_LIST = eqData.map(x => typeof x === 'string' ? x : (x.name || x.equipment_name || String(x)));
-            BERTH_LIST     = berthData.map(x => typeof x === 'string' ? x : (x.name || x.berth_name || String(x)));
-        } catch(e) {
+            BERTH_LIST = berthData.map(x => typeof x === 'string' ? x : (x.name || x.berth_name || String(x)));
+        } catch (e) {
             console.error('Failed to load equipment/berth lists', e);
         }
     }
@@ -2820,27 +2869,57 @@ function applyFilters() {
     }
     function globalSearch() {
 
-        if (!table) {
-            return;
-        }
-
-        const value =
-            document.getElementById('table-search').value;
-
-        if (!value) {
-            table.clearFilter(true);
-            return;
-        }
-
-        table.setFilter(function (data) {
-
-            return Object.values(data).some(v =>
-                String(v || '')
-                    .toLowerCase()
-                    .includes(value.toLowerCase())
-            );
-
-        });
+    if (!table) {
+        return;
     }
+
+    const rawValue = document.getElementById('table-search').value.trim();
+
+    if (!rawValue) {
+        table.clearFilter(true);
+        return;
+    }
+
+    const value = rawValue.toLowerCase();
+
+    // Normalize a raw date value (ISO or already DD-MM-YYYY) into DD-MM-YYYY HH:MM
+    function formatDateForSearch(raw) {
+        if (!raw) return '';
+        raw = String(raw).trim();
+
+        // Already in DD-MM-YYYY HH:MM (barge fields)
+        if (/^\d{2}-\d{2}-\d{4}/.test(raw)) {
+            return raw.toLowerCase();
+        }
+
+        // ISO format (MBC fields): 2026-06-20T05:20 or 2026-06-20 05:20
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return '';
+
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+
+        return `${dd}-${mm}-${yyyy} ${hh}:${min}`.toLowerCase();
+    }
+
+    table.setFilter(function (data) {
+
+        return Object.values(data).some(v => {
+            const str = String(v || '').toLowerCase();
+
+            // Plain substring match on raw value
+            if (str.includes(value)) return true;
+
+            // Also check the "as displayed" date format
+            const formatted = formatDateForSearch(v);
+            if (formatted && formatted.includes(value)) return true;
+
+            return false;
+        });
+    });
+}
 </script>
 {% endblock %}

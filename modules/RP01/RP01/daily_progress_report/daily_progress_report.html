@@ -1,0 +1,2892 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Progress Report - RP01{% endblock %}
+
+{% block head %}
+
+<style>
+
+/* ─────────────────────────────────────────────
+   PAGE HEADER
+───────────────────────────────────────────── */
+
+.page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.page-header h2 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--text-primary);
+}
+
+.module-badge {
+    background: #4a90d9;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.breadcrumb {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+}
+
+.breadcrumb a {
+    color: #4a90d9;
+    text-decoration: none;
+}
+
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.monthly-report-table th,
+.monthly-report-table td{
+    border:1px solid #000;
+    padding:6px;
+}
+
+.monthly-report-table thead th{
+    background:#fff200;
+    color:red;
+    font-weight:bold;
+    text-align:center;
+    vertical-align:middle;
+}
+
+/* ─────────────────────────────────────────────
+   FILTER SECTION
+───────────────────────────────────────────── */
+
+.filter-card {
+    background: #f8f9fb;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    padding: 18px;
+    margin-bottom: 20px;
+}
+
+.filter-row {
+    display: flex;
+    gap: 14px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.filter-group label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #667085;
+    text-transform: uppercase;
+}
+
+.filter-group input {
+    width: 180px;
+    height: 38px;
+    border: 1px solid #d0d5dd;
+    border-radius: 6px;
+    padding: 0 12px;
+    font-size: 14px;
+    background: #ffffff;
+}
+
+.filter-btn {
+    height: 38px;
+    min-width: 90px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.filter-btn.apply {
+    background: #4a90d9;
+    color: white;
+}
+
+.filter-btn.reset {
+    background: #ffffff;
+    color: #667085;
+    border: 1px solid #d0d5dd;
+}
+
+/* ─────────────────────────────────────────────
+   REPORT TABLE
+───────────────────────────────────────────── */
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    font-size: 14px;
+    background: #fff;
+}
+
+.report-table td,
+.report-table th {
+    border: 1px solid #d3d3d3;
+    padding: 8px 10px;
+    vertical-align: middle;
+}
+
+.report-title {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    background: #f7f7f7;
+    padding: 12px;
+}
+
+.report-date-row {
+    background: #fcfcfc;
+    font-weight: 600;
+}
+
+.left-label {
+    width: 180px;
+    font-weight: 600;
+    background: #fafafa;
+    white-space: nowrap;
+}
+
+.vessel-header {
+    text-align: center;
+    font-weight: 700;
+    font-size: 15px;
+    background: #eaf2fb;
+}
+
+/* ── Status badges ───────────────────────────── */
+
+.badge-inprogress {
+    display: inline-block;
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-completed {
+    display: inline-block;
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────
+   REPORT CARD
+───────────────────────────────────────────── */
+
+.report-card {
+    background: #ffffff;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.report-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #d9dee7;
+    background: #f8f9fb;
+    font-size: 16px;
+    font-weight: 700;
+    color: #344054;
+}
+
+.report-body {
+    padding: 20px;
+    overflow-x: auto;
+}
+
+.report-section {
+    border: 1px solid #d9d9d9;
+    border-radius: 8px;
+    padding: 16px;
+    background: #ffffff;
+    margin-bottom: 24px;
+}
+
+.report-section h4 {
+    margin-bottom: 12px;
+    color: #344054;
+    font-size: 15px;
+}
+
+/* ─────────────────────────────────────────────
+   LOADING SPINNER
+───────────────────────────────────────────── */
+
+.loading-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 30px 20px;
+    color: #667085;
+    font-size: 14px;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid #d0d5dd;
+    border-top-color: #4a90d9;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+</style>
+
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <h2>Daily Progress Report</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a>
+    &rsaquo;
+    Daily Progress Report
+</div>
+
+<!-- FILTER SECTION -->
+<div class="filter-card">
+    <div class="filter-row">
+
+        <div class="filter-group">
+            <label>Report Date</label>
+            <input type="date" id="report-date">
+        </div>
+
+        <button id="apply-filter-btn" class="filter-btn apply">
+            Apply
+        </button>
+
+        <button id="reset-filter-btn" class="filter-btn reset">
+            Reset
+        </button>
+        <button
+    type="button"
+    class="btn btn-primary"
+    id="download_excel_btn"
+>
+    Download Excel
+</button>
+
+    </div>
+</div>
+
+<!-- REPORT OUTPUT -->
+<div id="report-container" class="report-card" style="display:none;"></div>
+
+<script>
+
+document
+    .getElementById('apply-filter-btn')
+    .addEventListener('click', loadReport);
+
+document
+    .getElementById('reset-filter-btn')
+    .addEventListener('click', function () {
+        document.getElementById('report-date').value = '';
+        const container = document.getElementById('report-container');
+        container.style.display = 'none';
+        container.innerHTML = '';
+    });
+
+
+async function loadReport() {
+
+    const reportDate = document.getElementById('report-date').value;
+
+    if (!reportDate) {
+        alert('Please select a report date');
+        return;
+    }
+
+    const container = document.getElementById('report-container');
+
+    // Show loading state
+    container.style.display = 'block';
+    container.innerHTML = `
+        <div class="loading-wrap">
+            <div class="spinner"></div>
+            Loading report…
+        </div>
+    `;
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/daily_progress_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        if (!result.success) {
+            container.innerHTML = `
+                <div class="report-body" style="color:#c0392b;">
+                    Error: ${result.message}
+                </div>
+            `;
+            return;
+        }
+
+        renderReport(result.data, reportDate);
+
+// ALWAYS LOAD MONTHLY REPORT SECOND
+await loadMonthlyReport(reportDate);
+
+// ALWAYS LOAD VESSEL DELAY THIRD
+await loadVesselDelayReport(reportDate);
+
+console.log("VESSEL DELAY REPORT COMPLETED");
+
+await loadBargeStatusReport(reportDate);
+console.log("BARGE STATUS REPORT FUNCTION CALLED");
+
+await loadBargeDischargeReport(reportDate);
+
+await loadMbcReport(reportDate);
+
+await loadArrivedVesselReport(reportDate);
+
+await loadMbcArrivedReport(reportDate);
+
+await loadUpcomingVesselReport(reportDate);
+
+await loadMbcExpectedReport(reportDate);
+
+await loadTideTable(reportDate);
+
+await loadVesselDischargeSummary(reportDate);
+
+
+
+    } catch (err) {
+
+        container.innerHTML = `
+            <div class="report-body" style="color:#c0392b;">
+                Unexpected error: ${err.message}
+            </div>
+        `;
+    }
+}
+
+
+function renderReport(data, reportDate) {
+
+    const container = document.getElementById('report-container');
+
+    if (!data.length) {
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="report-body">
+                No vessels found for the selected date.
+            </div>
+        `;
+        return;
+    }
+
+    // ─────────────────────────────────────────────
+    // SORT:
+    // Completed vessels first
+    // Then still-discharging vessels, chronologically
+    // by discharge start time (matches backend sequencing)
+    // ─────────────────────────────────────────────
+
+    const parseDt = (s) => {
+        if (!s) return Infinity;
+        const [datePart, timePart] = s.split(' ');
+        const [d, m, y] = datePart.split('-').map(Number);
+        const [hh, mm] = (timePart || '00:00').split(':').map(Number);
+        return new Date(y, m - 1, d, hh, mm).getTime();
+    };
+
+    data.sort((a, b) => {
+
+    const aTime = parseDt(a.discharge_commenced);
+    const bTime = parseDt(b.discharge_commenced);
+
+    // Earliest discharge commenced first
+    if (aTime !== bTime) {
+        return aTime - bTime;
+    }
+
+    // If same commencement time, sort alphabetically
+    return (a.vessel_name || "").localeCompare(
+        b.vessel_name || "",
+        undefined,
+        { sensitivity: "base" }
+    );
+
+});
+
+    // ── Build one column per vessel ──────────────────────────────
+
+    let vesselHeaders         = '';
+    let cargoRow              = '';
+    let blQtyRow              = '';
+    let arrivedMflRow         = '';
+    let arrivedMbptRow        = '';
+    let dischargeCommencedRow = '';
+    let preBerthingDelayRow   = '';
+    let dischargeCompletedRow = '';
+
+    data.forEach(v => {
+
+        vesselHeaders += `
+            <td class="vessel-header">
+                ${v.vessel_name || '&mdash;'}
+            </td>
+        `;
+
+        cargoRow += `
+            <td style="text-align:center; font-size:14px;">
+                ${v.cargo_name || '&mdash;'}
+            </td>
+        `;
+
+        blQtyRow += `
+            <td style="text-align:center; font-weight:700; font-size:14px;">
+                ${v.bl_quantity
+                    ? Number(v.bl_quantity).toLocaleString('en-IN')
+                    : '&mdash;'}
+            </td>
+        `;
+
+        arrivedMflRow += `
+            <td style="text-align:center;">
+                ${v.arrived_mfl || '&mdash;'}
+            </td>
+        `;
+
+        arrivedMbptRow += `
+            <td style="text-align:center;">
+                ${v.arrived_mbpt || '&mdash;'}
+            </td>
+        `;
+
+        dischargeCommencedRow += `
+            <td style="text-align:center;">
+                ${v.discharge_commenced || '&mdash;'}
+            </td>
+        `;
+
+        preBerthingDelayRow += `
+            <td style="text-align:center; font-weight:600;">
+                ${v.pre_berthing_delay || '&mdash;'}
+            </td>
+        `;
+
+        dischargeCompletedRow += `
+            <td style="text-align:center;">
+                ${v.discharge_completed || '-'}
+            </td>
+        `;
+    });
+
+    const colCount = data.length + 1;
+
+    container.style.display = 'block';
+
+    container.innerHTML = `
+
+        <div class="report-body">
+
+            <table class="report-table">
+
+                <tr>
+                    <th colspan="${colCount}" class="report-title">
+                        DAILY REPORT OF JSW DHARAMTAR PORT OPERATIONS
+                    </th>
+                </tr>
+
+                <tr class="report-date-row">
+                    <td
+                        colspan="${colCount}"
+                        style="text-align:center; font-size:15px; padding:10px;">
+
+                        <b>Report Date :</b> ${formatDate(reportDate)}
+
+                    </td>
+                </tr>
+
+                <tr>
+                    <td class="left-label">Vessel Name</td>
+                    ${vesselHeaders}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Cargo / Source</td>
+                    ${cargoRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">B/L QTY. (MT)</td>
+                    ${blQtyRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Arrived at MFL</td>
+                    ${arrivedMflRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Arrived at MbPT</td>
+                    ${arrivedMbptRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Discharge Commenced</td>
+                    ${dischargeCommencedRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Pre-Berthing Delay</td>
+                    ${preBerthingDelayRow}
+                </tr>
+
+                <tr>
+                    <td class="left-label">Discharge Completed</td>
+                    ${dischargeCompletedRow}
+                </tr>
+
+            </table>
+
+        </div>
+    `;
+}
+
+function renderMonthlyReport(data) {
+
+    const container =
+        document.getElementById('report-container');
+
+    if (!data || !data.length) {
+        return;
+    }
+
+    const vesselList = data;
+    console.log("Monthly Order");
+vesselList.forEach(v => {
+    console.log(v.vessel_seq, v.vessel_name);
+});
+
+    // ? Collect unique dates from all vessels
+    const uniqueDatesSet = new Set();
+
+    vesselList.forEach(vessel => {
+        (vessel.daily_data || []).forEach(day => {
+            if (day.date_day) {
+                uniqueDatesSet.add(day.date_day);
+            }
+        });
+    });
+
+    // ? Sort DD-MM-YYYY dates correctly in ascending order
+    const uniqueDates = Array.from(uniqueDatesSet).sort((a, b) => {
+        const [ad, am, ay] = a.split('-').map(Number);
+        const [bd, bm, by] = b.split('-').map(Number);
+        return new Date(ay, am - 1, ad) - new Date(by, bm - 1, bd);
+    });
+
+    // ? Guard: if no dates found, show a message and stop
+    if (!uniqueDates.length) {
+        container.innerHTML += `
+            <div class="report-section" style="margin-top:20px;">
+                <h4>Monthly Cargo Discharge Report</h4>
+                <p style="color:red;">No discharge data found for this period.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+
+    <div class="report-section" style="margin-top:20px;">
+
+        <h4>Monthly Cargo Discharge Report</h4>
+
+        <div style="overflow-x:auto;">
+
+            <table
+                class="report-table monthly-report-table"
+                style="
+                    border-collapse:collapse;
+                    width:max-content;
+                    min-width:100%;
+                    table-layout:fixed;
+                "
+            >
+
+                <thead>
+
+                    <tr
+                        style="
+                            background:#fff200;
+                            color:red;
+                            font-weight:700;
+                            text-align:center;
+                        "
+                    >
+
+                        <th rowspan="2"
+                            style="
+                                min-width:90px;
+                                vertical-align:middle;
+                                text-align:center;
+                            ">
+                            Date / Day
+                        </th>
+
+                        <th rowspan="2"
+                            style="
+                                min-width:90px;
+                                vertical-align:middle;
+                                text-align:center;
+                            ">
+                            Total MV
+                        </th>
+    `;
+
+    vesselList.forEach(vessel => {
+
+        html += `
+            <th
+                colspan="3"
+                style="
+                    text-align:center;
+                    vertical-align:middle;
+                    min-width:300px;
+                    white-space:nowrap;
+                "
+            >
+                ${vessel.vessel_name}
+            </th>
+        `;
+    });
+
+    html += `
+                    </tr>
+
+                    <tr
+                        style="
+                            background:#fff200;
+                            color:red;
+                            font-weight:700;
+                            text-align:center;
+                        "
+                    >
+    `;
+
+    vesselList.forEach(vessel => {
+
+        // ? Show combined cargo name in sub-header per vessel
+        html += `
+
+            <th style="width:140px;text-align:center;">
+                ${vessel.cargo_name || 'Cargo / Source'}
+            </th>
+
+            <th style="width:80px;text-align:center;">
+                Qty in MT
+            </th>
+
+            <th style="width:80px;text-align:center;">
+                W/W Hrs.
+            </th>
+        `;
+    });
+
+    html += `
+                    </tr>
+
+                </thead>
+
+                <tbody>
+    `;
+
+    // ? Grand total accumulators
+    let grandTotalQty = 0;
+    const vesselTotals = vesselList.map(() => 0);
+
+    uniqueDates.forEach(currentDate => {
+
+        let totalMvQty = 0;
+
+        vesselList.forEach(vessel => {
+
+            const dayData =
+                (vessel.daily_data || [])
+                .find(d => d.date_day === currentDate);
+
+            if (dayData) {
+                totalMvQty += Number(dayData.total_qty || 0);
+            }
+        });
+
+        grandTotalQty += totalMvQty;
+
+        html += `
+            <tr>
+                <td style="text-align:center;">
+                    ${currentDate}
+                </td>
+                <td style="text-align:right;">
+                    ${totalMvQty > 0 ? totalMvQty.toLocaleString('en-IN') : '-'}
+                </td>
+        `;
+
+        vesselList.forEach((vessel, idx) => {
+
+            const dayData =
+                (vessel.daily_data || [])
+                .find(d => d.date_day === currentDate);
+
+            const qty = dayData ? Number(dayData.total_qty || 0) : 0;
+            vesselTotals[idx] += qty;
+
+            html += `
+                <td style="text-align:left;">
+                    ${vessel.cargo_name || '-'}
+                </td>
+
+                <td style="text-align:right;">
+                    ${qty > 0 ? qty.toLocaleString('en-IN') : '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ${qty > 0 ? (dayData.ww_hrs || '-') : '-'}
+                </td>
+            `;
+        });
+
+        html += `</tr>`;
+    });
+
+       // ============================================================
+    // TOTAL ROW
+    // ============================================================
+
+    html += `
+        <tr style="font-weight:bold;background:#f2f2f2;">
+            <td style="text-align:center;">TOTAL</td>
+
+            <td style="text-align:right;">
+                ${grandTotalQty.toLocaleString('en-IN')}
+            </td>
+    `;
+
+    vesselList.forEach((vessel, idx) => {
+
+        html += `
+            <td style="font-weight:bold;">
+                TOTAL
+            </td>
+
+            <td style="text-align:right;font-weight:bold;">
+                ${vesselTotals[idx] > 0
+                    ? vesselTotals[idx].toLocaleString('en-IN')
+                    : '-'}
+            </td>
+
+            <td style="text-align:center;font-weight:bold;">
+                ${vessel.ww_hrs_total || '-'}
+            </td>
+        `;
+    });
+
+    html += `</tr>`;
+
+
+    // ============================================================
+    // BALANCE ON BOARD
+    // ============================================================
+
+    html += `
+        <tr>
+            <td></td>
+            <td></td>
+    `;
+
+    vesselList.forEach(vessel => {
+
+        html += `
+            <td style="font-weight:600;">
+                Balance on Board
+            </td>
+
+            <td style="text-align:right;">
+                ${(Number(vessel.balance_on_board || 0)).toLocaleString('en-IN')}
+            </td>
+
+            <td></td>
+        `;
+    });
+
+    html += `</tr>`;
+
+
+    // ============================================================
+    // AVG DISCHARGE RATE
+    // ============================================================
+
+    html += `
+        <tr>
+            <td></td>
+            <td></td>
+    `;
+
+    vesselList.forEach(vessel => {
+
+        html += `
+            <td style="font-weight:bold;">
+                Avg Discharge Rate PWWD
+            </td>
+
+            <td style="text-align:right;font-weight:bold;">
+                ${(Number(vessel.avg_discharge_rate || 0)).toLocaleString('en-IN')}
+            </td>
+
+            <td></td>
+        `;
+    });
+
+    html += `</tr>`;
+
+
+    // ============================================================
+    // HOOKS AVAILABLE
+    // ============================================================
+
+    html += `
+        <tr>
+            <td></td>
+            <td></td>
+    `;
+
+    vesselList.forEach(vessel => {
+
+        html += `
+            <td>
+                Hooks Available
+            </td>
+
+            <td style="text-align:center;">
+                ${vessel.hooks_available || '4'}
+            </td>
+
+            <td></td>
+        `;
+    });
+
+    html += `</tr>`;
+
+
+    html += `
+        </tbody>
+        </table>
+        </div>
+    </div>
+    `;
+
+    container.innerHTML += html;
+}
+async function loadMonthlyReport(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/monthly_cargo_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        if (!result.success) {
+            console.warn('Monthly report failed:', result.message);
+            return;
+        }
+
+        renderMonthlyReport(result.data);
+
+    } catch (err) {
+        console.warn('Monthly report error:', err.message);
+    }
+}
+
+async function loadVesselDelayReport(reportDate) {
+
+    console.log("========== VESSEL DELAY START ==========");
+
+    console.log("REPORT DATE:", reportDate);
+
+    try {
+
+        const apiUrl =
+            `/api/module/RP01/vessel_delay_report?report_date=${reportDate}`;
+
+        console.log("API URL:", apiUrl);
+
+        const response = await fetch(apiUrl);
+
+        console.log("FETCH RESPONSE:", response);
+
+        const result = await response.json();
+
+        console.log("VESSEL DELAY API RESULT:", result);
+
+        if (!result.success) {
+
+            console.error(
+                'Vessel delay report failed:',
+                result.message
+            );
+
+            const container =
+                document.getElementById('report-container');
+
+            container.innerHTML += `
+
+                <div class="report-section">
+
+                    <div style="
+                        color:red;
+                        font-weight:700;
+                    ">
+
+                        Vessel Delay Report Failed :
+                        ${result.message}
+
+                    </div>
+
+                </div>
+            `;
+
+            return;
+        }
+
+        console.log(
+            "VESSEL DELAY DATA:",
+            result.data
+        );
+
+        renderVesselDelayReport(result.data);
+
+    } catch (err) {
+
+        console.error(
+            'Vessel delay report error:',
+            err
+        );
+
+        const container =
+            document.getElementById('report-container');
+
+        container.innerHTML += `
+
+            <div class="report-section">
+
+                <div style="
+                    color:red;
+                    font-weight:700;
+                ">
+
+                    Vessel Delay Unexpected Error :
+                    ${err.message}
+
+                </div>
+
+            </div>
+        `;
+    }
+
+    console.log("========== VESSEL DELAY END ==========");
+}
+
+function renderVesselDelayReport(data) {
+
+    const container =
+        document.getElementById('report-container');
+
+    if (!data || !data.length) {
+        return;
+    }
+
+    let delayHtml = `
+
+        <div class="report-section" style="margin-top:30px;">
+
+            <h4>
+                Vessel Delay Details
+            </h4>
+
+            <div style="overflow-x:auto;">
+
+                <table class="report-table">
+
+                    <!-- VESSEL HEADER -->
+
+                    <tr style="
+                        background:#dfe6ee;
+                        font-weight:700;
+                    ">
+    `;
+
+    // VESSEL NAMES
+    data.forEach(v => {
+
+        delayHtml += `
+
+            <th style="
+                min-width:350px;
+                text-align:center;
+                font-size:18px;
+            ">
+
+                ${v.vessel_name || '-'}
+
+            </th>
+        `;
+    });
+
+    delayHtml += `</tr>`;
+
+    // DELAY CONTENT ROW
+    delayHtml += `<tr>`;
+
+    data.forEach(v => {
+
+        let delayContent = '';
+
+        (v.delays || []).forEach(d => {
+
+            if (!d.delay_name) {
+                return;
+            }
+
+            delayContent += `
+
+    <div style="
+        margin-bottom:8px;
+    ">
+
+        <div style="
+            font-weight:700;
+            color:#c62828;
+            margin-bottom:2px;
+        ">
+            ${d.delay_name} :
+        </div>
+
+        <div style="
+            padding-left:10px;
+            white-space:pre-line;
+            line-height:1.3;
+            font-size:14px;
+        ">
+            ${d.crane_details || '-'}
+        </div>
+
+    </div>
+`;
+        });
+
+        delayHtml += `
+
+    <td style="
+        vertical-align:top;
+        background:#fff9c4;
+        padding:8px;
+        font-size:14px;
+    ">
+
+        ${delayContent || `
+<div style="
+    text-align:center;
+    color:#666;
+    font-weight:600;
+    padding:8px 0;
+">
+    No Delay
+</div>
+`}
+
+    </td>
+`;
+    });
+
+    delayHtml += `
+
+                    </tr>
+
+                </table>
+
+            </div>
+
+        </div>
+    `;
+
+    container.innerHTML += delayHtml;
+}
+
+async function loadBargeStatusReport(reportDate) {
+
+    console.log("========== BARGE STATUS START ==========");
+
+    try {
+
+        const apiUrl =
+            `/api/module/RP01/barge_status_report?report_date=${reportDate}`;
+
+        console.log(apiUrl);
+
+        const response = await fetch(apiUrl);
+
+        console.log(response.status);
+
+        const result = await response.json();
+
+        console.log(result);
+
+        if (!result.success) {
+            console.error(result.message);
+            return;
+        }
+
+        renderBargeStatusReport(result.data);
+
+    } catch (err) {
+        console.error(err);
+    }
+
+    console.log("========== BARGE STATUS END ==========");
+}
+
+function renderBargeStatusReport(data) {
+
+    const container = document.getElementById("report-container");
+
+    if (!data || Object.keys(data).length === 0)
+        return;
+
+    const editableRows = [
+        "r19_waiting_loaded",
+        "empty_at_gull_r19",
+        "in_transit_jetty_to_mv",
+        "breakdown",
+        "remarks"
+        
+    ];
+
+    const statuses = [
+        ["at_jetty", "At Jetty - Under Discharge / Loading"],
+        ["waiting_discharge", "At Jetty - Waiting for Discharge"],
+        ["r19_waiting_loaded", "At R-19 - Waiting (Loaded)"],
+        ["at_gull_loaded", "At Gull - Waiting (Loaded)"],
+        ["under_loading", "Under Loading at MV"],
+        ["waiting_loading", "Waiting for loading"],
+        ["waiting_empty_jetty", "Waiting at Jetty - Empty"],
+        ["empty_at_gull_r19", "Empty at Gull / R-19"],
+        ["in_transit_jetty_to_mv", "In transit - from Jetty to MV"],
+        ["breakdown", "Breakdown / Off Hired / Coastal"],
+        ["remarks", "Remarks"]
+    ];
+
+    let html = `
+    <div class="report-section" style="margin-top:30px">
+
+        <h4>Barge Status Report</h4>
+
+        <div style="overflow-x:auto">
+
+        <table class="report-table">
+
+            <tr style="background:#fff200;color:red;font-weight:bold">
+
+                <th>Status</th>
+    `;
+
+    Object.keys(data).forEach(ldudId => {
+
+        html += `
+            <th style="min-width:250px">
+                ${data[ldudId].vessel_name || `Vessel ${ldudId}`}
+            </th>
+        `;
+
+    });
+
+    html += `</tr>`;
+
+    statuses.forEach(([key, title]) => {
+
+        html += `<tr>`;
+
+        html += `
+            <td style="font-weight:bold">
+                ${title}
+            </td>
+        `;
+
+        Object.keys(data).forEach(ldudId => {
+
+            const value = key ? data[ldudId][key] : [];
+
+            let displayValue = "";
+
+            if (Array.isArray(value))
+                displayValue = value.join("<br>");
+            else
+                displayValue = (value === "NA" || value == null) ? "" : value;
+
+            if (editableRows.includes(key)) {
+
+                html += `
+                    <td
+                        contenteditable="true"
+                        class="barge-editable"
+                        data-ldud="${ldudId}"
+                        data-status="${key}"
+                        style="vertical-align:top;min-width:220px;"
+                    >
+                        ${displayValue}
+                    </td>
+                `;
+
+            } else {
+
+                html += `
+                    <td style="vertical-align:top">
+
+                        ${
+                            Array.isArray(value)
+                                ? (value.length ? value.join("<br>") : "-")
+                                : (value || "-")
+                        }
+
+                    </td>
+                `;
+            }
+
+        });
+
+        html += `</tr>`;
+
+    });
+
+    html += `
+        </table>
+        </div>
+    </div>
+    `;
+
+    container.innerHTML += html;
+
+    // Auto Save
+    document.querySelectorAll(".barge-editable").forEach(cell => {
+
+        cell.addEventListener("blur", function () {
+
+            fetch("/api/module/RP01/save_barge_status", {
+
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+
+                    ldud_id: this.dataset.ldud,
+
+                    status: this.dataset.status,
+
+                    value: this.innerHTML.trim()
+
+                })
+
+            })
+            .then(r => r.json())
+            .then(res => {
+
+                console.log("Saved", res);
+
+            })
+            .catch(err => {
+
+                console.error(err);
+
+            });
+
+        });
+
+    });
+
+}
+
+const editedStatus = {};
+
+document.querySelectorAll(".barge-editable").forEach(td => {
+
+    const ldudId = td.dataset.ldud;
+
+    if (!editedStatus[ldudId])
+        editedStatus[ldudId] = {};
+
+    editedStatus[ldudId][td.dataset.status] = td.innerHTML.trim();
+});
+
+
+async function loadBargeDischargeReport(reportDate) {
+    
+
+    console.log("========== BARGE REPORT START ==========");
+
+    console.log("REPORT DATE:", reportDate);
+
+    try {
+
+        const apiUrl =
+            `/api/module/RP01/barge_discharge_report?report_date=${reportDate}`;
+
+        console.log("API URL:", apiUrl);
+
+        const response = await fetch(apiUrl);
+
+        console.log("FETCH RESPONSE:", response);
+
+        const result = await response.json();
+
+        console.log("API RESULT:", result);
+
+        if (!result.success) {
+
+            console.error(
+                "BARGE REPORT FAILED:",
+                result.message
+            );
+
+            return;
+        }
+
+        console.log(
+            "BARGE REPORT DATA:",
+            result.data
+        );
+
+        renderBargeDischargeReport(result.data);
+
+    } catch (err) {
+
+        console.error(
+            "BARGE REPORT ERROR:",
+            err
+        );
+    }
+
+    console.log("========== BARGE REPORT END ==========");
+}
+
+
+function renderBargeDischargeReport(data) {
+
+    console.log("BARGE REPORT DATA:", data);
+
+    const container = document.getElementById('report-container');
+
+    if (!data) {
+        return;
+    }
+
+    const cargoHierarchy = data.cargo_hierarchy || {};   // cargo_type -> [cargo_categories]
+    const equipmentRows = data.equipment_rows || {};      // equipment -> "type||category" -> qty
+    const equipmentTotals = data.equipment_totals || {};
+    const monthTotals = data.month_totals || {};
+    const fyTotals = data.fy_totals || {};
+    const cumulativeTotals = data.cumulative_totals || {};
+
+    const cargoTypeOrder = [
+    "IBRM",
+    "CBRM",
+    "FLUXES",
+    "Clinker",
+    "SLAG",
+    "Other"
+    ];
+
+    const orderedTypes = cargoTypeOrder.filter(type => cargoHierarchy[type]);
+
+    // Include any other cargo types not in the above list
+    Object.keys(cargoHierarchy).forEach(type => {
+        if (!orderedTypes.includes(type)) {
+            orderedTypes.push(type);
+        }
+    });
+
+    const catKey = (type, cat) => `${type}||${cat}`;
+    const fmt = (n) => (n ? Number(n).toLocaleString('en-IN') : '0');
+
+    let html = `
+
+        <div class="report-section" style="margin-top:30px;">
+
+            <h4>
+                Barge Discharge Report
+            </h4>
+
+            <div style="overflow-x:auto;">
+
+                <table class="report-table">
+
+                    <!-- CARGO TYPE HEADER -->
+
+                    <tr style="
+                        background:#dfe6ee;
+                        font-weight:700;
+                    ">
+
+                        <th rowspan="2"
+                            style="
+                                min-width:220px;
+                                vertical-align:middle;
+                            ">
+                            Equipment Used
+                        </th>
+    `;
+
+    // TOP HEADER -> CARGO TYPES
+    orderedTypes.forEach(type => {
+
+        html += `
+
+            <th colspan="${cargoHierarchy[type].length}"
+            style="
+                text-align:center;
+                font-size:18px;
+            ">
+
+                ${type}
+
+            </th>
+        `;
+    });
+
+    // TOP HEADER -> Total / Total-This-Month (span both header rows)
+    html += `
+        <th rowspan="2" style="min-width:100px; text-align:center; vertical-align:middle;">
+            Total
+        </th>
+        <th rowspan="2" style="min-width:100px; text-align:center; vertical-align:middle;">
+            Total -<br/>This Month
+        </th>
+    </tr><tr>`;
+
+    // SECOND HEADER -> CARGO CATEGORIES (no cargo_name row)
+    orderedTypes.forEach(type => {
+
+        cargoHierarchy[type].forEach(category => {
+
+            html += `
+
+                <th style="
+                    min-width:160px;
+                    text-align:center;
+                ">
+
+                    ${category}
+
+                </th>
+            `;
+        });
+    });
+
+    html += `</tr>`;
+
+    // EQUIPMENT ROWS
+    Object.keys(equipmentRows).forEach(equipment => {
+
+        html += `
+
+            <tr>
+
+                <td style="
+                    font-weight:600;
+                ">
+
+                    By ${equipment}
+
+                </td>
+        `;
+
+        orderedTypes.forEach(type => {
+
+            cargoHierarchy[type].forEach(category => {
+
+                const key = catKey(type, category);
+                const qty = equipmentRows[equipment][key];
+
+                html += `
+
+                    <td style="
+                        text-align:center;
+                    ">
+
+                        ${qty ? qty.toLocaleString('en-IN') : ''}
+
+                    </td>
+                `;
+            });
+        });
+
+        const rowTotals = equipmentTotals[equipment] || {};
+
+        html += `
+                <td style="text-align:center; font-weight:600;">
+                    ${fmt(rowTotals.total_day)}
+                </td>
+                <td style="text-align:center; font-weight:600;">
+                    ${fmt(rowTotals.total_month)}
+                </td>
+            </tr>
+        `;
+    });
+
+    // ---- TOTAL FOR THE DAY ---- (grand total under "Total")
+    html += `
+        <tr style="background:#f5f5f5; font-weight:700;">
+            <td>Total For The Day</td>
+    `;
+
+    let dayGrandTotal = 0;
+
+    orderedTypes.forEach(type => {
+
+        cargoHierarchy[type].forEach(category => {
+
+            const key = catKey(type, category);
+            let total = 0;
+
+            Object.keys(equipmentRows).forEach(equipment => {
+                total += Number(equipmentRows[equipment][key] || 0);
+            });
+
+            dayGrandTotal += total;
+
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(total)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;">${fmt(dayGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
+
+    // ---- TOTAL RECEIPTS FOR THE MONTH ---- (grand total under "Total - This Month")
+    html += `
+        <tr style="background:#fff8dc; font-weight:700;">
+            <td>Total Receipts for the Month</td>
+    `;
+
+    let monthGrandTotal = 0;
+
+    orderedTypes.forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = monthTotals[key] || 0;
+            monthGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;"></td>
+        <td style="text-align:center;">${fmt(monthGrandTotal)}</td>
+    </tr>`;
+
+    // ---- TOTAL RECEIPTS FY ---- (grand total under "Total", NOT "Total - This Month")
+    html += `
+        <tr style="background:#e8f5e9; font-weight:700;">
+            <td>Total Receipts FY</td>
+    `;
+
+    let fyGrandTotal = 0;
+
+    orderedTypes.forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = fyTotals[key] || 0;
+            fyGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;">${fmt(fyGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
+
+    // ---- TOTAL CUMULATIVE TILL DATE ---- (grand total under "Total", NOT "Total - This Month")
+    html += `
+        <tr style="background:#eef2f5; font-weight:700;">
+            <td>Total Cumulative till date</td>
+    `;
+
+    let cumulativeGrandTotal = 0;
+
+    orderedTypes.forEach(type => {
+        cargoHierarchy[type].forEach(category => {
+            const key = catKey(type, category);
+            const val = cumulativeTotals[key] || 0;
+            cumulativeGrandTotal += Number(val);
+            html += `
+                <td style="text-align:center;">
+                    ${fmt(val)}
+                </td>
+            `;
+        });
+    });
+
+    html += `
+        <td style="text-align:center;">${fmt(cumulativeGrandTotal)}</td>
+        <td style="text-align:center;"></td>
+    </tr>`;
+
+    html += `
+                </table>
+
+            </div>
+
+        </div>
+    `;
+
+    container.innerHTML += html;
+}
+async function loadMbcReport(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/mbc_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        console.log("MBC REPORT:", result);
+
+        if (!result.success) {
+
+            console.error(
+                "MBC REPORT FAILED:",
+                result.message
+            );
+
+            return;
+        }
+
+        renderMbcReport(result.data);
+
+    } catch (err) {
+
+        console.error(
+            "MBC REPORT ERROR:",
+            err
+        );
+    }
+}
+
+function renderMbcReport(data) {
+
+    const container = document.getElementById("report-container");
+
+    if (!data || !data.length) {
+        return;
+    }
+
+    let html = `
+
+        <div class="report-section" style="margin-top:30px;">
+
+            <h4>MBC Report</h4>
+
+            <div style="overflow-x:auto;">
+
+                <table class="report-table">
+
+                    <tr style="
+                        background:#fff200;
+                        color:red;
+                        font-weight:bold;
+                    ">
+
+                        <th>MBC No.</th>
+
+                        <th>MBC Name</th>
+
+                        <th>Cargo</th>
+
+                        <th>Source</th>
+
+                        <th>Qty (MT)</th>
+
+                        <th>Arrived at Jetty</th>
+
+                        <th>Unloading / Loading<br>Commence</th>
+
+                        <th>Cleaning Start</th>
+
+                        <th>Unloading / Loading<br>Completed</th>
+
+                        <th>C/off from Jetty</th>
+
+                    </tr>
+    `;
+
+    data.forEach(row => {
+
+        html += `
+
+            <tr>
+
+                <td style="text-align:center;">
+                    ${row.mbc_no || "-"}
+                </td>
+
+                <td>
+                    ${row.mbc_name || "-"}
+                </td>
+
+                <td>
+                    ${row.cargo || "-"}
+                </td>
+
+                <td>
+                    ${row.source || "-"}
+                </td>
+
+                <td style="text-align:right;">
+                    ${Number(row.qty || 0).toLocaleString("en-IN")}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.arrived_at_jetty || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.commence_loading || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.cleaning_start || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.completed_loading || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.cast_off_jetty || "-"}
+                </td>
+
+            </tr>
+
+        `;
+    });
+
+    html += `
+
+                </table>
+
+            </div>
+
+        </div>
+
+    `;
+
+    container.innerHTML += html;
+}
+
+
+async function loadArrivedVesselReport(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/arrived_vessel_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        if (!result.success) {
+            console.error(result.message);
+            return;
+        }
+
+        renderArrivedVesselReport(result.data);
+
+    } catch (err) {
+
+        console.error(err);
+
+    }
+}
+
+function renderArrivedVesselReport(data) {
+
+    const container =
+        document.getElementById("report-container");
+
+    if (!Array.isArray(data)) {
+
+    console.warn("INVALID DATA");
+
+    data = [];
+
+}
+
+    let html = `
+
+    <div class="report-section" style="margin-top:30px;">
+
+        <h4>
+            VESSELS ARRIVED AT MUMBAI
+        </h4>
+
+        <div style="overflow-x:auto;">
+
+            <table class="report-table">
+
+                <tr style="
+                    background:#fff200;
+                    color:red;
+                    font-weight:700;
+                ">
+
+                    <th>Vsl No.</th>
+
+                    <th>M.Vessel Name</th>
+
+                    <th>Cargo</th>
+
+                    <th>B/L Qty. (MT)</th>
+
+                    <th>Load Port</th>
+
+                    <th>Arrived @ Mumbai</th>
+
+                </tr>
+    `;
+
+    data.forEach(row => {
+
+        html += `
+
+            <tr>
+
+                <td style="text-align:center;">
+                    ${row.vsl_no || "-"}
+                </td>
+
+                <td>
+                    ${row.vessel_name || "-"}
+                </td>
+
+                <td>
+                    ${row.cargo || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${Number(row.bl_qty || 0).toLocaleString("en-IN")}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.load_port || "-"}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.arrived_mumbai || "-"}
+                </td>
+
+            </tr>
+
+        `;
+
+    });
+
+    html += `
+
+            </table>
+
+        </div>
+
+    </div>
+
+    `;
+
+    container.innerHTML += html;
+}
+
+async function loadMbcArrivedReport(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/mbc_arrived_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        if (!result.success) {
+
+            console.error(result.message);
+
+            return;
+        }
+
+        renderMbcArrivedReport(result.data);
+
+    } catch (err) {
+
+        console.error(err);
+
+    }
+
+}
+
+function renderMbcArrivedReport(data) {
+
+    const container = document.getElementById("report-container");
+
+    if (!container) return;
+
+    // Ensure data is always an array
+    data = Array.isArray(data) ? data : [];
+
+    let html = `
+    <div class="report-section" style="margin-top:30px;">
+        <h4>MBC ARRIVED AT DHARAMTAR</h4>
+
+        <div style="overflow-x:auto;">
+            <table class="report-table">
+
+                <thead>
+                    <tr style="background:#fff200;color:red;font-weight:700;">
+                        <th>MBC No.</th>
+                        <th>MBC Name</th>
+                        <th>Cargo</th>
+                        <th>B/L Qty. (MT)</th>
+                        <th>Load Port</th>
+                        <th>Arrived @ Dharamtar</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+    `;
+
+    if (data.length > 0) {
+
+        data.forEach(row => {
+            html += `
+                <tr>
+                    <td style="text-align:center;">${row.mbc_no || "-"}</td>
+                    <td>${row.mbc_name || "-"}</td>
+                    <td>${row.cargo || "-"}</td>
+                    <td style="text-align:right;">
+                        ${Number(row.bl_qty || 0).toLocaleString("en-IN")}
+                    </td>
+                    <td>${row.load_port || "-"}</td>
+                    <td style="text-align:center;">
+                        ${row.arrived_dharamtar || "-"}
+                    </td>
+                </tr>
+            `;
+        });
+
+    } else {
+
+        html += `
+            <tr>
+                <td colspan="6" style="text-align:center;">
+                    No Records Found
+                </td>
+            </tr>
+        `;
+    }
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    </div>
+    `;
+
+    container.innerHTML += html;
+}
+async function loadUpcomingVesselReport(reportDate) {
+
+    console.log(
+        "========== UPCOMING VESSEL REPORT START =========="
+    );
+
+    console.log(
+        "REPORT DATE:",
+        reportDate
+    );
+
+    try {
+
+        // SAFETY CHECK
+        if (
+            typeof reportDate !== 'string'
+        ) {
+
+            console.error(
+                "INVALID REPORT DATE:",
+                reportDate
+            );
+
+            return;
+        }
+
+        const apiUrl =
+            `/api/module/RP01/upcoming_vessel_report?report_date=${reportDate}`;
+
+        console.log(
+            "API URL:",
+            apiUrl
+        );
+
+        const response =
+            await fetch(apiUrl);
+
+        console.log(
+            "FETCH RESPONSE:",
+            response
+        );
+
+        console.log(
+            "RESPONSE STATUS:",
+            response.status
+        );
+
+        const result =
+            await response.json();
+
+        console.log(
+            "FULL API RESULT:",
+            result
+        );
+
+        console.log(
+            "RESULT.SUCCESS:",
+            result.success
+        );
+
+        console.log(
+            "RESULT.DATA:",
+            result.data
+        );
+
+        console.log(
+            "IS ARRAY:",
+            Array.isArray(result.data)
+        );
+
+        if (!result.success) {
+
+            console.error(
+                "UPCOMING VESSEL REPORT FAILED:",
+                result.message
+            );
+
+            return;
+        }
+
+        if (
+            !Array.isArray(result.data)
+        ) {
+
+            console.error(
+                "EXPECTED ARRAY BUT GOT:",
+                result.data
+            );
+
+            return;
+        }
+
+        console.log(
+            "TOTAL RECORDS:",
+            result.data.length
+        );
+
+        renderUpcomingVesselReport(
+            result.data
+        );
+
+    } catch (err) {
+
+        console.error(
+            "UPCOMING VESSEL REPORT ERROR:",
+            err
+        );
+    }
+
+    console.log(
+        "========== UPCOMING VESSEL REPORT END =========="
+    );
+}
+
+
+
+function renderUpcomingVesselReport(data) {
+
+    console.log(
+        "========== RENDER UPCOMING VESSEL START =========="
+    );
+
+    console.log(
+        "RAW DATA:",
+        data
+    );
+
+    console.log(
+        "IS ARRAY:",
+        Array.isArray(data)
+    );
+
+    console.log(
+        "TOTAL RECORDS:",
+        data?.length
+    );
+
+    const container =
+        document.getElementById('report-container');
+
+if (!Array.isArray(data)) {
+
+    console.warn("INVALID DATA");
+
+    data = [];
+
+}
+
+    let html = `
+
+        <div class="report-section" style="margin-top:30px;">
+
+            <h4>
+                VESSELS EXPECTED AT MUMBAI
+            </h4>
+
+            <div style="overflow-x:auto;">
+
+                <table class="report-table">
+
+                    <tr style="
+                        background:#fff200;
+                        color:red;
+                        font-weight:700;
+                    ">
+
+                        <th>Vsl No.</th>
+
+                        <th>M.Vessel Name</th>
+
+                        <th>Cargo</th>
+
+                        <th>B/L Qty. (MT)</th>
+
+                        <th>Load Port</th>
+
+                        <th>ETA @ Mumbai</th>
+
+                    </tr>
+    `;
+
+    data.forEach((row, index) => {
+
+        console.log(
+            `ROW ${index + 1}:`,
+            row
+        );
+
+        html += `
+
+            <tr>
+
+                <td style="text-align:center;">
+                    ${row.vsl_no || '-'}
+                </td>
+
+                <td>
+                    ${row.vessel_name || '-'}
+                </td>
+
+                <td>
+                    ${row.cargo || '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ${Number(
+                        row.bl_qty || 0
+                    ).toLocaleString('en-IN')}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.load_port || '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ETA ${row.eta_mumbai || '-'}
+                </td>
+
+            </tr>
+        `;
+    });
+
+    html += `
+
+                </table>
+
+            </div>
+
+        </div>
+    `;
+
+    console.log(
+        "FINAL HTML:",
+        html
+    );
+
+    container.innerHTML += html;
+
+    console.log(
+        "========== RENDER UPCOMING VESSEL END =========="
+    );
+}
+
+async function loadMbcExpectedReport(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/mbc_expected_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        console.log("MBC EXPECTED REPORT:", result);
+
+        if (!result.success) {
+
+            console.error(result.message);
+
+            return;
+        }
+
+        renderMbcExpectedReport(result.data);
+
+    } catch (err) {
+
+        console.error(err);
+
+    }
+
+}
+
+function renderMbcExpectedReport(data) {
+
+    const container =
+        document.getElementById("report-container");
+
+    if (!Array.isArray(data))
+        data = [];
+
+    let html = `
+
+    <div class="report-section" style="margin-top:30px;">
+
+        <h4>
+            MBC EXPECTED AT MUMBAI
+        </h4>
+
+        <div style="overflow-x:auto;">
+
+            <table class="report-table">
+
+                <tr style="
+                    background:#fff200;
+                    color:red;
+                    font-weight:700;
+                ">
+
+                    <th>MBC No.</th>
+
+                    <th>MBC Name</th>
+
+                    <th>Cargo</th>
+
+                    <th>B/L Qty. (MT)</th>
+
+                    <th>Load Port</th>
+
+                    <th>ETA @ Mumbai</th>
+
+                </tr>
+
+    `;
+
+    if (data.length === 0) {
+
+        html += `
+
+            <tr>
+
+                <td colspan="6" style="text-align:center;">
+
+                    No Records Found
+
+                </td>
+
+            </tr>
+
+        `;
+
+    } else {
+
+        data.forEach(row => {
+
+            html += `
+
+                <tr>
+
+                    <td style="text-align:center;">
+                        ${row.mbc_no || "-"}
+                    </td>
+
+                    <td>
+                        ${row.mbc_name || "-"}
+                    </td>
+
+                    <td>
+                        ${row.cargo || "-"}
+                    </td>
+
+                    <td style="text-align:right;">
+                        ${Number(row.bl_qty || 0).toLocaleString("en-IN")}
+                    </td>
+
+                    <td>
+                        ${row.load_port || "-"}
+                    </td>
+
+                    <td style="text-align:center;">
+                        ${row.eta_mumbai || "-"}
+                    </td>
+
+                </tr>
+
+            `;
+
+        });
+
+    }
+
+    html += `
+
+            </table>
+
+        </div>
+
+    </div>
+
+    `;
+
+    container.innerHTML += html;
+
+}
+
+async function loadTideTable(reportDate) {
+
+    try {
+
+        const response = await fetch(
+            `/api/module/RP01/tide_report?report_date=${reportDate}`
+        );
+
+        const result = await response.json();
+
+        console.log("TIDE REPORT:", result);
+
+        if (!result.success) {
+
+            console.error(result.message);
+
+            return;
+        }
+
+        renderTideTable(result.data);
+
+    } catch (err) {
+
+        console.error("Tide Report Error:", err);
+
+    }
+
+}
+
+function renderTideTable(data) {
+
+    const container = document.getElementById("report-container");
+
+    if (!Array.isArray(data))
+        data = [];
+
+    let html = `
+
+    <div class="report-section" style="margin-top:30px;">
+
+        <h4>Tide Details</h4>
+
+        <div style="overflow-x:auto;">
+
+        <table class="report-table">
+
+            <tr style="
+                background:#fff200;
+                color:red;
+                font-weight:bold;
+            ">
+
+                <th>Type</th>
+
+                <th>Time</th>
+
+                <th>Mtrs</th>
+
+            </tr>
+
+    `;
+
+    if (data.length === 0) {
+
+        html += `
+
+            <tr>
+
+                <td colspan="3" style="text-align:center;">
+
+                    No Records Found
+
+                </td>
+
+            </tr>
+
+        `;
+
+    } else {
+
+        data.forEach(row => {
+
+            html += `
+
+                <tr>
+
+                    <td style="text-align:center;">
+
+                        ${row.type || "-"}
+
+                    </td>
+
+                    <td style="text-align:center;">
+
+                        ${row.time || "-"}
+
+                    </td>
+
+                    <td style="text-align:center;">
+
+                        ${Number(row.mtrs || 0).toFixed(2)}
+
+                    </td>
+
+                </tr>
+
+            `;
+
+        });
+
+    }
+
+    html += `
+
+        </table>
+
+        </div>
+
+    </div>
+
+    `;
+
+    container.innerHTML += html;
+
+}
+
+
+
+async function loadVesselDischargeSummary(reportDate) {
+
+    console.log(
+        "========== VESSEL DISCHARGE SUMMARY START =========="
+    );
+
+    console.log(
+        "REPORT DATE:",
+        reportDate
+    );
+
+    try {
+
+        // SAFETY CHECK
+        if (
+            typeof reportDate !== 'string'
+        ) {
+
+            console.error(
+                "INVALID REPORT DATE:",
+                reportDate
+            );
+
+            return;
+        }
+
+        const apiUrl =
+            `/api/module/RP01/vessel_discharge_summary?report_date=${reportDate}`;
+
+        console.log(
+            "API URL:",
+            apiUrl
+        );
+
+        const response =
+            await fetch(apiUrl);
+
+        console.log(
+            "FETCH RESPONSE:",
+            response
+        );
+
+        console.log(
+            "RESPONSE STATUS:",
+            response.status
+        );
+
+        const result =
+            await response.json();
+
+        console.log(
+            "FULL API RESULT:",
+            result
+        );
+
+        if (!result.success) {
+
+            console.error(
+                "VESSEL DISCHARGE SUMMARY FAILED:",
+                result.message
+            );
+
+            return;
+        }
+
+        console.log(
+            "RESULT DATA:",
+            result.data
+        );
+
+        console.log(
+            "IS ARRAY:",
+            Array.isArray(result.data)
+        );
+
+        if (
+            !Array.isArray(result.data)
+        ) {
+
+            console.error(
+                "EXPECTED ARRAY BUT GOT:",
+                result.data
+            );
+
+            return;
+        }
+
+        renderVesselDischargeSummary(
+            result.data
+        );
+
+    } catch (err) {
+
+        console.error(
+            "VESSEL DISCHARGE SUMMARY ERROR:",
+            err
+        );
+    }
+
+    console.log(
+        "========== VESSEL DISCHARGE SUMMARY END =========="
+    );
+}
+function renderVesselDischargeSummary(data) {
+
+    console.log(
+        "========== RENDER VESSEL SUMMARY START =========="
+    );
+
+    console.log(
+        "RAW DATA:",
+        data
+    );
+
+    console.log(
+        "IS ARRAY:",
+        Array.isArray(data)
+    );
+
+    console.log(
+        "TOTAL RECORDS:",
+        data?.length
+    );
+
+    const container =
+        document.getElementById('report-container');
+
+    // SAFETY CHECK
+if (!Array.isArray(data)) {
+
+    console.warn("INVALID DATA");
+
+    data = [];
+
+}
+
+    let html = `
+
+        <div class="report-section" style="margin-top:30px;">
+
+            <h4>
+                Vessel Discharge Summary
+            </h4>
+
+            <div style="overflow-x:auto;">
+
+                <table class="report-table">
+
+                    <tr style="
+                        background:#fff200;
+                        color:red;
+                        font-weight:700;
+                    ">
+
+                        <th>Vsl No.</th>
+
+                        <th>M.Vessel Name</th>
+
+                        <th>Cargo</th>
+
+                        <th>B/L Qty. (MT)</th>
+
+                        <th>Load Port</th>
+
+                        <th>Discharge Commence</th>
+
+                        <th>Discharge Completed</th>
+
+                        <th>Time Taken (Hrs)</th>
+
+                    </tr>
+    `;
+
+    // MAIN ROWS
+    data.forEach((row, index) => {
+
+        console.log(
+            `ROW ${index + 1}:`,
+            row
+        );
+
+        html += `
+
+            <tr>
+
+                <td style="text-align:center;">
+                    ${row.vsl_no || '-'}
+                </td>
+
+                <td>
+                    ${row.vessel_name || '-'}
+                </td>
+
+                <td>
+                    ${row.cargo || '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ${Number(
+                        row.bl_qty || 0
+                    ).toLocaleString('en-IN')}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.load_port || '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.discharge_commenced || '-'}
+                </td>
+
+                <td style="text-align:center;">
+                    ${row.discharge_completed || '-'}
+                </td>
+
+                <td style="
+                    text-align:center;
+                    font-weight:700;
+                ">
+                    ${Number(
+                        row.time_taken_hrs || 0
+                    ).toFixed(2)}
+                </td>
+
+            </tr>
+        `;
+    });
+
+    html += `
+
+                </table>
+
+            </div>
+
+        </div>
+    `;
+
+    console.log(
+        "FINAL HTML:",
+        html
+    );
+
+    container.innerHTML += html;
+
+    console.log(
+        "========== RENDER VESSEL SUMMARY END =========="
+    );
+}
+
+
+function formatDate(dateString) {
+    const date = new Date(dateString + 'T00:00:00'); // avoid timezone shift
+    return date.toLocaleDateString('en-GB', {
+        day:   '2-digit',
+        month: 'short',
+        year:  'numeric'
+    });
+}
+
+// =====================================================
+// DOWNLOAD DPR EXCEL
+// =====================================================
+
+document
+    .getElementById('download_excel_btn')
+    .addEventListener('click', function () {
+
+        console.log(
+            "========== DOWNLOAD EXCEL CLICKED =========="
+        );
+
+        // GET REPORT DATE
+        const reportDate =
+            document.getElementById('report-date').value;
+
+        console.log(
+            "SELECTED REPORT DATE:",
+            reportDate
+        );
+
+        // VALIDATION
+        if (!reportDate) {
+
+            alert(
+                'Please select report date'
+            );
+
+            return;
+        }
+
+        // DOWNLOAD URL
+        const downloadUrl =
+
+            `/api/module/RP01/daily_progress_report_excel?report_date=${reportDate}`;
+
+        console.log(
+            "DOWNLOAD URL:",
+            downloadUrl
+        );
+
+        // DOWNLOAD FILE
+        window.location.href =
+            downloadUrl;
+
+        console.log(
+            "========== DOWNLOAD STARTED =========="
+        );
+    });
+</script>
+
+{% endblock %}

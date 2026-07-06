@@ -6,7 +6,8 @@ from .. import bp
 from io import BytesIO
 from flask import send_file
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment 
+from openpyxl.utils import get_column_letter
 
 def login_required(f):
     @wraps(f)
@@ -216,7 +217,7 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
     cur.close()
     conn.close()
 
-    for v in vessels:
+    for i, v in enumerate(vessels):
         vid    = v.get('vcn_id')
         op     = v.get('operation_type', '')
         bl_qty = (bl_export.get(vid, 0) if op == 'Export' else bl_import.get(vid, 0))
@@ -230,7 +231,10 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         v['eta_to_dharamtar'] = eta_to_dharamtar.get(v['id'], '')
         v['wt_r19']           = ''
         v['at_gull_loaded']   = at_gull_loaded.get(v['id'], '')
-        v['mbc_eta']          = ', '.join(mbc_eta_list)
+        if i < len(mbc_eta_list):
+          v['mbc_eta'] = mbc_eta_list[i]
+        else:
+            v['mbc_eta'] = ''
 
     return vessels
 
@@ -513,6 +517,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         if status == "Discharging" and berth:
             occupied_berth_set.add(berth)
 
+    # Sort alphabetically by name regardless of type
+    barges.sort(key=lambda x: (x["name"] or "").upper())
+
     cur.close()
     conn.close()
     return barges, occupied_berth_set
@@ -520,9 +527,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
 
 # ── ROUTES — each defined exactly ONCE ───────────────────────────────────────
 
-@bp.route('/module/RP01/Barge-Position-Report/')
+@bp.route('/module/RP01/bargeposition/')
 @login_required
-def barge_position_dashboard():
+def bargeposition():
 
     barges, occupied_berth_set = _fetch_all_barges()
 
@@ -617,6 +624,7 @@ def barge_position_dashboard():
         all_barges=barges,
         mother_vessels=mother_vessels,
         tide_data=tide_data,
+         berths=berths,
         old_berths=old_berths,
         new_berths=new_berths,
         from_date=from_date_str,
@@ -630,6 +638,180 @@ def barge_position_dashboard():
         available_berths=max(0, 14 - occupied_berths),
         
     )
+    
+# ── API ROUTES ────────────────────────────────────────────────────────────────
+
+@bp.route('/api/module/RP01/berth-occupancy')
+@login_required
+def api_berth_occupancy():
+    include_completed = request.args.get('completed', '0') == '1'
+
+    if include_completed:
+        report_date = request.args.get('date', '')
+        shift       = request.args.get('shift', 'ALL')
+
+        if not report_date:
+            return jsonify([])
+
+        try:
+            base = datetime.strptime(report_date, '%Y-%m-%d')
+        except Exception:
+            return jsonify([])
+
+        # For date-only filtering — match the full selected date regardless of time
+        date_start = base.replace(hour=0,  minute=0,  second=0)
+        date_end   = base.replace(hour=23, minute=59, second=59)
+
+        # If a specific shift is selected, narrow the window
+        if shift.upper() != 'ALL':
+            SHIFT_WINDOWS = {
+                'A': (base.replace(hour=6,  minute=0),  base.replace(hour=14, minute=0)),
+                'B': (base.replace(hour=14, minute=0),  base.replace(hour=22, minute=0)),
+                'C': (base.replace(hour=22, minute=0),  (base + timedelta(days=1)).replace(hour=6, minute=0)),
+            }
+            from_dt, to_dt = SHIFT_WINDOWS.get(shift.upper(), (date_start, date_end))
+        else:
+            from_dt, to_dt = date_start, date_end
+
+        conn = get_db()
+        cur  = get_cursor(conn)
+        results = []
+
+        # Completed BARGES
+        # Use flexible regex: matches YYYY-MM-DD with space OR T separator
+        cur.execute(r"""
+            SELECT *
+            FROM (
+                SELECT
+                    bl.barge_name,
+                    bl.cargo_name,
+                    bl.commence_discharge_berth,
+                    bl.along_side_berth,
+                    bl.completed_discharge_berth,
+                    bl.cast_off_port,
+                    COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                    CASE
+                        WHEN bl.cast_off_port IS NOT NULL
+                             AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(bl.cast_off_port), 1, 10)::date
+                        WHEN bl.completed_discharge_berth IS NOT NULL
+                             AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(bl.completed_discharge_berth), 1, 10)::date
+                        ELSE NULL
+                    END AS completed_date
+                FROM ldud_barge_lines bl
+                JOIN ldud_header h ON h.id = bl.ldud_id
+                WHERE COALESCE(TRIM(bl.barge_name),'') <> ''
+                  AND (
+                        (bl.cast_off_port IS NOT NULL
+                         AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                        OR
+                        (bl.completed_discharge_berth IS NOT NULL
+                         AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                      )
+            ) sub
+            WHERE sub.completed_date = %s::date
+            ORDER BY sub.barge_name
+        """, (report_date,))
+
+        for row in cur.fetchall():
+            row = dict(row)
+            commenced = _fmt_dt(row.get('commence_discharge_berth') or row.get('along_side_berth'))
+            completed = _fmt_dt(row.get('cast_off_port') or row.get('completed_discharge_berth'))
+            results.append({
+                'type':      'BARGE',
+                'status':    'Completed',
+                'name':      row['barge_name'],
+                'cargo':     row.get('cargo_name') or '',
+                'bl_qty':    float(row['bl_qty'] or 0),
+                'commenced': commenced,
+                'completed': completed,
+            })
+
+        # Completed MBCs
+        cur.execute(r"""
+            SELECT *
+            FROM (
+                SELECT
+                    h.mbc_name,
+                    h.cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
+                    p.unloading_commenced,
+                    p.unloading_completed,
+                    p.vessel_cast_off,
+                    CASE
+                        WHEN p.unloading_completed IS NOT NULL
+                             AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(p.unloading_completed), 1, 10)::date
+                        WHEN p.vessel_cast_off IS NOT NULL
+                             AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(p.vessel_cast_off), 1, 10)::date
+                        ELSE NULL
+                    END AS completed_date
+                FROM mbc_header h
+                JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+                WHERE (
+                        (p.unloading_completed IS NOT NULL
+                         AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                        OR
+                        (p.vessel_cast_off IS NOT NULL
+                         AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                      )
+            ) sub
+            WHERE sub.completed_date = %s::date
+            ORDER BY sub.mbc_name
+        """, (report_date,))
+
+        for row in cur.fetchall():
+            row = dict(row)
+            results.append({
+                'type':      'MBC',
+                'status':    'Completed',
+                'name':      row['mbc_name'],
+                'cargo':     row.get('cargo_name') or '',
+                'bl_qty':    float(row['bl_qty'] or 0),
+                'commenced': _fmt_dt(row.get('unloading_commenced')),
+                'completed': _fmt_dt(row.get('unloading_completed') or row.get('vessel_cast_off')),
+            })
+
+        cur.close()
+        conn.close()
+        return jsonify(results)
+
+    # Original logic — completely untouched
+    barges, _ = _fetch_all_barges()
+    return jsonify(barges)
+
+
+@bp.route('/api/module/RP01/mother-vessel-data')
+@login_required
+def api_mother_vessel_data():
+    from_datetime = _parse_dt(request.args.get('from_datetime'))
+    to_datetime   = _parse_dt(request.args.get('to_datetime'))
+    if not from_datetime or not to_datetime:
+        return jsonify([])
+    vessels_raw = _fetch_mother_vessels(from_datetime, to_datetime)
+    vessels = [{
+        'vessel_name':         v.get('vessel_name') or '',
+        'discharge_commenced': _fmt_dt(v.get('discharge_commenced')),
+        'discharge_completed': _fmt_dt(v.get('discharge_completed')),
+        'under_loading':       v.get('under_loading') or '',
+        'eta_to_dharamtar':    v.get('eta_to_dharamtar') or '',
+        'wt_r19':              v.get('wt_r19') or '',
+        'at_gull_loaded':      v.get('at_gull_loaded') or '',
+        'mbc_eta':             v.get('mbc_eta') or '',
+    } for v in vessels_raw]
+    return jsonify(vessels)
+
+
+@bp.route('/api/module/RP01/tide-data')
+@login_required
+def api_tide_data():
+    from_datetime = _parse_dt(request.args.get('from_datetime'))
+    to_datetime   = _parse_dt(request.args.get('to_datetime'))
+    if not from_datetime or not to_datetime:
+        return jsonify([])
+    return jsonify(_fetch_tide_data(from_datetime, to_datetime))
 
 
 @bp.route('/api/module/RP01/shift-details')
@@ -648,171 +830,6 @@ def get_shift_details():
         "crane_operator_list": crane_operator_list,
     })
 
-
-@bp.route('/api/module/RP01/mother-vessel-data')
-@login_required
-def mother_vessel_data():
-
-    from_datetime = datetime.fromisoformat(request.args.get('from_datetime'))
-    to_datetime   = datetime.fromisoformat(request.args.get('to_datetime'))
-
-    # Widen window: previous day 00:00 so completed vessels are included
-    window_start = datetime(
-        from_datetime.year,
-        from_datetime.month,
-        from_datetime.day,
-        0, 0, 0
-    ) - timedelta(days=1)
-
-    vessels = _fetch_mother_vessels(window_start, to_datetime)
-    
-    
-    
-
-    return jsonify([{
-        "vessel_name":         v.get("vessel_name"),
-        "nor_tendered":        _fmt_dt(v.get("nor_tendered")),
-        "discharge_commenced": _fmt_dt(v.get("discharge_commenced")),
-        "discharge_completed": _fmt_dt(v.get("discharge_completed")),
-        "under_loading":       v.get("under_loading", ""),
-        "eta_to_dharamtar":    v.get("eta_to_dharamtar", ""),
-        "wt_r19":              "",
-        "at_gull_loaded":      v.get("at_gull_loaded", ""),
-        "mbc_eta":             v.get("mbc_eta", ""),
-    } for v in vessels])
-
-
-@bp.route('/api/module/RP01/tide-data')
-@login_required
-def tide_data_api():
-    from_datetime = datetime.fromisoformat(request.args.get('from_datetime'))
-    to_datetime   = datetime.fromisoformat(request.args.get('to_datetime'))
-    return jsonify(_fetch_tide_data(from_datetime, to_datetime))
-
-
-@bp.route('/api/module/RP01/berth-occupancy')
-@login_required
-def berth_occupancy():
-    completed = request.args.get("completed") == "1"
-    selected_date  = request.args.get('date')
-    selected_shift = request.args.get('shift')
-
-    items, _ = _fetch_all_barges(selected_date, selected_shift)
-    
-
-    # If popup requests completed data
-    if completed:
-
-        completed = []
-
-        conn = get_db()
-        cur = get_cursor(conn)
-
-        # ---------------- COMPLETED BARGES ----------------
-        cur.execute("""
-            SELECT
-                l.id,
-                l.barge_name,
-                l.cargo_name,
-                COALESCE(l.discharge_quantity,0) AS qty,
-                l.cast_off_port,
-                l.completed_discharge_berth
-            FROM ldud_barge_lines l
-            WHERE
-                l.cast_off_port IS NOT NULL
-                OR l.completed_discharge_berth IS NOT NULL
-        """)
-
-        for row in cur.fetchall():
-            row = dict(row)
-
-            completed_dt = _parse_dt(
-                row["cast_off_port"] or row["completed_discharge_berth"]
-            )
-
-            if completed_dt and completed_dt.date() == datetime.strptime(
-                selected_date, "%Y-%m-%d"
-            ).date():
-
-                completed.append({
-                    "type": "BARGE",
-                    "name": row["barge_name"],
-                    "cargo": row["cargo_name"] or "",
-                    "qty": float(row["qty"] or 0),
-                    "status": "Completed",
-                    "completed_date": _fmt_dt(completed_dt)
-                })
-
-        # ---------------- COMPLETED MBC ----------------
-        cur.execute("""
-            SELECT
-                h.id,
-                h.mbc_name,
-                h.cargo_name,
-                COALESCE(h.bl_quantity,0) AS qty,
-                p.unloading_completed,
-                p.vessel_cast_off
-            FROM mbc_header h
-            JOIN mbc_discharge_port_lines p
-                ON p.mbc_id=h.id
-            WHERE
-                p.unloading_completed IS NOT NULL
-                OR p.vessel_cast_off IS NOT NULL
-        """)
-
-        for row in cur.fetchall():
-            row = dict(row)
-
-            completed_dt = (
-                _parse_dt(row["vessel_cast_off"])
-                or _parse_dt(row["unloading_completed"])
-            )
-
-            if completed_dt and completed_dt.date() == datetime.strptime(
-                selected_date, "%Y-%m-%d"
-            ).date():
-
-                completed.append({
-                    "type": "MBC",
-                    "name": row["mbc_name"],
-                    "cargo": row["cargo_name"] or "",
-                    "qty": float(row["qty"] or 0),
-                    "status": "Completed",
-                    "completed_date": _fmt_dt(completed_dt)
-                })
-
-        cur.close()
-        conn.close()
-
-        return jsonify(completed)
-
-    # Existing berth/waiting response remains unchanged
-    return jsonify(items)
-@bp.route('/api/module/RP01/berths')
-@login_required
-def get_berths():
-
-    conn = get_db()
-    cur = get_cursor(conn)
-
-    cur.execute("""
-        SELECT
-            id,
-            berth_id,
-            berth_name,
-            berth_sequence
-        FROM port_berth_master
-        ORDER BY
-            COALESCE(berth_sequence,999),
-            berth_name
-    """)
-
-    data = [dict(r) for r in cur.fetchall()]
-
-    cur.close()
-    conn.close()
-
-    return jsonify(data)
 
 @bp.route('/api/module/RP01/shift-wise-discharge')
 @login_required
@@ -865,11 +882,10 @@ def _shift_wise_discharge_inner():
             WHERE entry_date = %s
               AND is_deleted IS NOT TRUE
               AND delay_name IS NOT NULL AND delay_name != ''
-              AND (
-                  LOWER(delay_name) LIKE '%%payloader%%'
-                  OR LOWER(delay_name) LIKE '%%Labor Cleaning%%'
-                
-              )
+                AND (
+                    LOWER(delay_name) LIKE '%%payloader%%'
+                    OR LOWER(delay_name) LIKE '%%labor cleaning%%'
+                )
         """, (selected_date,))
     else:
         cur.execute("""
@@ -878,29 +894,33 @@ def _shift_wise_discharge_inner():
             WHERE entry_date = %s AND shift = %s
               AND is_deleted IS NOT TRUE
               AND delay_name IS NOT NULL AND delay_name != ''
-              AND (
-                  LOWER(delay_name) LIKE '%%payloader%%'
-                  OR LOWER(delay_name) LIKE '%%Labor Cleaning%%'
-                  
-              )
+                AND (
+                    LOWER(delay_name) LIKE '%%payloader%%'
+                    OR LOWER(delay_name) LIKE '%%labor cleaning%%'
+                )
         """, (selected_date, shift))
 
     delay_map = {}
-
     for row in cur.fetchall():
-        key = (row['source_id'], row['source_type'])
-        name = (row['delay_name'] or '').lower()
+        key = (row["source_id"], row["source_type"])
 
         if key not in delay_map:
             delay_map[key] = {
-                'payloader': False,
-                'labour': False
+                "payloader": False,
+                "labour": False
             }
 
-        if 'payloader' in name:
-            delay_map[key]['payloader'] = True
-        else:
-            delay_map[key]['labour'] = True
+        delay = (row["delay_name"] or "").strip().lower()
+
+        print("DELAY ROW:", row["source_id"], row["source_type"], delay)
+
+        if "payloader" in delay:
+            delay_map[key]["payloader"] = True
+
+        if "labor cleaning" in delay or "labour cleaning" in delay:
+            delay_map[key]["labour"] = True
+
+    print("DELAY MAP:", delay_map)
 
 
     # ── 3. BARGE DISCHARGE ──
@@ -996,6 +1016,12 @@ def _shift_wise_discharge_inner():
             (row['vcn_id'], 'VCN'),
             {'payloader': False, 'labour': False}
         )
+        print(
+            "BARGE:",
+            row["barge_name"],
+            row["vcn_id"],
+            delays
+        )
         barge_discharge.append({
             'type': 'BARGE',
             'name': row['barge_name'],
@@ -1010,52 +1036,52 @@ def _shift_wise_discharge_inner():
 
         # ── 4. MBC DISCHARGE ─────────────────────────────────────────────────────
 
-        if is_all:
+    if is_all:
             cur.execute("""
                 SELECT
                     l.source_id AS id,
-                    l.barge_name AS mbc_name,
-                    l.cargo_name,
-                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                    COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
                     SUM(COALESCE(l.quantity,0)) AS actual_discharge
                 FROM lueu_lines l
-                LEFT JOIN mbc_header h
+                JOIN mbc_header h
                     ON h.id = l.source_id
                 WHERE l.source_type = 'MBC'
                 AND l.is_deleted IS NOT TRUE
                 AND l.entry_date = %s
-                AND TRIM(COALESCE(l.barge_name,'')) <> ''
                 GROUP BY
                     l.source_id,
-                    l.barge_name,
-                    l.cargo_name,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                    COALESCE(l.cargo_name, h.cargo_name),
                     h.bl_quantity
                 HAVING SUM(COALESCE(l.quantity,0)) > 0
-                ORDER BY l.barge_name
+                ORDER BY
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
             """, (selected_date,))
-        else:
+    else:
             cur.execute("""
                 SELECT
                     l.source_id AS id,
-                    l.barge_name AS mbc_name,
-                    l.cargo_name,
-                    COALESCE(h.bl_quantity,0) AS bl_qty,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                    COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
                     SUM(COALESCE(l.quantity,0)) AS actual_discharge
                 FROM lueu_lines l
-                LEFT JOIN mbc_header h
+                JOIN mbc_header h
                     ON h.id = l.source_id
                 WHERE l.source_type = 'MBC'
                 AND l.is_deleted IS NOT TRUE
                 AND l.entry_date = %s
                 AND l.shift = %s
-                AND TRIM(COALESCE(l.barge_name,'')) <> ''
                 GROUP BY
                     l.source_id,
-                    l.barge_name,
-                    l.cargo_name,
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                    COALESCE(l.cargo_name, h.cargo_name),
                     h.bl_quantity
                 HAVING SUM(COALESCE(l.quantity,0)) > 0
-                ORDER BY l.barge_name
+                ORDER BY
+                    COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
             """, (selected_date, shift))
 
     mbc_discharge = []
@@ -1066,6 +1092,12 @@ def _shift_wise_discharge_inner():
         delays = delay_map.get(
             (row['id'], 'MBC'),
             {'payloader': False, 'labour': False}
+        )
+        print(
+            "MBC:",
+            row["mbc_name"],
+            row["id"],
+            delays
         )
 
         mbc_discharge.append({
@@ -1087,410 +1119,1033 @@ def _shift_wise_discharge_inner():
         'barge_discharge': barge_discharge,
         'mbc_discharge': mbc_discharge,
     })
-    
-    
-    
+
+@bp.route('/api/module/RP01/shift-report/save', methods=['POST'])
+@login_required
+def api_shift_report_save():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+
+    import json as _json
+
+    conn = get_db()
+    cur  = get_cursor(conn)
+
+    try:
+        # Separate berth_layout (berths only) and waiting_area from the combined list
+        all_layout    = data.get('berth_layout', [])
+        berth_layout  = [item for item in all_layout if item.get('berth') != 'WAITING']
+        waiting_area  = [item for item in all_layout if item.get('berth') == 'WAITING']
+
+        cur.execute("""
+            INSERT INTO barge_position_report
+                (report_date, shift, shift_incharge, bpo, crane_operator,
+                 berth_layout, waiting_area, wt_r19, mbc_eta,
+                 eta_to_dharamtar, on_the_way_gull, shift_plan,
+                 notes, movement_logs, updated_at)
+            VALUES (%s, %s, %s, %s, %s,
+                    %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
+                    %s::jsonb, %s::jsonb, %s::jsonb,
+                    %s::jsonb, %s::jsonb, NOW())
+            ON CONFLICT (report_date, shift)
+            DO UPDATE SET
+                shift_incharge  = EXCLUDED.shift_incharge,
+                bpo             = EXCLUDED.bpo,
+                crane_operator  = EXCLUDED.crane_operator,
+                berth_layout    = EXCLUDED.berth_layout,
+                waiting_area    = EXCLUDED.waiting_area,
+                wt_r19          = EXCLUDED.wt_r19,
+                mbc_eta         = EXCLUDED.mbc_eta,
+                eta_to_dharamtar= EXCLUDED.eta_to_dharamtar,
+                on_the_way_gull = EXCLUDED.on_the_way_gull,
+                shift_plan      = EXCLUDED.shift_plan,
+                notes           = EXCLUDED.notes,
+                movement_logs   = EXCLUDED.movement_logs,
+                updated_at      = NOW()
+        """, (
+            data.get('report_date'),
+            data.get('shift'),
+            data.get('shift_incharge', ''),
+            data.get('bpo', ''),
+            data.get('crane_operator', ''),
+            _json.dumps(berth_layout),
+            _json.dumps(waiting_area),
+            _json.dumps(data.get('wt_r19', {})),
+            _json.dumps(data.get('mbc_eta', {})),
+            _json.dumps(data.get('eta_to_dharamtar', {})),
+            _json.dumps(data.get('on_the_way_gull', {})),
+            _json.dumps(data.get('shift_plan', {})),
+            _json.dumps(data.get('notes', [])),
+            _json.dumps(data.get('movement_logs', [])),
+        ))
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return jsonify({'error': str(e)}), 500
+
+    cur.close()
+    conn.close()
+    return jsonify({'ok': True})
 
 
+@bp.route('/api/module/RP01/shift-report/load')
+@login_required
+def api_shift_report_load():
+    report_date = request.args.get('date')
+    shift       = request.args.get('shift', 'ALL')
+    if not report_date:
+        return jsonify({'found': False})
+
+    conn = get_db()
+    cur  = get_cursor(conn)
+
+    try:
+        cur.execute("""
+            SELECT * FROM barge_position_report
+            WHERE report_date = %s AND shift = %s
+        """, (report_date, shift))
+        row = cur.fetchone()
+    except Exception as e:
+        cur.close()
+        conn.close()
+        return jsonify({'found': False, 'error': str(e)})
+
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({'found': False})
+
+    row = dict(row)
+
+    # Merge berth_layout and waiting_area back into one list
+    # (frontend sends/receives them combined)
+    berth_layout = row.get('berth_layout') or []
+    waiting_area = row.get('waiting_area') or []
+    combined     = berth_layout + waiting_area
+
+    return jsonify({
+        'found':           True,
+        'shift_incharge':  row.get('shift_incharge', ''),
+        'bpo':             row.get('bpo', ''),
+        'crane_operator':  row.get('crane_operator', ''),
+        'berth_layout':    combined,
+        'wt_r19':          row.get('wt_r19')          or {},
+        'mbc_eta':         row.get('mbc_eta')         or {},
+        'eta_to_dharamtar':row.get('eta_to_dharamtar')or {},
+        'on_the_way_gull': row.get('on_the_way_gull') or {},
+        'shift_plan':      row.get('shift_plan')      or {},
+        'notes':           row.get('notes')           or [],
+        'movement_logs':   row.get('movement_logs')   or [],
+        'updated_at':      str(row.get('updated_at', '')),
+    })
     
 @bp.route('/api/module/RP01/download-barge-position-excel')
 @login_required
 def download_barge_position_excel():
-
-    selected_date  = request.args.get('date', '')
-    selected_shift = request.args.get('shift', 'ALL')
+    report_date = request.args.get('date', '')
+    shift          = request.args.get('shift', 'ALL')
     shift_incharge = request.args.get('shift_incharge', '')
     bpo            = request.args.get('bpo', '')
     operator       = request.args.get('operator', '')
 
-    barges, occupied_berth_set = _fetch_all_barges(selected_date, selected_shift)
+    if not report_date:
+        return jsonify({'error': 'date is required'}), 400
 
-    waiting     = [b for b in barges if b["status"] in ["Waiting", "Under Discharge"]]
-    discharging = [b for b in barges if b["status"] == "Discharging"]
+    # ── SHIFT WINDOW (same logic as frontend SHIFT_WINDOWS) ────────────────
+    SHIFT_WINDOWS = {
+        'ALL': {'fh': 6,  'fm': 0, 'th': 6,  'tm': 0, 'next_day': True},
+        'A':   {'fh': 6,  'fm': 0, 'th': 14, 'tm': 0, 'next_day': False},
+        'B':   {'fh': 14, 'fm': 0, 'th': 22, 'tm': 0, 'next_day': False},
+        'C':   {'fh': 22, 'fm': 0, 'th': 6,  'tm': 0, 'next_day': True},
+    }
+    win  = SHIFT_WINDOWS.get(shift.upper(), SHIFT_WINDOWS['ALL'])
+    base = datetime.strptime(report_date, '%Y-%m-%d')
+    from_dt = base.replace(hour=win['fh'], minute=win['fm'], second=0)
+    to_base = base + timedelta(days=1) if win['next_day'] else base
+    to_dt   = to_base.replace(hour=win['th'], minute=win['tm'], second=0)
 
-    from_datetime = datetime.combine(
-        datetime.strptime(selected_date, "%Y-%m-%d").date(),
-        datetime.min.time()
-    ) - timedelta(days=1)
+    # ── DATA PULLS ───────────────────────────────────────────────────────
+    mother_vessels = _fetch_mother_vessels(from_dt, to_dt)
+    tide_data      = _fetch_tide_data(from_dt, to_dt)
+    barges, occupied_berth_set = _fetch_all_barges()
+    waiting     = [b for b in barges if b['status'] in ('Waiting', 'Under Discharge')]
+    discharging = [b for b in barges if b['status'] == 'Discharging']
 
-    to_datetime = datetime.combine(
-        datetime.strptime(selected_date, "%Y-%m-%d").date(),
-        datetime.max.time()
-    )
-
-    mother_vessels = _fetch_mother_vessels(from_datetime, to_datetime)
-    tide_data      = _fetch_tide_data(from_datetime, to_datetime)
-
-    # ── Fetch berth occupancy for board ──────────────────────────────────────
     conn = get_db()
     cur  = get_cursor(conn)
-    cur.execute("SELECT berth_name FROM port_berth_master ORDER BY berth_sequence, id")
-    berths = [r["berth_name"].upper() for r in cur.fetchall()]
+
+    # ── SAVED REPORT OVERLAY (editable fields, notes, logs, plan, layout) ──
+    saved = {}
+    try:
+        cur.execute("""
+            SELECT * FROM barge_position_report
+            WHERE report_date = %s AND shift = %s
+        """, (report_date, shift))
+        row = cur.fetchone()
+        if row:
+            saved = dict(row)
+    except Exception:
+        saved = {}
+
+    wt_r19_map          = saved.get('wt_r19') or {}
+    mbc_eta_map          = saved.get('mbc_eta') or {}
+    eta_dharamtar_map    = saved.get('eta_to_dharamtar') or {}
+    on_the_way_gull_map  = saved.get('on_the_way_gull') or {}
+    notes_saved          = saved.get('notes') or []
+    movement_logs        = saved.get('movement_logs') or []
+    shift_plan           = saved.get('shift_plan') or {}
+    berth_layout_saved   = saved.get('berth_layout') or []
+    waiting_area_saved   = saved.get('waiting_area') or []
+
+    for v in mother_vessels:
+        name = v.get('vessel_name') or ''
+        v['wt_r19']            = wt_r19_map.get(name, v.get('wt_r19', ''))
+        v['mbc_eta']           = mbc_eta_map.get(name, v.get('mbc_eta', ''))
+        v['eta_to_dharamtar']  = eta_dharamtar_map.get(name, v.get('at_gull_loaded', ''))
+        v['on_the_way_gull']   = on_the_way_gull_map.get(name, '')
+
+    # If a report was saved for this date/shift, its berth layout wins
+    use_saved_layout = bool(berth_layout_saved or waiting_area_saved)
+
+    # ── SHIFT WISE DISCHARGE (jetty / barge / mbc) ──────────────────────────
+    is_all = shift.upper() == 'ALL'
+    if is_all:
+        cur.execute("""
+            SELECT cargo_name, COALESCE(SUM(quantity), 0) AS qty
+            FROM lueu_lines
+            WHERE entry_date = %s AND quantity > 0
+              AND cargo_name IS NOT NULL AND cargo_name != '' AND is_deleted IS NOT TRUE
+            GROUP BY cargo_name ORDER BY cargo_name
+        """, (report_date,))
+    else:
+        cur.execute("""
+            SELECT cargo_name, COALESCE(SUM(quantity), 0) AS qty
+            FROM lueu_lines
+            WHERE entry_date = %s AND shift = %s AND quantity > 0
+              AND cargo_name IS NOT NULL AND cargo_name != '' AND is_deleted IS NOT TRUE
+            GROUP BY cargo_name ORDER BY cargo_name
+        """, (report_date, shift))
+    jetty_rows = [dict(r) for r in cur.fetchall()]
+
+    if is_all:
+        cur.execute("""
+            SELECT source_id, source_type, delay_name, barge_name
+            FROM lueu_lines
+            WHERE entry_date = %s AND is_deleted IS NOT TRUE
+              AND delay_name IS NOT NULL AND delay_name != ''
+              AND (LOWER(delay_name) LIKE '%%payloader%%' OR LOWER(delay_name) LIKE '%%labor cleaning%%')
+        """, (report_date,))
+    else:
+        cur.execute("""
+            SELECT source_id, source_type, delay_name, barge_name
+            FROM lueu_lines
+            WHERE entry_date = %s AND shift = %s AND is_deleted IS NOT TRUE
+              AND delay_name IS NOT NULL AND delay_name != ''
+              AND (LOWER(delay_name) LIKE '%%payloader%%' OR LOWER(delay_name) LIKE '%%labor cleaning%%')
+        """, (report_date, shift))
+    delay_map = {}
+    for r in cur.fetchall():
+        key = (r['source_id'], r['source_type'])
+        d = (r['delay_name'] or '').strip().lower()
+        e = delay_map.setdefault(key, {'payloader': False, 'labour': False})
+        if 'payloader' in d: e['payloader'] = True
+        if 'labor cleaning' in d or 'labour cleaning' in d: e['labour'] = True
+
+    if is_all:
+        cur.execute("""
+            WITH actual AS (
+                SELECT TRIM(UPPER(barge_name)) AS barge_key, source_id,
+                       SUM(COALESCE(quantity,0)) AS actual_qty
+                FROM lueu_lines
+                WHERE is_deleted IS NOT TRUE AND source_type = 'VCN' AND entry_date = %s
+                GROUP BY 1, 2 HAVING SUM(COALESCE(quantity,0)) > 0
+            )
+            SELECT bl.barge_name, bl.cargo_name,
+                   COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                   COALESCE(a.actual_qty, 0) AS actual_discharge, h.vcn_id
+            FROM ldud_barge_lines bl
+            JOIN ldud_header h ON h.id = bl.ldud_id
+            LEFT JOIN actual a
+                ON a.barge_key = TRIM(UPPER(CONCAT(bl.barge_name, ' / ', COALESCE(bl.trip_number::text,'1'))))
+               AND a.source_id = h.vcn_id
+            WHERE COALESCE(TRIM(bl.barge_name),'') <> '' AND COALESCE(a.actual_qty,0) > 0
+            ORDER BY bl.barge_name
+        """, (report_date,))
+    else:
+        cur.execute("""
+            WITH actual AS (
+                SELECT TRIM(UPPER(barge_name)) AS barge_key, source_id,
+                       SUM(COALESCE(quantity,0)) AS actual_qty
+                FROM lueu_lines
+                WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
+                  AND entry_date = %s AND shift = %s
+                GROUP BY 1, 2
+            )
+            SELECT bl.barge_name, bl.cargo_name,
+                   COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                   COALESCE(a.actual_qty, 0) AS actual_discharge, h.vcn_id
+            FROM ldud_barge_lines bl
+            JOIN ldud_header h ON h.id = bl.ldud_id
+            INNER JOIN actual a
+                ON a.barge_key = TRIM(UPPER(CONCAT(bl.barge_name, ' / ', COALESCE(bl.trip_number::text,'1'))))
+               AND a.source_id = h.vcn_id
+            WHERE COALESCE(TRIM(bl.barge_name),'') <> '' AND COALESCE(a.actual_qty,0) > 0
+            ORDER BY bl.barge_name
+        """, (report_date, shift))
+
+    barge_discharge = []
+    for r in cur.fetchall():
+        r = dict(r)
+        d = delay_map.get((r['vcn_id'], 'VCN'), {'payloader': False, 'labour': False})
+        barge_discharge.append({
+            'type': 'BARGE', 'name': r['barge_name'], 'cargo': r.get('cargo_name') or '',
+            'bl_qty': float(r['bl_qty'] or 0), 'actual_discharge': float(r['actual_discharge'] or 0),
+            'payloader_cl': r['barge_name'] if d['payloader'] else '',
+            'labour_cleaned': r['barge_name'] if d['labour'] else '',
+        })
+
+    if is_all:
+        cur.execute("""
+            SELECT l.source_id AS id,
+                   COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                   COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                   COALESCE(h.bl_quantity, 0) AS bl_qty,
+                   SUM(COALESCE(l.quantity,0)) AS actual_discharge
+            FROM lueu_lines l JOIN mbc_header h ON h.id = l.source_id
+            WHERE l.source_type = 'MBC' AND l.is_deleted IS NOT TRUE AND l.entry_date = %s
+            GROUP BY l.source_id, COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                     COALESCE(l.cargo_name, h.cargo_name), h.bl_quantity
+            HAVING SUM(COALESCE(l.quantity,0)) > 0
+            ORDER BY COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
+        """, (report_date,))
+    else:
+        cur.execute("""
+            SELECT l.source_id AS id,
+                   COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name) AS mbc_name,
+                   COALESCE(l.cargo_name, h.cargo_name) AS cargo_name,
+                   COALESCE(h.bl_quantity, 0) AS bl_qty,
+                   SUM(COALESCE(l.quantity,0)) AS actual_discharge
+            FROM lueu_lines l JOIN mbc_header h ON h.id = l.source_id
+            WHERE l.source_type = 'MBC' AND l.is_deleted IS NOT TRUE
+              AND l.entry_date = %s AND l.shift = %s
+            GROUP BY l.source_id, COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name),
+                     COALESCE(l.cargo_name, h.cargo_name), h.bl_quantity
+            HAVING SUM(COALESCE(l.quantity,0)) > 0
+            ORDER BY COALESCE(NULLIF(TRIM(l.barge_name), ''), h.mbc_name)
+        """, (report_date, shift))
+
+    mbc_discharge = []
+    for r in cur.fetchall():
+        r = dict(r)
+        d = delay_map.get((r['id'], 'MBC'), {'payloader': False, 'labour': False})
+        mbc_discharge.append({
+            'type': 'MBC', 'name': r['mbc_name'], 'cargo': r.get('cargo_name') or '',
+            'bl_qty': float(r['bl_qty'] or 0), 'actual_discharge': float(r['actual_discharge'] or 0),
+            'payloader_cl': r['mbc_name'] if d['payloader'] else '',
+            'labour_cleaned': r['mbc_name'] if d['labour'] else '',
+        })
+
+    barge_rows_combined = barge_discharge + mbc_discharge
+
+    # ── SHIFT SUMMARY (A/B/C discharge totals) ─────────────────────────────
+    shift_discharge_totals = {'A': 0, 'B': 0, 'C': 0}
+    for s in ['A', 'B', 'C']:
+        cur.execute("""
+            WITH actual AS (
+                SELECT TRIM(UPPER(barge_name)) AS barge_key, source_id,
+                       SUM(COALESCE(quantity,0)) AS actual_qty
+                FROM lueu_lines
+                WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
+                  AND entry_date = %s AND shift = %s
+                GROUP BY 1, 2
+            )
+            SELECT COALESCE(SUM(a.actual_qty),0) AS total FROM actual a
+        """, (report_date, s))
+        barge_total = float(cur.fetchone()['total'] or 0)
+
+        cur.execute("""
+            SELECT COALESCE(SUM(quantity),0) AS total
+            FROM lueu_lines
+            WHERE source_type = 'MBC' AND is_deleted IS NOT TRUE
+              AND entry_date = %s AND shift = %s
+        """, (report_date, s))
+        mbc_total = float(cur.fetchone()['total'] or 0)
+
+        shift_discharge_totals[s] = barge_total + mbc_total
+
+    total_discharge = sum(shift_discharge_totals.values())
+    a_plan = float(shift_plan.get('a_plan', 0) or 0)
+    b_plan = float(shift_plan.get('b_plan', 0) or 0)
+    c_plan = float(shift_plan.get('c_plan', 0) or 0)
+    total_plan = a_plan + b_plan + c_plan
+
+    slag_qty = sum(r['actual_discharge'] for r in barge_rows_combined if 'slag' in (r['cargo'] or '').lower())
+    clinker_qty = sum(r['actual_discharge'] for r in barge_rows_combined if (r['cargo'] or '').strip().lower() == 'clinker')
+    slag_clinker_total = slag_qty + clinker_qty
+    steel_plant = total_discharge - slag_clinker_total
+
     cur.close()
     conn.close()
 
-    old_berths = berths[:6]
-    new_berths = berths[6:]
+    # ── BERTH LAYOUT (matrix + waiting) ─────────────────────────────────
+    old_berths = ["BERTH 1", "BERTH 2", "BERTH 3", "BERTH 4", "BERTH 5", "BERTH 5A"]
+    new_berths = ["BERTH 6", "BERTH 7", "BERTH 8", "BERTH 8A", "BERTH 9", "BERTH 10", "BERTH 11", "BERTH 12"]
     positions  = ['A/S', 'D/B', 'T/B', 'F/B', 'S/B']
 
-    # Build berth→position→item map
-    berth_map = {}
-    for item in barges:
-        b = (item.get("berth") or "").strip().upper()
-        p = (item.get("position") or "A/S").upper()
-        if b:
-            berth_map[(b, p)] = item
+    matrix = {}   # (berth, position) -> item dict
+    waiting_list = []
 
-    # ── Styles ────────────────────────────────────────────────────────────────
+    if use_saved_layout:
+        for item in berth_layout_saved:
+            matrix[(item.get('berth'), item.get('position'))] = item
+        waiting_list = waiting_area_saved
+    else:
+        for b in discharging:
+            berth = (b.get('berth') or '').upper()
+            if berth:
+                matrix[(berth, 'A/S')] = b
+        waiting_list = waiting
+
+    # ══════════════════════════════════════════════════════════════════
+    #  BUILD WORKBOOK  (side-by-side layout, bordered/centered titles)
+    # ══════════════════════════════════════════════════════════════════
     wb = Workbook()
     ws = wb.active
-    ws.title = "Daily Barge Position"
+    ws.title = "Barge Position Report"
+    ws.sheet_view.showGridLines = False
 
-    thin = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'),  bottom=Side(style='thin')
-    )
-    thick_border = Border(
-        left=Side(style='medium'), right=Side(style='medium'),
-        top=Side(style='medium'),  bottom=Side(style='medium')
-    )
+    # ── Colors ───────────────────────────────────────────────────────
+    C_TEXT_PRIMARY   = "0F172A"
+    C_TEXT_MUTED     = "64748B"
+    C_BORDER         = "000000"   # solid black grid lines to match on-screen report
+    C_APP_BG         = "F8FAFC"
 
-    BLUE_HDR   = PatternFill("solid", fgColor="4D8CCD")   # header blue
-    YELLOW_HDR = PatternFill("solid", fgColor="FFFF00")   # title yellow
-    GREEN_CELL = PatternFill("solid", fgColor="C6EFCE")   # discharging
-    BLUE_CELL  = PatternFill("solid", fgColor="DBEAFE")   # waiting-discharge
-    GREY_CELL  = PatternFill("solid", fgColor="E5E7EB")   # completed
-    WAIT_CELL  = PatternFill("solid", fgColor="FEF08A")   # waiting area
+    C_WAITING_BG     = "FEF08A"
+    C_WAITING_TEXT   = "713F12"
 
-    white_bold   = Font(bold=True, color="FFFFFF", size=10)
-    black_bold   = Font(bold=True, color="000000", size=10)
-    normal_font  = Font(size=10)
-    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    left_align   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
+    C_DISCHARGE_BG   = "32DF6E"
+    C_DISCHARGE_TEXT = "14532D"
 
-    def style_cell(cell, fill=None, font=None, alignment=None, border=None):
-        if fill:      cell.fill      = fill
-        if font:      cell.font      = font
-        if alignment: cell.alignment = alignment
-        if border:    cell.border    = border
+    C_WAITING_DISCHARGE_BG = "43E6F1"   # cyan — alongside but discharge not started yet
 
-    def set_row_height(ws, row, height):
-        ws.row_dimensions[row].height = height
+    C_VESSEL_HEADER  = "4D8CCD"
+    C_SECTION_TITLE  = "1D4ED8"
 
-    # ── ROW 1: Title bar (Image 1 top row) ───────────────────────────────────
-    r = 1
-    # A1: "date"
-    ws.cell(r, 1, "date")
-    style_cell(ws.cell(r,1), border=thin, alignment=center_align, font=black_bold)
+    C_METRIC_WAITING   = "B45309"
+    C_METRIC_DISCHARGE = "166534"
+    C_METRIC_OCCUPIED  = "1D4ED8"
 
-    # B1: date value  (merged B1:C1)
-    ws.merge_cells(f"B{r}:C{r}")
-    ws.cell(r, 2, selected_date)
-    style_cell(ws.cell(r,2), border=thin, alignment=center_align, font=black_bold)
+    C_TIDE_HW_BG   = "DCFCE7"; C_TIDE_HW_TX = "166534"
+    C_TIDE_LW_BG   = "DBEAFE"; C_TIDE_LW_TX = "1E40AF"
 
-    # D1: title (merged D1:H1)
-    ws.merge_cells(f"D{r}:H{r}")
-    ws.cell(r, 4, "DPPL OPRATION SHIFT WISE  REPORT")
-    style_cell(ws.cell(r,4), border=thin, alignment=center_align, font=Font(bold=True, size=11))
+    C_BADGE_BARGE_BG = "FEF9C3"; C_BADGE_BARGE_TX = "92400E"
+    C_BADGE_MBC_BG   = "DBEAFE"; C_BADGE_MBC_TX   = "1E40AF"
 
-    # I1: "SHIFT"
-    ws.cell(r, 9, "SHIFT")
-    style_cell(ws.cell(r,9), border=thin, alignment=center_align, font=black_bold)
+    C_COMPLETED_BG   = "DCFCE7"; C_COMPLETED_TX = "166534"
 
-    # J1: shift value  (merged J1:K1)
-    ws.merge_cells(f"J{r}:K{r}")
-    shift_label = {"A": "A- SHIFT", "B": "B- SHIFT", "C": "C- SHIFT"}.get(selected_shift, "ALL SHIFT")
-    ws.cell(r, 10, shift_label)
-    style_cell(ws.cell(r,10), border=thin, alignment=center_align,
-               font=Font(bold=True, size=10, color="006400"))
+    thin = Side(style='thin', color=C_BORDER)
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # L1: DOC NO
-    ws.cell(r, 12, "DOC NO OPE/0100/F/01")
-    style_cell(ws.cell(r,12), border=thin, alignment=center_align, font=black_bold)
+    # title_border now identical to border since both are black — kept as a
+    # separate name so section-header calls (which pass brdr=title_border)
+    # still resolve to the same solid black grid.
+    title_border = border
 
-    # M1: REV
-    ws.cell(r, 13, "REV.02")
-    style_cell(ws.cell(r,13), border=thin, alignment=center_align, font=black_bold)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_a = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
-    # N1: ISSUE NO
-    ws.merge_cells(f"N{r}:O{r}")
-    ws.cell(r, 14, "ISSUE NO. isuue date:01.04.2022")
-    style_cell(ws.cell(r,14), border=thin, alignment=center_align, font=black_bold)
+    title_font       = Font(bold=True, size=18, color=C_TEXT_PRIMARY)
+    meta_font        = Font(size=11, color=C_TEXT_PRIMARY)
+    section_font     = Font(bold=True, size=13, color=C_SECTION_TITLE)
+    header_font      = Font(bold=True, size=10, color="FFFFFF")
+    grey_header_font = Font(bold=True, size=9, color=C_TEXT_MUTED)
+    grey_header_fill = PatternFill("solid", fgColor=C_APP_BG)
+    vessel_header_fill = PatternFill("solid", fgColor=C_VESSEL_HEADER)
+    waiting_fill  = PatternFill("solid", fgColor=C_WAITING_BG)
+    discharge_fill= PatternFill("solid", fgColor=C_DISCHARGE_BG)
+    waiting_discharge_fill = PatternFill("solid", fgColor=C_WAITING_DISCHARGE_BG)
+    empty_fill    = PatternFill("solid", fgColor="F1F5F9")
+    total_fill    = PatternFill("solid", fgColor=C_APP_BG)
+    card_fill     = PatternFill("solid", fgColor="FFFFFF")
+    tide_hw_fill  = PatternFill("solid", fgColor=C_TIDE_HW_BG)
+    tide_lw_fill  = PatternFill("solid", fgColor=C_TIDE_LW_BG)
+    completed_fill= PatternFill("solid", fgColor=C_COMPLETED_BG)
+    note_num_fill = PatternFill("solid", fgColor="E2E8F0")
 
-    set_row_height(ws, r, 20)
+    def put(r, c, value, font=None, fill=None, align=center, brdr=border):
+        cell = ws.cell(row=r, column=c, value=value)
+        cell.font = font or Font(size=10, color=C_TEXT_PRIMARY)
+        if fill: cell.fill = fill
+        cell.alignment = align or center
+        if brdr: cell.border = brdr
+        return cell
 
-    # ── ROW 2: Shift Incharge / BPO / Operator ───────────────────────────────
-    r = 2
-    ws.cell(r, 1, "shift incharge name")
-    style_cell(ws.cell(r,1), border=thin, alignment=center_align, font=black_bold)
+    def merge(r1, c1, r2, c2):
+        ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+        # apply border to every cell in the merged range so the black grid
+        # doesn't visually "cut off" partway through a merged block
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                ws.cell(row=rr, column=cc).border = title_border
 
-    ws.merge_cells(f"B{r}:H{r}")
-    ws.cell(r, 2, shift_incharge.upper() or "PRASHANT MHATRE")
-    style_cell(ws.cell(r,2), border=thin, alignment=center_align, font=black_bold)
+    # ── Row 1: Title (centered, no border) ────────────────────────────
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
+    put(1, 1, "Daily Barge Position Report — RP01", font=title_font, brdr=None, align=Alignment(horizontal='center'))
 
-    ws.cell(r, 9, "BPO")
-    style_cell(ws.cell(r,9), border=thin, alignment=center_align, font=black_bold)
+    # ── Row 2: Date / Shift / Doc info (bordered mini-table) ─────────
+    put(2, 1, "Date:", font=Font(bold=True, size=11), brdr=title_border, align=Alignment(horizontal='left'))
+    put(2, 2, f" {report_date}  ", font=meta_font, brdr=title_border, align=Alignment(horizontal='left'))
+    put(2, 3, " Shift: ", font=Font(bold=True, size=11), brdr=title_border, align=Alignment(horizontal='left'))
+    put(2, 4, f"{shift} -shift", font=meta_font, brdr=title_border, align=Alignment(horizontal='left'))
+    merge(2, 5, 2, 6)
+    put(2, 5, "DOC NO.OPE/0100/F/01", font=Font(size=9, color=C_TEXT_MUTED), brdr=title_border, align=Alignment(horizontal='left'))
+    put(2, 7, "ISUUENO.02", font=Font(size=9, color=C_TEXT_MUTED), brdr=title_border, align=Alignment(horizontal='left'))
+    merge(2, 8, 2, 9)
+    put(2, 8, "ISUUE DATE: 01.04.2022", font=Font(size=9, color=C_TEXT_MUTED), brdr=title_border, align=Alignment(horizontal='left'))
 
-    ws.merge_cells(f"J{r}:K{r}")
-    ws.cell(r, 10, bpo.upper() or "BPO NAME")
-    style_cell(ws.cell(r,10), border=thin, alignment=center_align, font=black_bold)
+    # ── Row 3: spacer ──────────────────────────────────────────────────
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=8)
+    put(3, 1, "", brdr=None)
 
-    ws.cell(r, 12, "operator")
-    style_cell(ws.cell(r,12), border=thin, alignment=center_align, font=black_bold)
+    # ── Row 4: Shift Incharge (full-width merge, wrapped, dynamic height) ──
+    put(4, 1, " Shift Incharge:", font=Font(bold=True, size=11), brdr=title_border, align=Alignment(horizontal='left', vertical='center'))
+    merge(4, 2, 4, 14)
+    put(4, 2, f" {shift_incharge}", font=meta_font, brdr=title_border, align=left_a)
 
-    ws.merge_cells(f"N{r}:O{r}")
-    ws.cell(r, 14, operator.upper() or "oprater name")
-    style_cell(ws.cell(r,14), border=thin, alignment=center_align, font=black_bold)
+    # ── Row 5: Crane Operator / BPO (full-width merge, wrapped) ───────
+    put(5, 1, " Crane Operator:", font=Font(bold=True, size=11), brdr=title_border, align=Alignment(horizontal='left', vertical='center'))
+    merge(5, 2, 5, 14)
+    put(5, 2, f" {operator}", font=meta_font, brdr=title_border, align=left_a)
 
-    set_row_height(ws, r, 20)
+    put(6, 1, " BPO:", font=Font(bold=True, size=11), brdr=title_border, align=Alignment(horizontal='left', vertical='center'))
+    merge(6, 2, 6, 14)
+    put(6, 2, f" {bpo}", font=meta_font, brdr=title_border, align=left_a)
 
-    r = 3  # blank separator
+    # Dynamically size rows 4-6 so long comma-separated names wrap cleanly
+    # inside their bordered cell instead of overflowing past it.
+    def est_row_height(text, chars_per_line=170):
+        lines = max(1, -(-len(str(text or '')) // chars_per_line))
+        return max(18, lines * 14)
 
-    # ── SUMMARY METRICS ROW ───────────────────────────────────────────────────
-    r = 4
-    summary_items = [
-        ("TOTAL MBC & BARGES IN PORT", len(barges)),
-        ("WAITING",                    len(waiting)),
-        ("DISCHARGING",                len(discharging)),
-        ("OCCUPIED BERTHS",            len(occupied_berth_set)),
-        ("AVAILABLE BERTHS",           max(0, 14 - len(occupied_berth_set))),
+    ws.row_dimensions[4].height = est_row_height(shift_incharge)
+    ws.row_dimensions[5].height = est_row_height(operator)
+    ws.row_dimensions[6].height = est_row_height(bpo)
+
+    # ── Row 8: spacer ──────────────────────────────────────────────────
+    row = 8
+
+    # ── Row 8: berth section titles (bordered, centered, side by side) ──
+    berth_title_row = row
+    merge(berth_title_row, 1, berth_title_row, 6)
+    put(berth_title_row, 1, f"OLD BERTH  ({len(old_berths)} BERTH)", font=section_font, brdr=title_border, align=center)
+    merge(berth_title_row, 8, berth_title_row, 13)
+    put(berth_title_row, 8, f"NEW BERTHS  ({len(new_berths)} BERTH)", font=section_font, brdr=title_border, align=center)
+    row += 1
+
+    # ── berth headers ───────────────────────────────────────
+    header_row_berth = row
+    put(header_row_berth, 1, "BERTH", font=grey_header_font, fill=grey_header_fill)
+    for i, p in enumerate(positions):
+        put(header_row_berth, i + 2, p, font=grey_header_font, fill=grey_header_fill)
+    put(header_row_berth, 8, "BERTH", font=grey_header_font, fill=grey_header_fill)
+    for i, p in enumerate(positions):
+        put(header_row_berth, i + 9, p, font=grey_header_font, fill=grey_header_fill)
+    row += 1
+
+    # ── berth matrices side by side ─────────────────────────
+    def berth_cell_text(item):
+        return (f"⚓ {item.get('type','BARGE')} — {item.get('name','')}\n"
+                f"{item.get('cargo','')}\n"
+                f"BL: {item.get('total', item.get('qty',0))} MT   "
+                f"Bal: {item.get('balance',0)} MT")
+
+    def berth_cell_fill(item):
+        unloading_commenced = str(item.get('unloading_commenced') or '').strip()
+        commence_discharge_berth = str(item.get('commence_discharge_berth') or '').strip()
+        unload_started = bool(unloading_commenced) or bool(commence_discharge_berth)
+        return discharge_fill if unload_started else waiting_discharge_fill
+
+    berth_matrix_start = row
+    max_berth_rows = max(len(old_berths), len(new_berths))
+    for r_i in range(max_berth_rows):
+        r = berth_matrix_start + r_i
+        ws.row_dimensions[r].height = 46
+        if r_i < len(old_berths):
+            b = old_berths[r_i]
+            put(r, 1, b, font=Font(bold=True, size=9), align=left_a)
+            for i, p in enumerate(positions):
+                item = matrix.get((b, p))
+                if item:
+                    put(r, i + 2, berth_cell_text(item), font=Font(size=8, bold=True, color=C_DISCHARGE_TEXT), fill=berth_cell_fill(item), align=left_a)
+                else:
+                    put(r, i + 2, "—", font=Font(size=9, color="94A3B8"), fill=empty_fill)
+        if r_i < len(new_berths):
+            b = new_berths[r_i]
+            put(r, 8, b, font=Font(bold=True, size=9), align=left_a)
+            for i, p in enumerate(positions):
+                item = matrix.get((b, p))
+                if item:
+                    put(r, i + 9, berth_cell_text(item), font=Font(size=8, bold=True, color=C_DISCHARGE_TEXT), fill=berth_cell_fill(item), align=left_a)
+                else:
+                    put(r, i + 9, "—", font=Font(size=9, color="94A3B8"), fill=empty_fill)
+
+    row = berth_matrix_start + max_berth_rows + 2  # spacer then section title row
+
+    # ── Mother Vessel + Waiting Area (side by side) ──────────────────
+    mv_title_row = row
+    merge(mv_title_row, 1, mv_title_row, 8)
+    put(mv_title_row, 1, "MOTHER VESSEL", font=section_font, brdr=title_border, align=center)
+    merge(mv_title_row, 10, mv_title_row, 14)
+    put(mv_title_row, 10, f"WAITING AREA  ({len(waiting_list)})", font=section_font, brdr=title_border, align=center)
+    row += 1
+
+    header_row = row
+    put(header_row, 1, "Parameter", font=header_font, fill=vessel_header_fill)
+    for i, v in enumerate(mother_vessels):
+        put(header_row, i + 2, f"Vessel {i+1}\n{v.get('vessel_name','')}", font=header_font, fill=vessel_header_fill)
+    for i, h in enumerate(["Type", "Name", "Cargo", "BL Qty (MT)", "Balance (MT)"]):
+        put(header_row, i + 10, h, font=grey_header_font, fill=grey_header_fill)
+    row += 1
+
+    mv_rows = [
+        ("VSL DISCH COMMNACED", 'discharge_commenced'),
+        ("VSL DISCHARGE COMPLITED", 'discharge_completed'),
+        ("UNDER LOADING", 'under_loading'),
+        ("ETA TO DHARAMTAR", 'eta_to_dharamtar'),
+        ("WT @ R19", 'wt_r19'),
+        ("ON THE WAY TO GULL", 'on_the_way_gull'),
+        ("MBC ETA", 'mbc_eta'),
     ]
-    col = 1
-    for label, val in summary_items:
-        ws.cell(r,   col, label)
-        ws.cell(r+1, col, val)
-        style_cell(ws.cell(r,col),   fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-        style_cell(ws.cell(r+1,col), font=black_bold,
-                   alignment=center_align, border=thin)
-        col += 3
-    set_row_height(ws, r,   22)
-    set_row_height(ws, r+1, 20)
-    r += 3
+    mv_end_row = row + len(mv_rows) - 1
+    waiting_end_row = row + len(waiting_list) - 1
+    for idx, (label, key) in enumerate(mv_rows):
+        r = row + idx
+        row_fill = PatternFill("solid", fgColor="FAFAFA") if idx % 2 == 0 else None
+        put(r, 1, label, font=Font(bold=True, size=9), fill=row_fill, align=left_a)
+        for i, v in enumerate(mother_vessels):
+            put(r, i + 2, v.get(key, ''), fill=row_fill, align=left_a)
 
-    # ── BOARD MATRIX — OLD BERTH (left) + NEW BERTHS (right) side by side ────
-    r += 1
-    positions  = ['A/S', 'D/B', 'T/B', 'F/B', 'S/B']
+    for idx, item in enumerate(waiting_list):
+        r = row + idx
+        put(r, 10, item.get('type', 'BARGE'), font=Font(bold=True, size=9, color=C_WAITING_TEXT), fill=waiting_fill)
+        put(r, 11, item.get('name', ''), font=Font(bold=True, size=10, color=C_WAITING_TEXT), fill=waiting_fill, align=left_a)
+        put(r, 12, item.get('cargo', ''), font=Font(size=9, color=C_WAITING_TEXT), fill=waiting_fill, align=left_a)
+        put(r, 13, float(item.get('total', item.get('total_qty', item.get('qty', 0))) or 0),
+            font=Font(bold=True, size=9, color=C_WAITING_TEXT), fill=waiting_fill)
+        put(r, 14, float(item.get('balance', item.get('balance_qty', 0)) or 0),
+            font=Font(bold=True, size=9, color=C_METRIC_WAITING), fill=waiting_fill)
 
-    # Column layout:
-    # Col 1      = OLD BERTH label
-    # Col 2-6    = OLD positions (A/S, D/B, T/B, F/B, S/B)
-    # Col 7      = empty gap
-    # Col 8      = NEW BERTH label
-    # Col 9-13   = NEW positions (A/S, D/B, T/B, F/B, S/B)
+    # ── FIX: Notes/Tide (columns 1-8) only need to wait for the Mother
+    #    Vessel table (also columns 1-8) to finish — NOT for the Waiting
+    #    Area (columns 10-14), which is visually separate. Previously this
+    #    used max(mv_end_row, waiting_end_row), which left a large empty
+    #    gap under the Mother Vessel columns whenever Waiting Area was
+    #    longer than Mother Vessel. Waiting Area is allowed to keep
+    #    running past this point in its own column range.
+    row = mv_end_row + 2
 
-    OLD_START = 1   # berth label col
-    OLD_POS   = 2   # first position col
-    GAP_COL   = 7
-    NEW_START = 8
-    NEW_POS   = 9
+    # ── Notes + Tide Table (side by side) ─────────────────────────────
+    nt_title_row = row
+    merge(nt_title_row, 1, nt_title_row, 4)
+    put(nt_title_row, 1, "NOTES", font=section_font, brdr=title_border, align=center)
+    merge(nt_title_row, 6, nt_title_row, 8)
+    put(nt_title_row, 6, "TIDE TABLE", font=section_font, brdr=title_border, align=center)
+    row += 1
 
-    # ── Section title row ────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:F{r}")
-    ws.cell(r, OLD_START, f"OLD BERTH  ({len(old_berths)} BERTHS)")
-    style_cell(ws.cell(r, OLD_START), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
+    tide_header_row = row
+    for i, h in enumerate(["Type", "Time", "Height (m)"]):
+        put(tide_header_row, i + 6, h, font=grey_header_font, fill=grey_header_fill)
+    row += 1
 
-    ws.cell(r, GAP_COL, "")  # gap
+    # ── NOTES LOOP ────────────────────────────────────────────
+    notes_list = notes_saved or ["3B to 5A plug problem — informed electrical Mr. Koli."]
+    for i, n in enumerate(notes_list, start=1):
+        r = row + i - 1
+        est_lines = max(1, -(-len(n) // 55))   # ceil division
+        ws.row_dimensions[r].height = max(22, est_lines * 14)
 
-    ws.merge_cells(f"H{r}:M{r}")
-    ws.cell(r, NEW_START, f"NEW BERTHS  ({len(new_berths)} BERTHS)")
-    style_cell(ws.cell(r, NEW_START), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 20)
-    r += 1
+        put(r, 1, i, font=Font(bold=True, size=9, color="1E3A8A"), fill=note_num_fill)
 
-    # ── Column header row ────────────────────────────────────────────────────
-    matrix_hdrs = ["BERTH"] + positions
+        merge(r, 2, r, 4)
+        put(r, 2, n, font=Font(size=9), fill=grey_header_fill, align=left_a)
 
-    for ci, h in enumerate(matrix_hdrs, OLD_START):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r, ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
+    for i, t in enumerate(tide_data):
+        r = row + i
+        tag = (t.get('type') or '').upper()
+        tfill = tide_hw_fill if tag == 'HW' else tide_lw_fill
+        ttext = C_TIDE_HW_TX if tag == 'HW' else C_TIDE_LW_TX
+        put(r, 6, tag, font=Font(bold=True, size=9, color=ttext), fill=tfill)
+        put(r, 7, t.get('time', ''), font=Font(size=9))
+        put(r, 8, t.get('height', ''), font=Font(size=9))
 
-    ws.cell(r, GAP_COL, "")  # gap
+    notes_tide_end_row = row + max(len(notes_list), len(tide_data)) - 1
 
-    for ci, h in enumerate(matrix_hdrs, NEW_START):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r, ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
+    # ── Now reconcile with Waiting Area, since the Shift Wise Discharge
+    #    section below spans the FULL width again (columns 1-8) and must
+    #    not start until both the Notes/Tide block AND the Waiting Area
+    #    (which may still be running in columns 10-14) have finished.
+    row = max(notes_tide_end_row, waiting_end_row) + 2
 
-    # ── Data rows — OLD and NEW side by side ─────────────────────────────────
-    max_rows = max(len(old_berths), len(new_berths))
+    # ── Shift Wise Discharge Report ───────────────────────────────────
+    merge(row, 1, row, 8)
+    put(row, 1, "SHIFT WISE DISCHARGE REPORT", font=section_font, brdr=title_border, align=center)
+    row += 1
 
+    header_row1 = row
+    merge(header_row1, 1, header_row1, 2)
+    put(header_row1, 1, "SHIFT JETTY DISCHARGE", font=grey_header_font, fill=grey_header_fill)
+    merge(header_row1, 3, header_row1, 8)
+    put(header_row1, 3, "BARGE DISCHARGE", font=grey_header_font, fill=grey_header_fill)
+    row += 1
+
+    header_row2 = row
+    labels2 = ["CARGO", "QTY", "BARGES AND MBC", "CARGO", "BL QTY", "ACTUAL DISCHARGE", "PAYLOADER CL", "LABOUR CLEANED"]
+    for i, h in enumerate(labels2):
+        put(header_row2, i + 1, h, font=grey_header_font, fill=grey_header_fill)
+    row += 1
+
+    payloader_names = [r['payloader_cl'] for r in barge_rows_combined if r.get('payloader_cl')]
+    labour_names    = [r['labour_cleaned'] for r in barge_rows_combined if r.get('labour_cleaned')]
+
+    max_rows = max(len(jetty_rows), len(barge_rows_combined), 1)
+    jetty_total = bl_total = actual_total = 0
     for i in range(max_rows):
+        j = jetty_rows[i] if i < len(jetty_rows) else None
+        b = barge_rows_combined[i] if i < len(barge_rows_combined) else None
+        if j: jetty_total += float(j['qty'] or 0)
+        if b: bl_total += b['bl_qty']; actual_total += b['actual_discharge']
 
-        # ── OLD BERTH side ───────────────────────────────────────────────────
-        if i < len(old_berths):
-            berth = old_berths[i]
-            ws.cell(r, OLD_START, berth)
-            style_cell(ws.cell(r, OLD_START), font=black_bold,
-                       alignment=left_align, border=thin)
+        put(row, 1, j['cargo_name'] if j else '', font=Font(size=9), align=left_a)
+        put(row, 2, float(j['qty']) if j else '', font=Font(size=9))
 
-            for ci, pos in enumerate(positions, OLD_POS):
-                item = berth_map.get((berth.upper(), pos))
-                if item:
-                    dqty = float(item.get('discharge_qty', 0))
-                    bal  = float(item.get('balance_qty',  0))
-                    txt  = (f"{item['type']} \u2013 {item['name']}\n"
-                            f"{item['cargo']}\n"
-                            f"Disch: {dqty} MT\n"
-                            f"Bal: {bal} MT")
-                    fill = (GREEN_CELL if dqty > 0 and bal > 0
-                            else BLUE_CELL if bal > 0
-                            else GREY_CELL)
-                    style_cell(ws.cell(r, ci, txt), fill=fill,
-                               font=normal_font, alignment=center_align, border=thin)
-                else:
-                    style_cell(ws.cell(r, ci, "\u2014"),
-                               alignment=center_align, border=thin, font=normal_font)
+        if b:
+            badge_fill = C_BADGE_MBC_BG if b['type'] == 'MBC' else C_BADGE_BARGE_BG
+            badge_tx   = C_BADGE_MBC_TX if b['type'] == 'MBC' else C_BADGE_BARGE_TX
+            cell = put(row, 3, f"{b['type']}  {b['name']}", font=Font(size=9, bold=True, color=badge_tx), align=left_a)
+            cell.fill = PatternFill("solid", fgColor=badge_fill)
         else:
-            # fill empty cols so border still shows
-            for ci in range(OLD_START, OLD_START + 6):
-                style_cell(ws.cell(r, ci, ""),
-                           alignment=center_align, border=thin, font=normal_font)
+            put(row, 3, '', font=Font(size=9), align=left_a)
 
-        # ── GAP col ──────────────────────────────────────────────────────────
-        ws.cell(r, GAP_COL, "")
+        put(row, 4, b['cargo'] if b else '', font=Font(size=9), align=left_a)
+        put(row, 5, b['bl_qty'] if b else '', font=Font(size=9))
+        put(row, 6, b['actual_discharge'] if b else '', font=Font(bold=True, size=9))
+        put(row, 7, payloader_names[i] if i < len(payloader_names) else '', font=Font(size=8, color=C_TEXT_MUTED))
+        put(row, 8, labour_names[i] if i < len(labour_names) else '', font=Font(size=8, color=C_TEXT_MUTED))
+        row += 1
 
-        # ── NEW BERTH side ───────────────────────────────────────────────────
-        if i < len(new_berths):
-            berth = new_berths[i]
-            ws.cell(r, NEW_START, berth)
-            style_cell(ws.cell(r, NEW_START), font=black_bold,
-                       alignment=left_align, border=thin)
+    put(row, 1, "TOTAL", font=Font(bold=True, size=11), fill=total_fill)
+    put(row, 2, jetty_total, font=Font(bold=True, size=11), fill=total_fill)
+    merge(row, 3, row, 4)
+    put(row, 3, '', fill=total_fill)
+    put(row, 5, bl_total, font=Font(bold=True, size=11), fill=total_fill)
+    put(row, 6, actual_total, font=Font(bold=True, size=11), fill=total_fill)
+    put(row, 7, '', fill=total_fill)
+    put(row, 8, '', fill=total_fill)
+    row += 2
 
-            for ci, pos in enumerate(positions, NEW_POS):
-                item = berth_map.get((berth.upper(), pos))
-                if item:
-                    dqty = float(item.get('discharge_qty', 0))
-                    bal  = float(item.get('balance_qty',  0))
-                    txt  = (f"{item['type']} \u2013 {item['name']}\n"
-                            f"{item['cargo']}\n"
-                            f"Disch: {dqty} MT\n"
-                            f"Bal: {bal} MT")
-                    fill = (GREEN_CELL if dqty > 0 and bal > 0
-                            else BLUE_CELL if bal > 0
-                            else GREY_CELL)
-                    style_cell(ws.cell(r, ci, txt), fill=fill,
-                               font=normal_font, alignment=center_align, border=thin)
-                else:
-                    style_cell(ws.cell(r, ci, "\u2014"),
-                               alignment=center_align, border=thin, font=normal_font)
-        else:
-            for ci in range(NEW_START, NEW_START + 6):
-                style_cell(ws.cell(r, ci, ""),
-                           alignment=center_align, border=thin, font=normal_font)
+    # ── Shift summary + Slag/Clinker (side by side) ─────────────────
+    summary_top = row
+    for i, h in enumerate(["SHIFT", "DISCHARGE", "PLAN", "DIFF"]):
+        put(summary_top, i + 1, h, font=grey_header_font, fill=grey_header_fill)
 
-        set_row_height(ws, r, 55)
-        r += 1
+    put(summary_top, 6, "SLAG", font=Font(bold=True, size=9), fill=total_fill, align=left_a)
+    put(summary_top, 7, slag_qty, font=Font(size=9), fill=card_fill)
+    row += 1
 
-    r += 1
+    for s, plan in zip(['A', 'B', 'C'], [a_plan, b_plan, c_plan]):
+        put(row, 1, s, font=Font(size=9))
+        put(row, 2, shift_discharge_totals[s], font=Font(size=9))
+        put(row, 3, plan if plan else '', font=Font(size=9))
+        put(row, 4, (plan - shift_discharge_totals[s]) if plan else '', font=Font(size=9))
+        row += 1
 
-    # ── WAITING AREA ──────────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:F{r}")
-    ws.cell(r, 1, "WAITING AREA")
-    style_cell(ws.cell(r,1), fill=YELLOW_HDR, font=black_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
+    put(summary_top + 1, 6, "CLINKER", font=Font(bold=True, size=9), fill=total_fill, align=left_a)
+    put(summary_top + 1, 7, clinker_qty, font=Font(size=9), fill=card_fill)
+    put(summary_top + 2, 6, "TOTAL", font=Font(bold=True, size=9), fill=total_fill, align=left_a)
+    put(summary_top + 2, 7, slag_clinker_total, font=Font(size=9), fill=card_fill)
 
-    for ci, h in enumerate(["TYPE","NAME","CARGO","DISCHARGE (MT)","BALANCE (MT)","STATUS"], 1):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r,ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    r += 1
+    put(row, 1, "TOTAL", font=Font(bold=True), fill=total_fill)
+    put(row, 2, total_discharge, font=Font(bold=True), fill=total_fill)
+    put(row, 3, total_plan if total_plan else '', font=Font(bold=True), fill=total_fill)
+    put(row, 4, (total_plan - total_discharge) if total_plan else '', font=Font(bold=True), fill=total_fill)
+    put(row, 6, "STEEL PLANT", font=Font(bold=True, size=9), fill=total_fill, align=left_a)
+    put(row, 7, steel_plant, font=Font(bold=True, size=9), fill=card_fill)
+    row += 3
 
-    for item in waiting:
-        data = [item["type"], item["name"], item["cargo"],
-                item["discharge_qty"], item["balance_qty"], item["status"]]
-        for ci, v in enumerate(data, 1):
-            cell = ws.cell(r, ci, v)
-            style_cell(cell, fill=WAIT_CELL, font=normal_font,
-                       alignment=center_align, border=thin)
-        set_row_height(ws, r, 18)
-        r += 1
+    # ── Column widths ──────────────────────────────────────────────
+    widths = {
+        'A': 20, 'B': 20, 'C': 19, 'D': 20, 'E': 18, 'F': 18,
+        'G': 16, 'H': 14, 'I': 15, 'J': 16, 'K': 20, 'L': 16, 'M': 16, 'N': 14
+    }
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A8"
 
-    r += 1
-
-    # ── MOTHER VESSEL ─────────────────────────────────────────────────────────
-    mv_params = [
-        ("VSL DISCH COMMNACED",    "discharge_commenced"),
-        ("VSL DISCHARGE COMPLITED","discharge_completed"),
-        ("UNDER LOADING",          "under_loading"),
-        ("ETA TO DHARAMTAR",       "eta_to_dharamtar"),
-        ("WT @ R19",               "wt_r19"),
-        ("ON THE WAY TO GULL",     "at_gull_loaded"),
-        ("MBC ETA",                "mbc_eta"),
-    ]
-
-    # Header row
-    ws.cell(r, 1, "Parameter")
-    style_cell(ws.cell(r,1), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    for vi, mv in enumerate(mother_vessels, 2):
-        ws.cell(r, vi, f"Vessel {vi-1}\n{mv.get('vessel_name','')}")
-        style_cell(ws.cell(r,vi), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    set_row_height(ws, r, 30)
-    r += 1
-
-    for label, key in mv_params:
-        ws.cell(r, 1, label)
-        style_cell(ws.cell(r,1), font=black_bold, alignment=left_align, border=thin)
-        for vi, mv in enumerate(mother_vessels, 2):
-            cell = ws.cell(r, vi, mv.get(key, "") or "")
-            style_cell(cell, font=normal_font, alignment=center_align, border=thin)
-        set_row_height(ws, r, 18)
-        r += 1
-
-    r += 1
-
-    # ── TIDE TABLE ────────────────────────────────────────────────────────────
-    ws.merge_cells(f"A{r}:C{r}")
-    ws.cell(r, 1, "TIDE TABLE")
-    style_cell(ws.cell(r,1), fill=BLUE_HDR, font=white_bold,
-               alignment=center_align, border=thin)
-    set_row_height(ws, r, 18)
-    r += 1
-
-    for ci, h in enumerate(["TYPE","TIME","HEIGHT (m)"], 1):
-        ws.cell(r, ci, h)
-        style_cell(ws.cell(r,ci), fill=BLUE_HDR, font=white_bold,
-                   alignment=center_align, border=thin)
-    r += 1
-
-    for t in tide_data:
-        for ci, v in enumerate([t["type"], t["time"], t["height"]], 1):
-            cell = ws.cell(r, ci, v)
-            fill = GREEN_CELL if t["type"] == "HW" else BLUE_CELL
-            style_cell(cell, fill=fill, font=normal_font,
-                       alignment=center_align, border=thin)
-        set_row_height(ws, r, 16)
-        r += 1
-
-    # ── Column widths ─────────────────────────────────────────────────────────
-    col_widths = {
-            1: 14,  # OLD berth label
-            2: 20, 3: 18, 4: 18, 5: 18, 6: 18,   # OLD positions
-            7: 3,                                   # GAP
-            8: 14,  # NEW berth label
-            9: 20, 10: 18, 11: 18, 12: 18, 13: 18, # NEW positions
-            14: 20, 15: 10, 16: 26,
-        }
-    from openpyxl.utils import get_column_letter
-    for cn, w in col_widths.items():
-        ws.column_dimensions[get_column_letter(cn)].width = w
-
-    # ── Send file ─────────────────────────────────────────────────────────────
+    # ── Output ─────────────────────────────────────────────────────
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
-    fname = f"Daily_Barge_Position_{selected_date}_{selected_shift}.xlsx"
-    return send_file(output, as_attachment=True, download_name=fname,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    filename = f"Daily_Barge_Position_Report_{report_date}_{shift}.xlsx"
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+@bp.route('/api/module/RP01/download-movement-logs-excel', methods=['POST'])
+@login_required
+def download_movement_logs_excel():
+    data = request.get_json() or {}
+    logs = data.get('movement_logs', [])
+    report_date = data.get('report_date', '')
+    shift = data.get('shift', 'ALL')
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Movement Logs"
+    ws.sheet_view.showGridLines = False
+
+    thin = Side(style='thin', color='D9E2EC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_a = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+    headers = ["Name", "From", "To", "Date", "Time", "Shift", "Shift Incharge"]
+
+    # ── Title row ────────────────────────────────────────────────
+    ws.merge_cells('A1:G1')
+    c = ws['A1']
+    c.value = f"MOVEMENT LOGS   (Total: {len(logs)})"
+    c.font = Font(bold=True, size=16, color="2563EB")
+    c.alignment = center
+    ws.row_dimensions[1].height = 26
+
+    # ── Header row ───────────────────────────────────────────────
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=i, value=h)
+        cell.font = Font(bold=True, size=10, color="6B7280")
+        cell.fill = PatternFill("solid", fgColor="F8FAFC")
+        cell.alignment = center
+        cell.border = border
+
+    # ── Data rows ────────────────────────────────────────────────
+    r = 3
+    if not logs:
+        ws.merge_cells(f'A{r}:G{r}')
+        cell = ws.cell(row=r, column=1, value="No movement logs found.")
+        cell.font = Font(size=10, color="94A3B8")
+        cell.alignment = center
+        r += 1
+    else:
+        for log in logs:
+            incharge = (log.get('shiftIncharge') or '').strip() or '—'
+            vals = [
+                log.get('name', ''), log.get('from', ''), log.get('to', ''),
+                log.get('reportDate', ''), log.get('time', ''),
+                log.get('shift', ''), incharge
+            ]
+            for i, v in enumerate(vals, start=1):
+                cell = ws.cell(row=r, column=i, value=v)
+                cell.border = border
+                cell.alignment = left_a if i in (1, 2, 3, 7) else center
+                cell.font = Font(bold=(i == 1), size=10, color="0F172A")
+            r += 1
+
+    widths = {'A': 18, 'B': 16, 'C': 16, 'D': 14, 'E': 14, 'F': 10, 'G': 30}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A3"
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f"Movement_Logs_{report_date or 'report'}_{shift}_{stamp}.xlsx"
+    )
     
-    
+@bp.route('/api/module/RP01/download-completed-excel')
+@login_required
+def download_completed_excel():
+    report_date = request.args.get('date', '')
+    shift = request.args.get('shift', 'ALL')
+    if not report_date:
+        return jsonify({'error': 'date is required'}), 400
+
+    # ── Fetch completed BARGES + MBC for this date ──────────────────
+    conn = get_db()
+    cur  = get_cursor(conn)
+    items = []
+
+    cur.execute(r"""
+        SELECT * FROM (
+            SELECT bl.barge_name, bl.cargo_name, bl.commence_discharge_berth,
+                   bl.along_side_berth, bl.completed_discharge_berth, bl.cast_off_port,
+                   COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                   CASE
+                       WHEN bl.cast_off_port IS NOT NULL AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                       THEN SUBSTRING(TRIM(bl.cast_off_port), 1, 10)::date
+                       WHEN bl.completed_discharge_berth IS NOT NULL AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                       THEN SUBSTRING(TRIM(bl.completed_discharge_berth), 1, 10)::date
+                       ELSE NULL
+                   END AS completed_date
+            FROM ldud_barge_lines bl
+            JOIN ldud_header h ON h.id = bl.ldud_id
+            WHERE COALESCE(TRIM(bl.barge_name),'') <> ''
+              AND ((bl.cast_off_port IS NOT NULL AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                   OR (bl.completed_discharge_berth IS NOT NULL AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'))
+        ) sub WHERE sub.completed_date = %s::date
+        ORDER BY sub.barge_name
+    """, (report_date,))
+    for row in cur.fetchall():
+        row = dict(row)
+        items.append({
+            'type': 'BARGE', 'name': row['barge_name'], 'cargo': row.get('cargo_name') or '',
+            'bl_qty': float(row['bl_qty'] or 0),
+            'commenced': _fmt_dt(row.get('commence_discharge_berth') or row.get('along_side_berth')),
+            'completed': _fmt_dt(row.get('cast_off_port') or row.get('completed_discharge_berth')),
+        })
+
+    cur.execute(r"""
+        SELECT * FROM (
+            SELECT h.mbc_name, h.cargo_name, COALESCE(h.bl_quantity, 0) AS bl_qty,
+                   p.unloading_commenced, p.unloading_completed, p.vessel_cast_off,
+                   CASE
+                       WHEN p.unloading_completed IS NOT NULL AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                       THEN SUBSTRING(TRIM(p.unloading_completed), 1, 10)::date
+                       WHEN p.vessel_cast_off IS NOT NULL AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                       THEN SUBSTRING(TRIM(p.vessel_cast_off), 1, 10)::date
+                       ELSE NULL
+                   END AS completed_date
+            FROM mbc_header h JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+            WHERE (p.unloading_completed IS NOT NULL AND TRIM(p.unloading_completed) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+               OR (p.vessel_cast_off IS NOT NULL AND TRIM(p.vessel_cast_off) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+        ) sub WHERE sub.completed_date = %s::date
+        ORDER BY sub.mbc_name
+    """, (report_date,))
+    for row in cur.fetchall():
+        row = dict(row)
+        items.append({
+            'type': 'MBC', 'name': row['mbc_name'], 'cargo': row.get('cargo_name') or '',
+            'bl_qty': float(row['bl_qty'] or 0),
+            'commenced': _fmt_dt(row.get('unloading_commenced')),
+            'completed': _fmt_dt(row.get('unloading_completed') or row.get('vessel_cast_off')),
+        })
+
+    cur.close()
+    conn.close()
+
+    # ── Build styled workbook ────────────────────────────────────────
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Completed Barges & MBC"
+    ws.sheet_view.showGridLines = False
+
+    thin = Side(style='thin', color='D9E2EC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_a = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+    headers = ["Type", "Name", "Cargo", "BL Qty (MT)", "Commenced", "Completed", "Status"]
+
+    ws.merge_cells('A1:G1')
+    c = ws['A1']
+    c.value = f"✓ COMPLETED BARGES & MBC   (Total: {len(items)})"
+    c.font = Font(bold=True, size=16, color="166534")
+    c.alignment = center
+    ws.row_dimensions[1].height = 26
+
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=i, value=h)
+        cell.font = Font(bold=True, size=10, color="6B7280")
+        cell.fill = PatternFill("solid", fgColor="F8FAFC")
+        cell.alignment = center
+        cell.border = border
+
+    badge_barge_fill = PatternFill("solid", fgColor="FEF9C3")
+    badge_mbc_fill   = PatternFill("solid", fgColor="DBEAFE")
+    status_fill      = PatternFill("solid", fgColor="DCFCE7")
+
+    r = 3
+    if not items:
+        ws.merge_cells(f'A{r}:G{r}')
+        cell = ws.cell(row=r, column=1, value="No completed barges / MBC found.")
+        cell.font = Font(size=10, color="94A3B8")
+        cell.alignment = center
+        r += 1
+    else:
+        for idx, item in enumerate(items):
+            row_fill = PatternFill("solid", fgColor="FFFFFF" if idx % 2 == 0 else "F8FAFC")
+            is_mbc = item['type'] == 'MBC'
+
+            cell = ws.cell(row=r, column=1, value=item['type'])
+            cell.fill = badge_mbc_fill if is_mbc else badge_barge_fill
+            cell.font = Font(bold=True, size=9, color="1E40AF" if is_mbc else "92400E")
+            cell.alignment = center
+            cell.border = border
+
+            cell = ws.cell(row=r, column=2, value=item['name'])
+            cell.font = Font(bold=True, size=10, color="0F172A")
+            cell.fill = row_fill
+            cell.alignment = left_a
+            cell.border = border
+
+            cell = ws.cell(row=r, column=3, value=item['cargo'])
+            cell.font = Font(size=10, color="0F172A")
+            cell.fill = row_fill
+            cell.alignment = left_a
+            cell.border = border
+
+            cell = ws.cell(row=r, column=4, value=item['bl_qty'])
+            cell.font = Font(size=10, color="0F172A")
+            cell.fill = row_fill
+            cell.alignment = center
+            cell.border = border
+            cell.number_format = '#,##0'
+
+            cell = ws.cell(row=r, column=5, value=item['commenced'])
+            cell.font = Font(size=9, color="1D4ED8")
+            cell.fill = row_fill
+            cell.alignment = center
+            cell.border = border
+
+            cell = ws.cell(row=r, column=6, value=item['completed'])
+            cell.font = Font(bold=True, size=9, color="166534")
+            cell.fill = row_fill
+            cell.alignment = center
+            cell.border = border
+
+            cell = ws.cell(row=r, column=7, value="✓ Completed")
+            cell.font = Font(bold=True, size=9, color="166534")
+            cell.fill = status_fill
+            cell.alignment = center
+            cell.border = border
+
+            r += 1
+
+    widths = {'A': 12, 'B': 22, 'C': 20, 'D': 14, 'E': 18, 'F': 18, 'G': 14}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A3"
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f"Completed_Barges_MBC_{report_date}_{shift}_{stamp}.xlsx"
+    )        

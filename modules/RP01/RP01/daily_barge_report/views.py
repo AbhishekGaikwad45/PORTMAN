@@ -1998,7 +1998,9 @@ def get_mbc_data():
             999
         )
     )
-
+    for row in filtered_rows:
+     if row.get("sailed_out_load_port"):
+         row["sailed_out_load_port"] = _fmt_dt(row["sailed_out_load_port"])
 
     return jsonify(filtered_rows)
 

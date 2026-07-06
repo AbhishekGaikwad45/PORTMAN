@@ -20,7 +20,7 @@ from .historical_data import views as _historical_data_views  # noqa: registers 
 from .Barge_Position_Report  import views as _barge_position_views
 
 from .report_24_hours import views as _report_24_hours_views
-# from .daily_progress_report import views as _daily_progress_report_views
+from .daily_progress_report import views as _daily_progress_report_views
 
 def login_required(f):
     @wraps(f)

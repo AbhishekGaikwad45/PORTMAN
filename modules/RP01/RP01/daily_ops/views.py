@@ -1672,7 +1672,6 @@ def _fetch_cargo_statistics(report_date):
 
 def _fetch_mbc_cargo_handling(report_date):
 
-
     target_date = report_date - timedelta(days=1)
 
     month_start = date(
@@ -1681,12 +1680,6 @@ def _fetch_mbc_cargo_handling(report_date):
         1
     )
 
-    # Financial Year Start (April)
-    if target_date.month >= 4:
-        fy_start = date(target_date.year, 4, 1)
-    else:
-        fy_start = date(target_date.year - 1, 4, 1)
-
     conn = get_db()
     cur = get_cursor(conn)
 
@@ -1694,43 +1687,24 @@ def _fetch_mbc_cargo_handling(report_date):
 
         cur.execute("""
             SELECT
-
                 h.cargo_type,
-
-                COALESCE(
-                    m.mbc_owner_name,
-                    'OTHERS'
-                ) AS owner,
-
-                COALESCE(
-                    SUM(l.quantity),
-                    0
-                ) AS qty
-
+                COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+                COALESCE(SUM(l.quantity),0) AS qty
             FROM lueu_lines l
-
             JOIN mbc_header h
                 ON h.id = l.source_id
-
             LEFT JOIN mbc_master m
                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
-
             WHERE l.is_deleted = false
-            AND l.source_type = 'MBC'
-            AND l.entry_date::date BETWEEN %s AND %s
-
+              AND l.source_type = 'MBC'
+              AND l.entry_date::date BETWEEN %s AND %s
             GROUP BY
                 h.cargo_type,
                 m.mbc_owner_name
-
             ORDER BY
-                m.mbc_owner_name,
-                h.cargo_type
-
-        """, (
-            start_date,
-            end_date
-        ))
+                owner,
+                cargo_type
+        """, (start_date, end_date))
 
         return cur.fetchall()
 
@@ -1746,7 +1720,7 @@ def _fetch_mbc_cargo_handling(report_date):
         target_date
     )
 
-    # Financial Year To Date
+    # Financial Year (Historical + Live)
     cur.execute("""
         SELECT
             cargo_type,
@@ -1765,18 +1739,14 @@ def _fetch_mbc_cargo_handling(report_date):
             LEFT JOIN mbc_master m
                 ON TRIM(UPPER(h.source_display)) = TRIM(UPPER(m.mbc_name))
             WHERE h.entry_date BETWEEN DATE '2026-04-01'
-                                AND DATE '2026-04-30'
-            AND (
-                    h.source_display ILIKE 'JSW%%'
-                    OR h.source_display ILIKE 'MBC%%'
-                    OR h.source_display ILIKE 'Gautam%%'
-                    OR h.source_display ILIKE 'Siddhi%%'
-                )
+                                  AND DATE '2026-04-30'
+              AND h.source_display NOT ILIKE 'MV%%'
+              AND h.source_display NOT ILIKE 'CL Hengyang%%'
 
             UNION ALL
 
             ----------------------------------------------------------------
-            -- Live Data (May 2026 onwards)
+            -- Live Data (May onwards)
             ----------------------------------------------------------------
             SELECT
                 h.cargo_type,
@@ -1788,9 +1758,8 @@ def _fetch_mbc_cargo_handling(report_date):
             LEFT JOIN mbc_master m
                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
             WHERE l.is_deleted = false
-            AND l.source_type = 'MBC'
-            AND l.entry_date::date BETWEEN DATE '2026-05-01'
-                                        AND %s
+              AND l.source_type = 'MBC'
+              AND l.entry_date::date BETWEEN DATE '2026-05-01' AND %s
 
         ) x
         GROUP BY
@@ -1802,6 +1771,7 @@ def _fetch_mbc_cargo_handling(report_date):
     """, (target_date,))
 
     year_rows = cur.fetchall()
+
     cur.close()
     conn.close()
 
@@ -3236,8 +3206,7 @@ def _build_excel_a4(
     for cat in CATEGORY_ORDER:
 
         slots = CATEGORY_SLOTS[cat]
-
-        category_totals[cat] = sum(
+        category_totals[cat] = sum( 
             cargo_totals.get(
                 cargo_names[index + i],
                 0

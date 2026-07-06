@@ -3,28 +3,23 @@
 {% block content %}
 <link rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/css/bootstrap-multiselect.min.css">
-
 <script
     src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/js/bootstrap-multiselect.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
 <style>
-    /* High-Contrast Premium Light Palette */
     :root {
         --app-bg: #f8fafc;
         --surface-bg: #ffffff;
         --border-clr: #cbd5e1;
         --text-primary: #0f172a;
         --text-muted: #64748b;
-
-        /* Interactive Card Status Colors */
         --state-waiting-bg: #fef08a;
         --state-waiting-text: #713f12;
         --state-waiting-border: #fde68a;
-
         --state-discharging-bg: #bbf7d0;
         --state-discharging-text: #14532d;
         --state-discharging-border: #86efac;
-
         --matrix-empty-bg: #f1f5f9;
         --matrix-stripe-bg: #e2e8f0;
     }
@@ -34,11 +29,9 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
         color: var(--text-primary);
         margin: 0;
-        min-height: 100vh;
         box-sizing: border-box;
     }
 
-    /* Top Metrics Ribbon Grid Area */
     .metrics-ribbon-grid {
         display: grid;
         grid-template-columns: repeat(5, 1fr);
@@ -54,7 +47,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
     }
 
     .metric-card-tile .info-group label {
@@ -63,7 +56,7 @@
         text-transform: uppercase;
         color: var(--text-muted);
         font-weight: 700;
-        letter-spacing: 0.8px;
+        letter-spacing: .8px;
         margin-bottom: 6px;
     }
 
@@ -73,9 +66,6 @@
         color: var(--text-primary);
     }
 
-
-
-    /* Filters System Sub-Ribbon Area */
     .filtering-toolbar-deck {
         background: var(--surface-bg);
         border: 1px solid var(--border-clr);
@@ -84,7 +74,7 @@
         margin-bottom: 16px;
         display: flex;
         gap: 14px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
     }
 
     .filter-input-wrap {
@@ -103,16 +93,15 @@
         color: var(--text-primary);
         box-sizing: border-box;
         outline: none;
-        transition: border-color 0.2s, box-shadow 0.2s;
+        transition: border-color .2s, box-shadow .2s;
     }
 
     .filter-input-wrap input:focus,
     .filter-input-wrap select:focus {
         border-color: #3b82f6;
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, .1);
     }
 
-    /* Master Board Canvas Viewport Layout Frame */
     .dashboard-viewport {
         display: grid;
         grid-template-columns: 220px 1.4fr 1.4fr;
@@ -128,14 +117,14 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
     }
 
     .panel-header {
         padding: 14px 16px;
         font-size: 13px;
         font-weight: 700;
-        letter-spacing: 0.5px;
+        letter-spacing: .5px;
         text-transform: uppercase;
         border-bottom: 1px solid var(--border-clr);
         background: #f8fafc;
@@ -157,9 +146,6 @@
         font-weight: 700;
     }
 
-    /* ==========================================================================
-       SECTION 1: LEFT SIDEBAR WAITING AREA FLOW
-       ========================================================================== */
     .waiting-list-flow {
         flex: 1;
         overflow-y: auto;
@@ -184,8 +170,8 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        transition: transform 0.1s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, .05);
+        transition: transform .1s ease;
     }
 
     .barge-pill-container:active {
@@ -207,7 +193,7 @@
         font-size: 12px;
         color: var(--state-waiting-text);
         font-weight: 600;
-        opacity: 0.9;
+        opacity: .9;
     }
 
     .barge-pill-metrics {
@@ -217,22 +203,16 @@
         margin-top: 4px;
     }
 
-    /* ==========================================================================
-       SECTION 2 & 3: CENTER TWO-COLUMN JETTY MATRICES
-       ========================================================================== */
     .matrix-wrapper {
         overflow-x: auto;
         overflow-y: auto;
     }
-
 
     .vessel-panel-frame .matrix-wrapper {
         overflow-x: auto;
         overflow-y: hidden;
         width: 100%;
     }
-
-
 
     .matrix-table {
         width: 100%;
@@ -251,7 +231,7 @@
         padding: 12px 6px;
         border-bottom: 1px solid var(--border-clr);
         text-align: center;
-        letter-spacing: 0.5px;
+        letter-spacing: .5px;
     }
 
     .matrix-table th:first-child {
@@ -279,7 +259,7 @@
         width: 85px;
         min-width: 85px;
         max-width: 85px;
-        letter-spacing: 0.2px;
+        letter-spacing: .2px;
         line-height: 14px;
     }
 
@@ -287,7 +267,6 @@
         width: 100%;
         height: 110px;
         min-height: 110px;
-        min-width: unset;
         box-sizing: border-box;
         border: 1px solid transparent;
         border-radius: 4px;
@@ -295,7 +274,6 @@
         align-items: stretch;
         justify-content: stretch;
         padding: 2px;
-        box-sizing: border-box;
     }
 
     .matrix-dropzone.empty-slot {
@@ -310,7 +288,6 @@
         border: 1px dashed #3b82f6;
     }
 
-    /* Discharging Matrix State Card Block */
     .berth-allocated-card {
         width: 100%;
         border-radius: 10px;
@@ -323,17 +300,14 @@
 
     .berth-allocated-card.discharging {
         background: #32df6e;
-        /* Green */
     }
 
     .berth-allocated-card.waiting-discharge {
         background: #43e6f1;
-        /* Light Blue */
     }
 
     .berth-allocated-card.completed-discharge {
         background: #75e67e;
-        /* Grey */
     }
 
     .berth-card-title {
@@ -346,7 +320,7 @@
         font-size: 11px;
         font-weight: 600;
         color: var(--state-discharging-text);
-        opacity: 0.9;
+        opacity: .9;
     }
 
     .berth-card-metrics {
@@ -356,94 +330,42 @@
         margin-top: 2px;
     }
 
-    /* ==========================================================================
-       SECTION 4: RIGHT-SIDE SYSTEMS LOG DECK
-       ========================================================================== */
-    .sidebar-block {
-        padding: 16px;
-        border-bottom: 1px solid var(--border-clr);
-    }
-
-    .sidebar-block:last-child {
-        border-bottom: none;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
-
-    .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 12px;
-        margin-bottom: 10px;
-        font-weight: 600;
-    }
-
-    .color-dot {
-        width: 12px;
-        height: 12px;
-        border-radius: 3px;
-    }
-
-    .instruction-text {
-        font-size: 12px;
-        color: var(--text-muted);
-        line-height: 1.5;
-        margin-top: 12px;
-    }
-
-    .log-scroller {
-        flex: 1;
-        overflow-y: auto;
-        background: var(--matrix-empty-bg);
+    .vessel-panel-frame,
+    .tide-panel-frame,
+    .notes-panel-frame {
+        background: var(--surface-bg);
         border: 1px solid var(--border-clr);
-        border-radius: 4px;
-        padding: 12px;
-        margin-top: 10px;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
     }
 
-    .log-item {
-        font-size: 12px;
-        padding: 8px 0;
-        border-bottom: 1px solid var(--border-clr);
-        line-height: 1.4;
+    .vessel-panel-frame {
+        width: 100%;
+        max-width: 100%;
+        margin-bottom: 15px;
     }
 
-    .log-item strong {
-        color: var(--text-primary);
-        text-transform: uppercase;
+    .tide-panel-frame {
+        width: 320px;
+        max-width: 320px;
     }
 
-    .log-item span {
-        color: var(--text-muted);
-        display: block;
-        font-size: 10px;
-        margin-top: 3px;
+    .notes-panel-frame {
+        margin-top: 0;
     }
 
-    ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
+    .vessel-info-table th,
+    .vessel-info-table td {
+        font-size: 11px;
+        padding: 8px;
+        word-break: break-word;
     }
 
-    ::-webkit-scrollbar-track {
-        background: transparent;
+    .tide-panel-frame {
+        width: 320px;
     }
 
-    ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
-    }
-
-    /* ==========================================================================
-       NEW SECTION: SHIFT REPORT META BAR (Editable Date / Incharge / Shift)
-       ========================================================================== */
     .shift-meta-bar {
         background: var(--surface-bg);
         border: 1px solid var(--border-clr);
@@ -454,7 +376,7 @@
         display: flex;
         gap: 16px;
         flex-wrap: wrap;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
     }
 
     .meta-field-group {
@@ -462,7 +384,7 @@
         flex-direction: column;
         gap: 6px;
         flex: 1;
-        min-width: 150px;
+        min-width: 180px;
     }
 
     .meta-field-group label {
@@ -470,7 +392,7 @@
         text-transform: uppercase;
         color: var(--text-muted);
         font-weight: 700;
-        letter-spacing: 0.6px;
+        letter-spacing: .6px;
     }
 
     .meta-field-group input,
@@ -483,97 +405,13 @@
         color: var(--text-primary);
         font-weight: 600;
         outline: none;
-        transition: border-color 0.2s, box-shadow 0.2s;
+        transition: border-color .2s, box-shadow .2s;
     }
 
     .meta-field-group input:focus,
     .meta-field-group select:focus {
         border-color: #3b82f6;
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
-    }
-
-    /* ==========================================================================
-       NEW SECTION: MOTHER VESSEL + TIDE TABLE
-       ========================================================================== */
-
-
-    .vessel-panel-frame,
-    .tide-panel-frame,
-    .notes-panel-frame {
-        background: var(--surface-bg);
-        border: 1px solid var(--border-clr);
-        border-radius: 6px;
-        overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    }
-
-    .vessel-panel-frame {
-        width: 100%;
-        max-width: 100%;
-        margin-bottom: 15px;
-    }
-
-    .vessel-info-table {
-        width: 100%;
-        table-layout: fixed;
-    }
-
-    .vessel-info-table th,
-    .vessel-info-table td {
-        font-size: 11px;
-        padding: 8px;
-        word-break: break-word;
-    }
-
-    .tide-panel-frame {
-        width: 320px;
-        max-width: 320px;
-    }
-
-    .tide-table {
-        width: 100%;
-    }
-
-    .shift-meta-bar {
-        margin-top: 15px;
-        margin-bottom: 15px;
-    }
-
-    .meta-field-group {
-        min-width: 180px;
-    }
-
-    .add-row-btn {
-        background: #eff6ff;
-        border: 1px solid #bfdbfe;
-        color: #1d4ed8;
-        font-size: 11px;
-        font-weight: 700;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        letter-spacing: 0.3px;
-        transition: background 0.15s;
-    }
-
-    .add-row-btn:hover {
-        background: #dbeafe;
-    }
-
-    .remove-row-btn {
-        background: none;
-        border: none;
-        color: #94a3b8;
-        font-size: 13px;
-        cursor: pointer;
-        padding: 2px 6px;
-        border-radius: 4px;
-        transition: color 0.15s, background 0.15s;
-    }
-
-    .remove-row-btn:hover {
-        color: #dc2626;
-        background: #fef2f2;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, .1);
     }
 
     .vessel-info-table,
@@ -593,7 +431,7 @@
         padding: 10px 8px;
         border-bottom: 1px solid var(--border-clr);
         text-align: left;
-        letter-spacing: 0.4px;
+        letter-spacing: .4px;
         text-transform: uppercase;
     }
 
@@ -607,24 +445,10 @@
     }
 
     .vessel-info-table td[contenteditable="true"]:hover,
-    .vessel-info-table td[contenteditable="true"]:focus,
-    .tide-table td[contenteditable="true"]:hover,
-    .tide-table td[contenteditable="true"]:focus {
+    .vessel-info-table td[contenteditable="true"]:focus {
         background: #f8fafc;
         outline: 1px dashed #93c5fd;
         outline-offset: -2px;
-    }
-
-    .vessel-info-table td.vessel-name-cell {
-        font-weight: 700;
-    }
-
-    .vessel-info-table td.vessel-name-cell .vessel-cargo-line {
-        display: block;
-        font-weight: 500;
-        color: var(--text-muted);
-        font-size: 11px;
-        margin-top: 2px;
     }
 
     .tide-type-tag {
@@ -632,7 +456,7 @@
         font-weight: 800;
         padding: 2px 7px;
         border-radius: 10px;
-        letter-spacing: 0.4px;
+        letter-spacing: .4px;
     }
 
     .tide-type-tag.lw {
@@ -645,9 +469,6 @@
         color: #166534;
     }
 
-    /* ==========================================================================
-       NEW SECTION: JETTY BARGE POSITION NOTES
-       ========================================================================== */
     .notes-log-list {
         padding: 12px 16px 16px;
         display: flex;
@@ -689,12 +510,6 @@
         color: var(--text-primary);
     }
 
-    .note-text:hover,
-    .note-text:focus {
-
-        background: #ffffff;
-    }
-
     .secondary-panels-stack {
         width: 100%;
         display: block;
@@ -702,30 +517,11 @@
         margin-bottom: 15px;
     }
 
-    .vessel-panel-frame,
-    .tide-panel-frame,
-    .notes-panel-frame {
-        background: #fff;
-        border: 1px solid var(--border-clr);
-        border-radius: 6px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
-    }
-
-    /* Same spacing for Notes */
-    .notes-panel-frame {
-        margin-top: 15px;
-    }
-
-    .vessel-panel-frame {
-        margin-bottom: 0px;
-    }
-
     .filter-group {
         display: flex;
         flex-direction: column;
         gap: 4px;
     }
-
 
     .page-header {
         margin-bottom: 15px;
@@ -747,18 +543,6 @@
         color: #3b82f6;
         text-decoration: none;
     }
-
-    .badge-primary {
-        background: #3b82f6;
-        color: #fff;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        margin-left: 8px;
-    }
-
-
-
 
     .filter-bar {
         display: flex;
@@ -794,7 +578,7 @@
         text-transform: uppercase;
     }
 
-    .filter-group input[type="datetime-local"] {
+    .filter-group input[type="date"] {
         width: 190px;
         height: 34px;
         padding: 6px 10px;
@@ -817,7 +601,7 @@
     .filter-btn.primary {
         background: #4a90e2;
         color: #fff;
-        height: 30px;
+        height: 34px;
         padding: 0 18px;
         border: none;
         border-radius: 4px;
@@ -827,6 +611,26 @@
 
     .filter-btn.primary:hover {
         background: #357abd;
+    }
+
+    .filter-btn.save-btn {
+        background: #16a34a;
+        color: #fff;
+        height: 34px;
+        padding: 0 18px;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .filter-btn.save-btn:hover {
+        background: #15803d;
+    }
+
+    .filter-btn.save-btn:disabled {
+        background: #86efac;
+        cursor: not-allowed;
     }
 
     .vessel-horizontal-table {
@@ -840,7 +644,6 @@
         color: #fff;
         padding: 10px;
         min-width: 110px;
-        white-space: normal;
         text-align: center;
     }
 
@@ -848,7 +651,6 @@
         padding: 8px;
         border: 1px solid #d1d5db;
         font-size: 12px;
-        white-space: normal;
         word-break: break-word;
     }
 
@@ -856,6 +658,13 @@
         font-weight: 700;
         width: 220px;
         background: #fafafa;
+    }
+
+    .vessel-horizontal-table td[contenteditable="true"]:hover,
+    .vessel-horizontal-table td[contenteditable="true"]:focus {
+        background: #f0f9ff;
+        outline: 1px dashed #60a5fa;
+        outline-offset: -2px;
     }
 
     .logs-modal {
@@ -908,13 +717,36 @@
         margin-top: 15px;
     }
 
-    .notes-panel-frame {
-        width: 100%;
-        margin-top: 0;
+    .add-row-btn {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        color: #1d4ed8;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background .15s;
     }
 
-    .tide-panel-frame {
-        width: 320px;
+    .add-row-btn:hover {
+        background: #dbeafe;
+    }
+
+    .remove-row-btn {
+        background: none;
+        border: none;
+        color: #94a3b8;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: color .15s, background .15s;
+    }
+
+    .remove-row-btn:hover {
+        color: #dc2626;
+        background: #fef2f2;
     }
 
     .reset-btn {
@@ -963,44 +795,9 @@
         align-items: flex-start;
     }
 
-    .shift-summary-table,
-    .slag-summary-table {
-        border-collapse: collapse;
-        background: #fff;
-    }
-
     .shift-summary-table {
-        width: 420px;
-    }
-
-    .slag-summary-table {
-        width: 250px;
-    }
-
-    .slag-table {
-        border-collapse: collapse;
-        width: 140px;
-        background: #fff;
-    }
-
-    .slag-table td {
-        border: 1px solid #cbd5e1;
-        /* black border kadha */
-        padding: 8px 12px;
-        /* same as shift table */
-        height: 32px;
-        /* same row height */
-        font-size: 12px;
-        background: #fff;
-    }
-
-    .shift-summary-table,
-    .slag-table {
         border-collapse: collapse;
         background: #fff;
-    }
-
-    .shift-summary-table {
         width: 420px;
     }
 
@@ -1013,7 +810,9 @@
     }
 
     .slag-table {
+        border-collapse: collapse;
         width: 140px;
+        background: #fff;
     }
 
     .slag-table td {
@@ -1025,20 +824,54 @@
         background: #fff;
     }
 
-    .slag-table td:first-child {
-        width: 90px;
-    }
-
-    .slag-table td:last-child {
-        width: 50px;
-    }
-
     .plan-input {
         width: 100%;
         border: none;
         outline: none;
         text-align: center;
         font-size: 12px;
+    }
+
+    /* Save status indicator */
+    .save-status {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .save-status.saved {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .save-status.unsaved {
+        background: #fef9c3;
+        color: #92400e;
+    }
+
+    .save-status.saving {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .save-status.error {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    /* Saved-date indicator badge */
+    .saved-date-badge {
+        font-size: 10px;
+        background: #f0fdf4;
+        border: 1px solid #86efac;
+        color: #166534;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-weight: 600;
     }
 
     .preview-loader {
@@ -1127,21 +960,21 @@
         }
     }
 </style>
+
+<!-- ═══════════════════════════════ PAGE HEADER ═══════════════════════════════ -->
 <div class="page-header">
     <h2>
-        Daily Bage Position Report
+        Daily Barge Position Report
         <span class="badge badge-primary">RP01</span>
     </h2>
-
     <hr>
-
     <div class="breadcrumb-wrapper">
-        <a href="/module/RP01/">Reports</a>&rsaquo;
-        <span>›</span>
+        <a href="/module/RP01/">Reports</a> &rsaquo;
         <span>Daily Barge Position</span>
     </div>
 </div>
 
+<!-- ═══════════════════════════════ FILTER BAR ════════════════════════════════ -->
 <div class="filter-bar">
 
     <div class="filter-group">
@@ -1155,21 +988,28 @@
         <select id="report-shift"
             style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;font-weight:600;">
             <option value="ALL" selected>All Shift</option>
-            <option value="A">A Shift </option>
-            <option value="B">B Shift </option>
-            <option value="C">C Shift </option>
+            <option value="A">A Shift</option>
+            <option value="B">B Shift</option>
+            <option value="C">C Shift</option>
         </select>
     </div>
 
     <button type="button" class="filter-btn primary" onclick="applyDateRangeFilter()">
         👁 Preview
     </button>
-    <button type="button" class="filter-btn reset-btn">
+    <button type="button" class="filter-btn reset-btn" onclick="resetReport()">
         Reset
+    </button>
+    <button type="button" class="filter-btn save-btn" id="saveReportBtn" onclick="saveReport()" disabled>
+        💾 Save Report
     </button>
     <button type="button" class="filter-btn primary" onclick="downloadExcel()">
         ↓ Download Excel
     </button>
+
+    <!-- Save status -->
+    <span id="saveStatusBadge" class="save-status" style="display:none;"></span>
+    <span id="savedDateBadge" class="saved-date-badge" style="display:none;"></span>
 
     <div class="logs-toolbar">
         <span class="title">Movement Logs</span>
@@ -1178,75 +1018,76 @@
     </div>
 
 </div>
+
 <div id="logConsole" style="display:none;"></div>
-<!-- ==========================================================================
-     NEW: SHIFT REPORT META BAR — editable Date / Shift Incharge / Shift
-     ========================================================================== -->
+
+<!-- ══════════════════════════ REPORT CONTENT ════════════════════════════════ -->
 <div id="reportContent" style="display:none;">
+
+    <!-- Shift meta bar -->
     <div class="shift-meta-bar">
         <div class="meta-field-group">
             <label>Shift Incharge</label>
-            <input type="text" id="shiftInchargeName" readonly placeholder="Select Shift Incharge">
+            <input type="text" id="shiftInchargeName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftInchargeName', () => SHIFT_INCHARGE_LIST)">
         </div>
         <div class="meta-field-group">
-            <label>BPO/Portbird</label>
-            <input type="text" id="shiftBpoName" readonly placeholder="Select BPO/Portbird">
+            <label>BPO / Portbird</label>
+            <input type="text" id="shiftBpoName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftBpoName', () => PORTBIRD_LIST)">
         </div>
         <div class="meta-field-group">
             <label>Crane Operator</label>
-            <input type="text" id="shiftIportName" readonly placeholder="Select Crane Operator">
+            <input type="text" id="shiftIportName" readonly placeholder="Click to select…"
+                onclick="openMultiPicker('shiftIportName', () => CRANE_OPERATOR_LIST)">
         </div>
     </div>
 
+    <!-- Metrics ribbon -->
     <div class="metrics-ribbon-grid">
         <div class="metric-card-tile">
             <div class="info-group">
-                <label>Total MBC & Barges In Port</label>
+                <label>Total MBC &amp; Barges In Port</label>
                 <span id="metricTotal">{{ total_barges }}</span>
             </div>
-
         </div>
         <div class="metric-card-tile">
             <div class="info-group">
                 <label>Waiting</label>
-                <span id="metricWaiting" style="color: #b45309">{{ waiting_count }}</span>
+                <span id="metricWaiting" style="color:#b45309">{{ waiting_count }}</span>
             </div>
-
         </div>
         <div class="metric-card-tile">
             <div class="info-group">
                 <label>Discharging</label>
-                <span id="metricDischarging" style="color: #166534">{{ discharging_count }}</span>
+                <span id="metricDischarging" style="color:#166534">{{ discharging_count }}</span>
             </div>
-
         </div>
         <div class="metric-card-tile">
             <div class="info-group">
                 <label>Occupied Berths</label>
-                <span id="metricOccupied" style="color: #1d4ed8">{{ occupied_berths }}</span>
+                <span id="metricOccupied" style="color:#1d4ed8">{{ occupied_berths }}</span>
             </div>
-
         </div>
         <div class="metric-card-tile">
             <div class="info-group">
                 <label>Available Berths</label>
-                <span id="metricFree" style="color: var(--text-muted)">{{ available_berths }}</span>
+                <span id="metricFree" style="color:var(--text-muted)">{{ available_berths }}</span>
             </div>
-
         </div>
     </div>
 
+    <!-- Toolbar -->
     <div class="filtering-toolbar-deck">
         <div class="filter-input-wrap">
-            <input type="text" id="searchBargeName" placeholder=" Search barge name..." oninput="triggerClientFilter()">
+            <input type="text" id="searchBargeName" placeholder=" Search barge name…" oninput="triggerClientFilter()">
         </div>
         <div class="filter-input-wrap">
-            <input type="text" id="searchCargo" placeholder=" Search cargo..." oninput="triggerClientFilter()">
+            <input type="text" id="searchCargo" placeholder=" Search cargo…" oninput="triggerClientFilter()">
         </div>
         <div class="filter-input-wrap">
             <select id="selectJettyFilter" onchange="triggerClientFilter()">
                 <option value="ALL">All Berth</option>
-
                 {% for num in berths %}
                 <option value="{{ num }}">{{ num }}</option>
                 {% endfor %}
@@ -1262,8 +1103,10 @@
         </div>
     </div>
 
+    <!-- Berth board -->
     <div class="dashboard-viewport">
 
+        <!-- Waiting area -->
         <div class="panel-frame">
             <div class="panel-header">
                 <span class="title-tag">Waiting Area</span>
@@ -1272,56 +1115,46 @@
             <div class="waiting-list-flow" id="waitingAreaZone" data-location="Waiting Area">
                 {% for barge in waiting %}
                 <div class="barge-pill-container draggable-node" draggable="true" data-id="{{ barge.id }}"
-                    data-name="{{ barge.barge_name }}" data-cargo="{{ barge.cargo }}" data-qty="{{ barge.qty }}">
-                    <div class="barge-pill-header">
-                        {{ barge.type }} - {{ barge.name }}
-                    </div>
-
-                    <div class="barge-pill-cargo">
-                        {{ barge.cargo }}
-                    </div>
-
-
-                    <div class="barge-pill-metrics">
-                        <b>BL :</b> {{ "{:,.0f}".format(barge.total_qty or barge.qty or 0) }} MT
-                    </div>
-
-                    <div class="barge-pill-metrics" style="color:#b45309;">
-                        <b>Bal :</b> {{ "{:,.0f}".format(barge.balance_qty or barge.qty or 0) }} MT
-                    </div>
+                    data-name="{{ barge.barge_name }}" data-cargo="{{ barge.cargo }}" data-qty="{{ barge.qty }}"
+                    data-balance="{{ barge.balance_qty }}" data-total="{{ barge.total_qty or barge.qty }}"
+                    data-type="{{ barge.type }}" data-unloading-commenced="" data-commencedischarge-berth="">
+                    <div class="barge-pill-header">{{ barge.type }} — {{ barge.name }}</div>
+                    <div class="barge-pill-cargo">{{ barge.cargo }}</div>
+                    <div class="barge-pill-metrics"><b>BL :</b> {{ "{:,.0f}".format(barge.total_qty or barge.qty or 0)
+                        }} MT</div>
+                    <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal :</b> {{
+                        "{:,.0f}".format(barge.balance_qty or barge.qty or 0) }} MT</div>
                 </div>
                 {% endfor %}
             </div>
         </div>
 
+        <!-- Old berths matrix -->
         <div class="panel-frame">
             <div class="panel-header">
                 <span>OLD BERTH</span>
-                <span style="color: var(--text-muted); font-size: 11px;">6 BERTH</span>
+                <span style="color:var(--text-muted);font-size:11px;">6 BERTH</span>
             </div>
             <div class="matrix-wrapper">
                 <table class="matrix-table" id="leftMatrixTable">
                     <thead>
                         <tr>
-                            <th style="width: 85px;">BERTH</th>
+                            <th style="width:85px;">BERTH</th>
                             <th>Alongside</th>
-                            <th>Double<br> Bank</th>
-                            <th>Triple <br>Bank</th>
-                            <th>Fourth<br> Bank</th>
-                            <th>Fifth<br> Bank</th>
+                            <th>Double<br>Bank</th>
+                            <th>Triple<br>Bank</th>
+                            <th>Fourth<br>Bank</th>
+                            <th>Fifth<br>Bank</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for num in old_berths %}
                         <tr data-jetty-row="{{ num }}">
                             <td class="jetty-label">{{ num }}</td>
-
                             {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
                             <td>
                                 <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
-                                    data-position="{{ pos }}">
-                                    —
-                                </div>
+                                    data-position="{{ pos }}">—</div>
                             </td>
                             {% endfor %}
                         </tr>
@@ -1331,34 +1164,32 @@
             </div>
         </div>
 
+        <!-- New berths matrix -->
         <div class="panel-frame">
             <div class="panel-header">
                 <span>NEW BERTHS</span>
-                <span style="color: var(--text-muted); font-size: 11px;">8 BERTH</span>
+                <span style="color:var(--text-muted);font-size:11px;">8 BERTH</span>
             </div>
             <div class="matrix-wrapper">
                 <table class="matrix-table" id="rightMatrixTable">
                     <thead>
                         <tr>
-                            <th style="width: 85px;">BERTH</th>
+                            <th style="width:85px;">BERTH</th>
                             <th>Alongside</th>
-                            <th>Double<br> Bank</th>
-                            <th>Triple<br> Bank</th>
-                            <th>Fourth<br> Bank</th>
-                            <th>Fifth <br>Bank</th>
+                            <th>Double<br>Bank</th>
+                            <th>Triple<br>Bank</th>
+                            <th>Fourth<br>Bank</th>
+                            <th>Fifth<br>Bank</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for num in new_berths %}
                         <tr data-jetty-row="{{ num }}">
                             <td class="jetty-label">{{ num }}</td>
-
                             {% for pos in ['A/S','D/B','T/B','F/B','S/B'] %}
                             <td>
                                 <div class="matrix-dropzone empty-slot" data-berth="{{ num }}"
-                                    data-position="{{ pos }}">
-                                    —
-                                </div>
+                                    data-position="{{ pos }}">—</div>
                             </td>
                             {% endfor %}
                         </tr>
@@ -1369,100 +1200,70 @@
         </div>
     </div>
 
-
-
-    <!-- ==========================================================================
-     NEW: MOTHER VESSEL TABLE + TIDE TABLE — editable
-     ========================================================================== -->
-    <div class="secondary-panels-stack ">
-
+    <!-- Mother vessel table -->
+    <div class="secondary-panels-stack">
         <div class="vessel-panel-frame">
             <div class="panel-header">
                 <span style="color:#1d4ed8;">Mother Vessel</span>
-
             </div>
             <div class="matrix-wrapper">
                 <table class="vessel-horizontal-table">
                     <thead id="motherVesselHead">
                         <tr>
                             <th>Parameter</th>
-
                             {% for vessel in mother_vessels %}
-                            <th>
-                                Vessel {{ loop.index }}<br>
-                                {{ vessel.vessel_name }}
-                            </th>
+                            <th>Vessel {{ loop.index }}<br>{{ vessel.vessel_name }}</th>
                             {% endfor %}
                         </tr>
                     </thead>
-
                     <tbody id="motherVesselBody">
-
                         <tr>
                             <td><b>VSL DISCH COMMNACED</b></td>
-                            {% for vessel in mother_vessels %}
-                            <td>{{ vessel.discharge_commenced }}</td>
-                            {% endfor %}
+                            {% for vessel in mother_vessels %}<td>{{ vessel.discharge_commenced }}</td>{% endfor %}
                         </tr>
-
                         <tr>
                             <td><b>VSL DISCHARGE COMPLITED</b></td>
-                            {% for vessel in mother_vessels %}
-                            <td>{{ vessel.discharge_completed }}</td>
-                            {% endfor %}
+                            {% for vessel in mother_vessels %}<td>{{ vessel.discharge_completed }}</td>{% endfor %}
                         </tr>
-
                         <tr>
                             <td><b>UNDER LOADING</b></td>
-                            {% for vessel in mother_vessels %}
-                            <td>{{ vessel.under_loading }}</td>
-                            {% endfor %}
+                            {% for vessel in mother_vessels %}<td>{{ vessel.under_loading }}</td>{% endfor %}
                         </tr>
-
-                        <tr>
+                        <tr data-mv-row="eta_to_dharamtar">
                             <td><b>ETA TO DHARAMTAR</b></td>
                             {% for vessel in mother_vessels %}
-                            <td>{{ vessel.unloaded_till_date }}</td>
+                            <td data-vessel="{{ vessel.vessel_name }}" data-field="eta_to_dharamtar"">
+                                {{ vessel.eta_to_dharamtar }}
+                            </td>
                             {% endfor %}
                         </tr>
-
-
-
-                        <tr>
+                        <!-- WT @ R19 — editable, keyed by vessel name -->
+                        <tr data-mv-row=" wt_r19">
                             <td><b>WT @ R19</b></td>
                             {% for vessel in mother_vessels %}
-                            <td contenteditable="true"></td>
+                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="wt_r19"
+                                oninput="markUnsaved()"></td>
                             {% endfor %}
                         </tr>
-
                         <tr>
                             <td><b>ON THE WAY TO GULL</b></td>
-                            {% for vessel in mother_vessels %}
-                            <td>{{ vessel.at_gull_loaded }}</td>
-                            {% endfor %}
+                            {% for vessel in mother_vessels %}<td>{{ vessel.at_gull_loaded }}</td>{% endfor %}
                         </tr>
-
-                        <tr>
+                        <!-- MBC ETA — editable -->
+                        <tr data-mv-row="mbc_eta">
                             <td><b>MBC ETA</b></td>
                             {% for vessel in mother_vessels %}
-                            <td contenteditable="true">{{ vessel.disch_commenced }}</td>
+                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="mbc_eta"
+                                oninput="markUnsaved()">{{ vessel.mbc_eta }}</td>
                             {% endfor %}
                         </tr>
-
-
-
                     </tbody>
                 </table>
             </div>
         </div>
-
-
-
     </div>
 
-    <!-- ==========================================================================
-     NEW: JETTY BARGE POSITION NOTES — editable
-     ========================================================================== -->
+    <!-- Notes + Tide row -->
     <div class="notes-tide-row">
         <div class="notes-panel-frame">
             <div class="panel-header">
@@ -1470,81 +1271,16 @@
                 <button class="add-row-btn" onclick="addNoteRow()">+ Add Note</button>
             </div>
             <div class="notes-log-list" id="notesLogList">
+                <!-- Default notes pre-loaded; overwritten by backend on load -->
                 <div class="note-entry-row">
                     <span class="note-index">1</span>
-                    <div class="note-text" contenteditable="true">3B to 5A plug problem — informed electrical Mr. Koli.
-                    </div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">2</span>
-                    <div class="note-text" contenteditable="true">3A to 5B chute bypass causing frequent chute jamming.
-                    </div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">3</span>
-                    <div class="note-text" contenteditable="true">As per Swapnil Sir, no shift change available on both
-                        J1 and
-                        J5 — run only 01 loading point.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">4</span>
-                    <div class="note-text" contenteditable="true">G/Aarav to be cleaned for different cargo.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">5</span>
-                    <div class="note-text" contenteditable="true">All KDL clinker barges to be cleaned as per Pankaj
-                        Sir.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">6</span>
-                    <div class="note-text" contenteditable="true">Excavator maintenance work must be permitted as per
-                        the
-                        control room.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">7</span>
-                    <div class="note-text" contenteditable="true">CLO 10*25 (Hold 2) to discharge to plant; CLO 25*50
-                        (Hold 4)
-                        to discharge via LS route — unload both grades separately, as per Swapnil Sir.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">8</span>
-                    <div class="note-text" contenteditable="true">Old unloader VHF of the system to be kept in the
-                        control room.
-                    </div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">9</span>
-                    <div class="note-text" contenteditable="true">As per Swapnil Sir, charda to be cleaned for dry dock
-                        cargo.
-                    </div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">10</span>
-                    <div class="note-text" contenteditable="true">G/Aarav barges to be cleaned as per Swapnil Sir.</div>
-                    <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
-                </div>
-                <div class="note-entry-row">
-                    <span class="note-index">11</span>
-                    <div class="note-text" contenteditable="true">All clinker barges to be cleaned and tarpaulin
-                        collected as
-                        per General Labour / Supervisor — without permission, charda not to be cleaned for different
-                        cargo.
-                    </div>
+                    <div class="note-text" contenteditable="true" oninput="markUnsaved()">3B to 5A plug problem —
+                        informed electrical Mr. Koli.</div>
                     <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
                 </div>
             </div>
-
         </div>
+
         <div class="tide-panel-frame">
             <div class="panel-header"><span style="color:#1d4ed8;">Tide Table</span></div>
             <div class="matrix-wrapper">
@@ -1559,11 +1295,7 @@
                     <tbody id="tideTableBody">
                         {% for tide in tide_data %}
                         <tr>
-                            <td>
-                                <span class="tide-type-tag {{ tide.type|lower }}">
-                                    {{ tide.type }}
-                                </span>
-                            </td>
+                            <td><span class="tide-type-tag {{ tide.type|lower }}">{{ tide.type }}</span></td>
                             <td>{{ tide.time }}</td>
                             <td>{{ tide.height }}</td>
                         </tr>
@@ -1573,6 +1305,8 @@
             </div>
         </div>
     </div>
+
+    <!-- Shift wise discharge -->
     <div class="shift-discharge-panel">
         <div class="panel-header">
             <span style="color:#1d4ed8;">Shift Wise Discharge Report</span>
@@ -1603,8 +1337,9 @@
             </tbody>
         </table>
     </div>
-    <div class="shift-summary-wrapper">
 
+    <!-- Shift summary -->
+    <div class="shift-summary-wrapper">
         <table class="shift-summary-table">
             <thead>
                 <tr>
@@ -1614,35 +1349,28 @@
                     <th>DIFF</th>
                 </tr>
             </thead>
-
             <tbody>
                 <tr>
                     <td>A</td>
                     <td id="aDischarge">0</td>
-                    <td>
-                        <input type="number" id="aPlan" class="plan-input" oninput="calculateShiftDiff()">
-                    </td>
+                    <td><input type="number" id="aPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="aDiff">0</td>
                 </tr>
-
                 <tr>
                     <td>B</td>
                     <td id="bDischarge">0</td>
-                    <td>
-                        <input type="number" id="bPlan" class="plan-input" oninput="calculateShiftDiff()">
-                    </td>
+                    <td><input type="number" id="bPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="bDiff">0</td>
                 </tr>
-
                 <tr>
                     <td>C</td>
                     <td id="cDischarge">0</td>
-                    <td>
-                        <input type="number" id="cPlan" class="plan-input" oninput="calculateShiftDiff()">
-                    </td>
+                    <td><input type="number" id="cPlan" class="plan-input"
+                            oninput="calculateShiftDiff(); markUnsaved();""></td>
                     <td id="cDiff">0</td>
                 </tr>
-
                 <tr class="total-row">
                     <td>TOTAL</td>
                     <td id="totalDischarge">0</td>
@@ -1670,56 +1398,50 @@
                     <td>STEEL PLANT</td>
                     <td id="steelPlantQty">0</td>
                 </tr>
-
             </tbody>
         </table>
-
     </div>
 </div>
 
-
+<!-- Movement Logs Modal -->
 <div id="logsModal" class="logs-modal">
     <div class="logs-modal-content">
-
         <div class="logs-modal-header">
-            <span>Movement Logs</span>
-
-            <button class="remove-row-btn" onclick="closeMovementLogs()">
-                ✕
-            </button>
+            <span id="logsModalTitle">Movement Logs</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;"
+                    onclick="downloadModalExcel()">↓ Download Excel</button>
+                <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
+            </div>
         </div>
-
-        <div id="logsModalBody" class="logs-modal-body">
-        </div>
-
+        <div id="logsModalBody" class="logs-modal-body"></div>
     </div>
 </div>
+
 <div id="previewLoader" class="preview-loader" style="display:none;">
     <div class="loader-box">
         <div class="loader-spinner"></div>
-        <div class="loader-text">Loading Preview...</div>
+        <div class="loader-text">Loading Preview…</div>
     </div>
 </div>
+
 <div id="excelLoader" style="display:none;">
     <div class="excel-loader-overlay">
         <div class="excel-loader-box">
             <div class="excel-loader-spinner"></div>
-
-            <div class="excel-loader-title">
-                Preparing Download...
-            </div>
-
-            <div class="excel-loader-subtitle">
-                Fetching data...
-            </div>
+            <div class="excel-loader-title">Preparing Download…</div>
+            <div class="excel-loader-subtitle">Fetching data…</div>
         </div>
     </div>
 </div>
+
 <iframe id="downloadFrame" style="display:none;"></iframe>
+
 {% raw %}
 <script>
-
-    // ── Shift time windows ────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  CONSTANTS & STATE
+    // ══════════════════════════════════════════════════════════════════════════════
     const SHIFT_WINDOWS = {
         ALL: { fromHour: 6, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
         A: { fromHour: 6, fromMin: 0, toHour: 14, toMin: 0, nextDay: false },
@@ -1727,10 +1449,58 @@
         C: { fromHour: 22, fromMin: 0, toHour: 6, toMin: 0, nextDay: true },
     };
 
-    function getShiftDateRange() {
-        const dateVal = document.getElementById('report-date').value;   // "YYYY-MM-DD"
-        const shiftKey = document.getElementById('report-shift').value;  // "A" / "B" / "C"
+    const PORTBIRD_LIST = [
+        "Rajendra Mhatre", "Bhushan Patil", "Vinit Thale", "Kedar Patil",
+        "Siddhesh Patil", "Vrutant Shirke", "Rhitik Adsule", "Nikit Mhatre"
+    ];
 
+    let SHIFT_INCHARGE_LIST = [];
+    let CRANE_OPERATOR_LIST = [];
+    let _movementLogs = [];
+    let _modalExcelMode = null;   // 'logs' | 'completed'
+    let _modalExcelData = [];
+
+    // Tracks whether any unsaved edits exist
+    let _unsaved = false;
+
+    // Current live items fetched from server (used for save snapshot)
+    let _currentItems = [];
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SAVE STATUS HELPERS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function setSaveStatus(state, text) {
+        const badge = document.getElementById('saveStatusBadge');
+        badge.className = `save-status ${state}`;
+        badge.textContent = text;
+        badge.style.display = 'inline-flex';
+    }
+
+    function markUnsaved() {
+        _unsaved = true;
+        setSaveStatus('unsaved', '● Unsaved changes');
+        document.getElementById('saveReportBtn').disabled = false;
+    }
+
+    function markSaved(updatedAt) {
+        _unsaved = false;
+        setSaveStatus('saved', '✓ Saved');
+        document.getElementById('saveReportBtn').disabled = false;
+
+        if (updatedAt) {
+            const d = new Date(updatedAt);
+            const badge = document.getElementById('savedDateBadge');
+            badge.textContent = `Last saved: ${d.toLocaleString()}`;
+            badge.style.display = 'inline-flex';
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT DATE RANGE
+    // ══════════════════════════════════════════════════════════════════════════════
+    function getShiftDateRange() {
+        const dateVal = document.getElementById('report-date').value;
+        const shiftKey = document.getElementById('report-shift').value;
         if (!dateVal) return null;
 
         const win = SHIFT_WINDOWS[shiftKey];
@@ -1744,47 +1514,401 @@
         to.setHours(win.toHour, win.toMin, 0, 0);
 
         const fmt = d =>
-            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
         return { fromISO: fmt(from), toISO: fmt(to) };
     }
 
-    // ── Main preview trigger ──────────────────────────────────────────────────────
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MAIN PREVIEW
+    // ══════════════════════════════════════════════════════════════════════════════
     async function applyDateRangeFilter() {
+    const range = getShiftDateRange();
+    if (!range) { alert("Please select a date."); return; }
 
-        const range = getShiftDateRange();
+    document.getElementById("previewLoader").style.display = "flex";
 
-        if (!range) {
-            alert("Please select a date.");
-            return;
+    _movementLogs = [];
+    document.getElementById('logConsole').innerHTML = '';
+    document.getElementById('logCount').textContent = '0';
+
+    try {
+        document.getElementById("reportContent").style.display = "block";
+        document.getElementById("saveReportBtn").disabled = false;
+
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+
+        // Run the board/summary loaders — if ANY of these fail, log it but
+        // don't let it block the saved-report fetch below.
+        const results = await Promise.allSettled([
+            loadBerthOccupancy(range.fromISO, range.toISO),
+            loadMotherVesselData(range.fromISO, range.toISO),
+            loadTideData(range.fromISO, range.toISO),
+            loadShiftWiseDischarge(),
+            loadShiftSummary(),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+        });
+
+        // Saved-report fetch is isolated so a failure elsewhere never
+        // prevents your saved data from being applied.
+        let savedData = null;
+        try {
+            savedData = await loadSavedReport(reportDate, shift);
+            console.log('Saved report lookup:', reportDate, shift, savedData);
+        } catch (e) {
+            console.error('loadSavedReport failed:', e);
         }
 
-        document.getElementById("previewLoader").style.display = "flex";
+        if (savedData && savedData.found) {
+            applySavedOverlay(savedData);
+        } else {
+            console.warn('No saved report found for', reportDate, shift);
+        }
+
+    } catch (err) {
+        console.error('Preview failed:', err);
+        alert('Something went wrong loading the preview. Check console for details.');
+    } finally {
+        document.getElementById("previewLoader").style.display = "none";
+    }
+}
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function saveReport() {
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+
+        if (!reportDate) { alert("Select a date first."); return; }
+
+        const btn = document.getElementById('saveReportBtn');
+        btn.disabled = true;
+        setSaveStatus('saving', '⏳ Saving…');
 
         try {
+            // ── 1. Berth layout: collect all cards currently placed in a dropzone ──
+            const berthLayout = [];
+            document.querySelectorAll('.matrix-dropzone:not(.empty-slot)').forEach(zone => {
+                const card = zone.querySelector('.berth-allocated-card, .draggable-node');
+                if (!card) return;
+                berthLayout.push({
+                    id: card.dataset.id || '',
+                    name: card.dataset.name || '',
+                    cargo: card.dataset.cargo || '',
+                    qty: parseFloat(card.dataset.qty || 0),
+                    balance: parseFloat(card.dataset.balance || 0),
+                    discharge: parseFloat(card.dataset.discharge || 0),
+                    total: parseFloat(card.dataset.total || card.dataset.qty || 0),
+                    berth: zone.dataset.berth,
+                    position: zone.dataset.position,
+                    type: card.dataset.type || 'BARGE',
+                    unloading_commenced: card.dataset.unloadingCommenced || '',
+                    commence_discharge_berth: card.dataset.commencedischargeBerth || '',
+                });
+            });
 
-            document.getElementById("reportContent").style.display = "block";
+            // ── 2. Waiting area items (order matters) ──────────────────────────────
+            const waitingItems = [];
+            document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(pill => {
+                waitingItems.push({
+                    id: pill.dataset.id || '',
+                    name: pill.dataset.name || '',
+                    cargo: pill.dataset.cargo || '',
+                    qty: parseFloat(pill.dataset.qty || 0),
+                    balance: parseFloat(pill.dataset.balance || 0),
+                    total: parseFloat(pill.dataset.total || pill.dataset.qty || 0),
+                    type: pill.dataset.type || 'BARGE',
+                    berth: 'WAITING',
+                    position: '',
+                    unloading_commenced: pill.dataset.unloadingCommenced || '',
+                    commence_discharge_berth: pill.dataset.commencedischargeBerth || '',
+                });
+            });
 
-            await Promise.all([
-                loadBerthOccupancy(range.fromISO, range.toISO),
-                loadMotherVesselData(range.fromISO, range.toISO),
-                loadTideData(range.fromISO, range.toISO),
-                loadShiftWiseDischarge(),
-                loadShiftSummary()
-            ]);
+            // ── 3. WT @ R19 and MBC ETA — keyed by vessel name ─────────────────────
+            const wtR19 = {};
+            const mbcEta = {};
+            const etaToDharamtar = {};
+            const onTheWayGull = {};
 
-        } finally {
+            document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
+                wtR19[td.dataset.vessel] = td.textContent.trim();
+            });
 
-            document.getElementById("previewLoader").style.display = "none";
+            document.querySelectorAll('[data-field="mbc_eta"]').forEach(td => {
+                mbcEta[td.dataset.vessel] = td.textContent.trim();
+            });
+            document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
+                etaToDharamtar[td.dataset.vessel] = td.textContent.trim();
+            });
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {   // NEW
+                onTheWayGull[td.dataset.vessel] = td.textContent.trim();
+            });
 
+            // ── 4. Notes ────────────────────────────────────────────────────────────
+            const notes = [];
+            document.querySelectorAll('#notesLogList .note-text').forEach(el => {
+                const t = el.textContent.trim();
+                if (t) notes.push(t);
+            });
+
+            const shiftPlan = {
+                a_plan: parseFloat(document.getElementById('aPlan').value) || 0,
+                b_plan: parseFloat(document.getElementById('bPlan').value) || 0,
+                c_plan: parseFloat(document.getElementById('cPlan').value) || 0,
+            };
+
+            // ── 5. Meta fields ───────────────────────────────────────────────────────
+            const payload = {
+                report_date: reportDate,
+                shift: shift,
+                shift_incharge: document.getElementById('shiftInchargeName').value || '',
+                bpo: document.getElementById('shiftBpoName').value || '',
+                crane_operator: document.getElementById('shiftIportName').value || '',
+                berth_layout: [...berthLayout, ...waitingItems],
+                wt_r19: wtR19,
+                eta_to_dharamtar: etaToDharamtar,
+                mbc_eta: mbcEta,
+                on_the_way_gull: onTheWayGull,
+                shift_plan: shiftPlan,
+                notes: notes,
+                movement_logs: _movementLogs,
+            };
+
+            const res = await fetch('/api/module/RP01/shift-report/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!res.ok) throw new Error(await res.text());
+
+            const data = await res.json();
+            markSaved(new Date().toISOString());
+
+        } catch (err) {
+            console.error('Save failed:', err);
+            setSaveStatus('error', '✕ Save failed');
+            btn.disabled = false;
         }
     }
 
-    // ── Mother Vessel ─────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  LOAD SAVED REPORT  →  GET /api/module/RP01/shift-report/load
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function loadSavedReport(reportDate, shift) {
+        try {
+            const params = new URLSearchParams({ date: reportDate, shift });
+            const res = await fetch(`/api/module/RP01/shift-report/load?${params}`);
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (e) {
+            console.warn('Could not load saved report:', e);
+            return null;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  APPLY SAVED OVERLAY
+    // ══════════════════════════════════════════════════════════════════════════════
+    function applySavedOverlay(savedData) {
+
+        // ── Meta fields ─────────────────────────────────────────────────────────
+        if (savedData.shift_incharge) document.getElementById('shiftInchargeName').value = savedData.shift_incharge;
+        if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
+        if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
+
+        // ── Berth layout ────────────────────────────────────────────────────────
+        if (savedData.berth_layout && savedData.berth_layout.length > 0) {
+            // Clear current board
+            document.querySelectorAll('.matrix-dropzone').forEach(z => {
+                z.classList.add('empty-slot');
+                z.innerHTML = '—';
+            });
+            document.getElementById('waitingAreaZone').innerHTML = '';
+
+            savedData.berth_layout.forEach(item => {
+                if (item.berth === 'WAITING') {
+                    // Restore to waiting area
+                    const pill = buildWaitingPill(item);
+                    document.getElementById('waitingAreaZone').appendChild(pill);
+                } else {
+                    // Restore to berth cell
+                    const zone = document.querySelector(
+                        `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+                    );
+                    if (!zone) return;
+                    zone.classList.remove('empty-slot');
+                    zone.innerHTML = buildBerthCard(item, item.balance);
+                }
+            });
+
+            updateInterfaceMetrics();
+        }
+
+        // ── WT @ R19 ────────────────────────────────────────────────────────────
+        if (savedData.wt_r19) {
+            document.querySelectorAll('[data-field="wt_r19"]').forEach(td => {
+                const val = savedData.wt_r19[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+
+        // ── MBC ETA ─────────────────────────────────────────────────────────────
+        if (savedData.mbc_eta) {
+            document.querySelectorAll('[data-field="mbc_eta"]').forEach(td => {
+                const val = savedData.mbc_eta[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+        //on the way to dharamtar
+        if (savedData.eta_to_dharamtar) {
+            document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
+                const val = savedData.eta_to_dharamtar[td.dataset.vessel];
+                if (val !== undefined) {
+                    td.textContent = val;
+                }
+            });
+        }
+        // ── On the way to Gull (NEW, alongside existing WT@R19 / MBC ETA / ETA blocks) ──
+        if (savedData.on_the_way_gull) {
+            document.querySelectorAll('[data-field="on_the_way_gull"]').forEach(td => {
+                const val = savedData.on_the_way_gull[td.dataset.vessel];
+                if (val !== undefined) td.textContent = val;
+            });
+        }
+
+        // ── Notes ────────────────────────────────────────────────────────────────
+        if (savedData.notes && savedData.notes.length > 0) {
+            const list = document.getElementById('notesLogList');
+            list.innerHTML = '';
+            savedData.notes.forEach((text, i) => {
+                const row = document.createElement('div');
+                row.className = 'note-entry-row';
+                row.innerHTML = `
+                <span class="note-index">${i + 1}</span>
+                <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
+                <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+                list.appendChild(row);
+            });
+        }
+
+        // ── Movement Logs ────────────────────────────────────────────────────────
+        if (savedData.movement_logs && savedData.movement_logs.length > 0) {
+            _movementLogs = savedData.movement_logs;
+            const logConsole = document.getElementById('logConsole');
+            logConsole.innerHTML = '';
+            // Restore in reverse so newest shows on top (prepend order)
+            [...savedData.movement_logs].reverse().forEach(log => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                item.innerHTML = `
+                    <strong>${log.name}</strong> — Moved<br>
+                    <span>${log.from} → ${log.to}</span><br>
+                    <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
+                    <span>Shift Incharge: ${log.shiftIncharge}</span>`;
+                logConsole.prepend(item);
+            });
+            document.getElementById('logCount').textContent = _movementLogs.length;
+        }
+        // ── Shift Plan ───────────────────────────────────────────────
+        if (savedData.shift_plan) {
+
+            document.getElementById('aPlan').value =
+                savedData.shift_plan.a_plan ?? '';
+
+            document.getElementById('bPlan').value =
+                savedData.shift_plan.b_plan ?? '';
+
+            document.getElementById('cPlan').value =
+                savedData.shift_plan.c_plan ?? '';
+
+            calculateShiftDiff();
+        }
+
+        // ── Show saved timestamp ────────────────────────────────────────────────
+        markSaved(savedData.updated_at);
+
+        // Mark as clean (no unsaved changes yet)
+        _unsaved = false;
+        setSaveStatus('saved', '✓ Loaded from saved report');
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  BUILD DOM ELEMENTS
+    // ══════════════════════════════════════════════════════════════════════════════
+    function buildWaitingPill(item) {
+        const bl = parseFloat(item.total || item.qty || 0);
+        const bal = parseFloat(item.balance || bl);
+        const pill = document.createElement('div');
+        pill.className = 'barge-pill-container draggable-node';
+        pill.setAttribute('draggable', 'true');
+        pill.dataset.id = item.id || '';
+        pill.dataset.name = item.name || '';
+        pill.dataset.cargo = item.cargo || '';
+        pill.dataset.qty = item.qty || 0;
+        pill.dataset.balance = item.balance || 0;
+        pill.dataset.total = item.total || item.qty || 0;
+        pill.dataset.type = item.type || 'BARGE';
+        pill.dataset.unloadingCommenced = item.unloading_commenced || '';
+        pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
+
+        pill.innerHTML = `
+        <div class="barge-pill-header">${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="barge-pill-cargo">${item.cargo || ''}</div>
+        <div class="barge-pill-metrics"><b>BL:</b> ${bl.toLocaleString()} MT</div>
+        <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal:</b> ${bal.toLocaleString()} MT</div>`;
+        return pill;
+    }
+
+    function buildBerthCard(item, balance) {
+        const bal = parseFloat(balance || 0);
+        const unloadStarted =
+            (item.unloading_commenced && String(item.unloading_commenced).trim() !== '') ||
+            (item.commence_discharge_berth && String(item.commence_discharge_berth).trim() !== '');
+
+        const cardClass = unloadStarted ? 'discharging' : 'waiting-discharge';
+        const bl = parseFloat(item.total || item.qty || 0);
+
+        return `
+    <div class="berth-allocated-card ${cardClass} draggable-node"
+         draggable="true"
+         data-id="${item.id || ''}"
+         data-name="${item.name || ''}"
+         data-cargo="${item.cargo || ''}"
+         data-qty="${bl}"
+         data-total="${bl}"
+         data-balance="${bal}"
+         data-discharge="${item.discharge || 0}"
+         data-type="${item.type || 'BARGE'}"
+         data-unloading-commenced="${item.unloading_commenced || ''}"
+         data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
+        <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="berth-card-cargo">${item.cargo || ''}</div>
+        <div class="berth-card-metrics"><b>BL :</b> ${bl.toLocaleString()} MT</div>
+        <div class="berth-card-metrics" style="color:#b45309;"><b>Bal :</b> ${bal.toLocaleString()} MT</div>
+    </div>`;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOTHER VESSEL  (live refresh)
+    // ══════════════════════════════════════════════════════════════════════════════
     async function loadMotherVesselData(fromDateTime, toDateTime) {
         const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
-        const res = await fetch(`/api/module/RP01/mother-vessel-data?${params}`);
-        const vessels = await res.json();
+        const vessels = await (await fetch(`/api/module/RP01/mother-vessel-data?${params}`)).json();
 
         const headRow = document.querySelector('#motherVesselHead tr');
         const body = document.getElementById('motherVesselBody');
@@ -1795,25 +1919,32 @@
         });
 
         const rows = [
-            ['VSL DISCH COMMNACED', 'discharge_commenced'],
-            ['VSL DISCHARGE COMPLITED', 'discharge_completed'],
-            ['UNDER LOADING', 'under_loading'],
-            ['ETA TO DHARAMTAR', 'eta_to_dharamtar'],
-            ['WT @ R19', 'wt_r19'],
-            ['ON THE WAY TO GULL', 'at_gull_loaded'],
-            ['MBC ETA', 'mbc_eta'],
+            ['VSL DISCH COMMNACED', 'discharge_commenced', false],
+            ['VSL DISCHARGE COMPLITED', 'discharge_completed', false],
+            ['UNDER LOADING', 'under_loading', false],
+            ['ETA TO DHARAMTAR', 'at_gull_loaded', false],
+            ['WT @ R19', 'wt_r19', true],  // editable
+            ['ON THE WAY TO GULL', 'on_the_way_gull', true, 'on_the_way_gull', false],
+            ['MBC ETA', 'mbc_eta', true],  // editable
         ];
 
         body.innerHTML = '';
-        rows.forEach(([label, key]) => {
-            let rowHtml = `<tr><td><b>${label}</b></td>`;
-            vessels.forEach(v => { rowHtml += `<td contenteditable="true">${v[key] || ''}</td>`; });
+        rows.forEach(([label, key, editable]) => {
+            const attr = editable
+                ? `contenteditable="true" data-vessel="{VESSEL}" data-field="${key}" oninput="markUnsaved()"`
+                : '';
+            let rowHtml = `<tr data-mv-row="${key}"><td><b>${label}</b></td>`;
+            vessels.forEach(v => {
+                rowHtml += `<td ${editable ? attr.replace('{VESSEL}', (v.vessel_name || '')) : ''}>${v[key] || ''}</td>`;
+            });
             rowHtml += '</tr>';
             body.innerHTML += rowHtml;
         });
     }
 
-    // ── Tide ──────────────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  TIDE
+    // ══════════════════════════════════════════════════════════════════════════════
     async function loadTideData(fromDateTime, toDateTime) {
         const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
         const tides = await (await fetch(`/api/module/RP01/tide-data?${params}`)).json();
@@ -1821,270 +1952,125 @@
         body.innerHTML = '';
         tides.forEach(t => {
             body.innerHTML += `
-            <tr>
-                <td><span class="tide-type-tag ${(t.type || '').toLowerCase()}">${t.type || ''}</span></td>
-                <td>${t.time || ''}</td>
-                <td>${t.height ?? ''}</td>
-            </tr>`;
+        <tr>
+            <td><span class="tide-type-tag ${(t.type || '').toLowerCase()}">${t.type || ''}</span></td>
+            <td>${t.time || ''}</td>
+            <td>${t.height ?? ''}</td>
+        </tr>`;
         });
     }
 
-    // ── Berth Occupancy ───────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  BERTH OCCUPANCY
+    // ══════════════════════════════════════════════════════════════════════════════
     async function loadBerthOccupancy(fromDateTime, toDateTime) {
         const params = new URLSearchParams({ from_datetime: fromDateTime, to_datetime: toDateTime });
         const items = await (await fetch(`/api/module/RP01/berth-occupancy?${params}`)).json();
+        _currentItems = items;
         renderBerthBoard(items);
     }
 
-    // ── Render Berth Board ────────────────────────────────────────────────────────
     function renderBerthBoard(items) {
         document.querySelectorAll('.matrix-dropzone').forEach(z => {
             z.classList.add('empty-slot');
             z.innerHTML = '—';
         });
-
-        const waitingZoneEl = document.getElementById('waitingAreaZone');
-        waitingZoneEl.innerHTML = '';
+        document.getElementById('waitingAreaZone').innerHTML = '';
 
         (items || []).forEach(item => {
             if (item.status === 'Completed') return;
 
             if (item.status === 'Discharging' && item.berth) {
-                const berth = item.berth.toUpperCase();
-                const position = (item.position || 'A/S').toUpperCase();
-
                 const zone = document.querySelector(
-                    `.matrix-dropzone[data-berth="${berth}"][data-position="${position}"]`
+                    `.matrix-dropzone[data-berth="${item.berth.toUpperCase()}"][data-position="${(item.position || 'A/S').toUpperCase()}"]`
                 );
                 if (!zone) return;
                 zone.classList.remove('empty-slot');
-  
                 zone.innerHTML = buildBerthCard(item, parseFloat(item.balance_qty || 0));
             } else {
-                const pill = document.createElement('div');
-                pill.className = 'barge-pill-container draggable-node';
-                if (item.type === 'BARGE' && item.status === 'Under Discharge') {
-                    pill.classList.add('under-discharge');
-                }
-                pill.setAttribute('draggable', 'true');
-                pill.dataset.id = item.id || '';
-                pill.dataset.name = item.name || '';
-                pill.dataset.cargo = item.cargo || '';
-                pill.dataset.qty = item.balance_qty || item.qty || 0;
-                pill.dataset.total = item.total_qty || item.qty || 0;
-                pill.dataset.unloadingCommenced = item.unloading_commenced || '';
-                pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
-                const bl = parseFloat(item.total_qty || item.qty || 0);
-                const bal = parseFloat(item.balance_qty || bl);
-
-                pill.innerHTML = `
-                <div class="barge-pill-header">
-                    ${item.type || 'BARGE'} — ${item.name || ''}
-                </div>
-
-                <div class="barge-pill-cargo">
-                    ${item.cargo || ''}
-                </div>
-
-                <div class="barge-pill-metrics">
-                    <b>BL:</b> ${bl.toLocaleString()} MT
-                </div>
-
-                <div class="barge-pill-metrics" style="color:#b45309;">
-                    <b>Bal:</b> ${bal.toLocaleString()} MT
-                </div>`;
-                waitingZoneEl.appendChild(pill);
+                document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
+                    ...item,
+                    balance: item.balance_qty || item.qty,
+                    total: item.total_qty || item.qty,
+                }));
             }
         });
 
         updateInterfaceMetrics();
     }
 
-    function buildBerthCard(item, balance) {
-
-        const bal = parseFloat(balance || 0);
-
-        const unloadStarted =
-            (item.unloading_commenced && String(item.unloading_commenced).trim() !== '') ||
-            (item.commence_discharge_berth && String(item.commence_discharge_berth).trim() !== '');
-
-        let cardClass = unloadStarted
-            ? "discharging"          // Green
-            : "waiting-discharge";   // Sky Blue
-        return `
-        <div class="berth-allocated-card ${cardClass} draggable-node" 
-            draggable="true"
-            data-id="${item.id || ''}"
-            data-name="${item.name || ''}"
-            data-cargo="${item.cargo || ''}"
-            data-qty="${item.total_qty || item.qty || 0}"
-            data-balance="${balance}"
-            data-discharge="${item.discharge_qty || 0}"
-            data-unloading-commenced="${item.unloading_commenced || ''}"
-            data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
-
-    <div class="berth-card-title">
-        ⚓ ${item.type || 'BARGE'} — ${item.name || ''}
-    </div>
-
-    <div class="berth-card-cargo">
-        ${item.cargo || ''}
-    </div>
-
-    ${item.alongside_time
-                ? `<div class="berth-card-metrics" style="font-size:10px;opacity:.8;">
-              A/S: ${item.alongside_time}
-           </div>`
-                : ''
-            }
-
-        <div class="berth-card-metrics">
-            <b>BL :</b> ${Number(item.total_qty || item.qty || 0).toLocaleString()} MT
-        </div>
-
-        <div class="berth-card-metrics" style="color:#b45309;">
-            <b>Bal :</b> ${bal.toLocaleString()} MT
-        </div>
-
-
-
-    </div>`;
-    }
-
-    // ── Drag & Drop ───────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  DRAG & DROP
+    // ══════════════════════════════════════════════════════════════════════════════
     let activeDragData = null;
     let sourceOriginElement = null;
+    let autoScrollInterval = null;
 
     document.addEventListener('dragstart', function (e) {
         const node = e.target.closest('.draggable-node, .berth-allocated-card');
         if (node) {
-        activeDragData = {
-            id: node.dataset.id,
-            name: node.dataset.name,
-            cargo: node.dataset.cargo,
-            qty: node.dataset.qty,
-            balance: node.dataset.balance || node.dataset.qty,
-            total: node.dataset.total || node.dataset.qty,
-            discharge: node.dataset.discharge || 0,
-            unloading_commenced: node.dataset.unloadingCommenced || "",
-            commence_discharge_berth: node.dataset.commencedischargeBerth || ""
-        };
+            activeDragData = {
+                id: node.dataset.id,
+                name: node.dataset.name,
+                cargo: node.dataset.cargo,
+                qty: node.dataset.qty,
+                balance: node.dataset.balance || node.dataset.qty,
+                total: node.dataset.total || node.dataset.qty,
+                discharge: node.dataset.discharge || 0,
+                type: node.dataset.type || 'BARGE',
+                unloading_commenced: node.dataset.unloadingCommenced || '',
+                commence_discharge_berth: node.dataset.commencedischargeBerth || '',
+            };
             sourceOriginElement = node;
         }
     });
 
-    let autoScrollInterval = null;
-
     document.addEventListener('dragover', function (e) {
-
-        const wrapper = document.elementFromPoint(
-            e.clientX,
-            e.clientY
-        )?.closest('.matrix-wrapper');
-
-        if (!wrapper) {
-            clearInterval(autoScrollInterval);
-            return;
-        }
-
+        const wrapper = document.elementFromPoint(e.clientX, e.clientY)?.closest('.matrix-wrapper');
+        if (!wrapper) { clearInterval(autoScrollInterval); return; }
         const rect = wrapper.getBoundingClientRect();
-
-        const TOP_ZONE = 100;
-        const BOTTOM_ZONE = 100;
-        const SPEED = 15;
-
         clearInterval(autoScrollInterval);
-
-        // Scroll UP
-        if (e.clientY < rect.top + TOP_ZONE) {
-
-            autoScrollInterval = setInterval(() => {
-                wrapper.scrollTop -= SPEED;
-            }, 15);
-
-        }
-
-        // Scroll DOWN
-        else if (e.clientY > rect.bottom - BOTTOM_ZONE) {
-
-            autoScrollInterval = setInterval(() => {
-                wrapper.scrollTop += SPEED;
-            }, 15);
-
-        }
+        if (e.clientY < rect.top + 100) autoScrollInterval = setInterval(() => wrapper.scrollTop -= 15, 15);
+        else if (e.clientY > rect.bottom - 100) autoScrollInterval = setInterval(() => wrapper.scrollTop += 15, 15);
     });
 
-    document.addEventListener('dragend', () => {
-        clearInterval(autoScrollInterval);
-    });
+    document.addEventListener('dragend', () => clearInterval(autoScrollInterval));
+    document.addEventListener('drop', () => clearInterval(autoScrollInterval));
 
-    document.addEventListener('drop', () => {
-        clearInterval(autoScrollInterval);
-    });
+    // Re-bind dropzones (called after DOM re-renders)
+    function bindDropzones() {
+        document.querySelectorAll('.matrix-dropzone').forEach(zone => {
+            zone.addEventListener('dragover', e => e.preventDefault());
+            zone.addEventListener('dragenter', function () {
+                if (this.classList.contains('empty-slot')) this.classList.add('drag-active');
+            });
+            zone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+            zone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                this.classList.remove('drag-active');
+                if (!activeDragData || !this.classList.contains('empty-slot')) return;
 
-    document.querySelectorAll('.matrix-dropzone').forEach(zone => {
-        zone.addEventListener('dragover', e => e.preventDefault());
-        zone.addEventListener('dragenter', function () { if (this.classList.contains('empty-slot')) this.classList.add('drag-active'); });
-        zone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
-        zone.addEventListener('drop', function (e) {
-            e.preventDefault();
-            this.classList.remove('drag-active');
-            if (!activeDragData || !this.classList.contains('empty-slot')) return;
+                const berth = this.dataset.berth;
+                const position = this.dataset.position;
+                let fromLocation = 'WAITING AREA';
+                const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
+                if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
 
-            const berth = this.dataset.berth;
-            const position = this.dataset.position;
-            let fromLocation = 'WAITING AREA';
-            const oldZone = sourceOriginElement && sourceOriginElement.closest('.matrix-dropzone');
-            if (oldZone) fromLocation = `${oldZone.dataset.berth} ➜ ${oldZone.dataset.position}`;
+                cleanSourceOrigin();
+                this.classList.remove('empty-slot');
+                this.innerHTML = buildBerthCard({
+                    ...activeDragData,
+                    unloading_commenced: activeDragData.unloading_commenced,
+                    commence_discharge_berth: activeDragData.commence_discharge_berth,
+                }, parseFloat(activeDragData.balance || activeDragData.qty || 0));
 
-            cleanSourceOrigin();
-            this.classList.remove('empty-slot');
-
-            const balance = Number(activeDragData.balance || activeDragData.qty || 0);
-            const discharge = Number(activeDragData.discharge || 0);
-            const bl = Number(activeDragData.total || activeDragData.qty || 0);
-            const bal = Number(activeDragData.balance || activeDragData.qty || 0);
-            const unloadStarted =
-                (activeDragData.unloading_commenced && String(activeDragData.unloading_commenced).trim() !== '') ||
-                (activeDragData.commence_discharge_berth && String(activeDragData.commence_discharge_berth).trim() !== '');
-
-            let cardClass = unloadStarted
-                ? "discharging"
-                : "waiting-discharge";
-            this.innerHTML = `
-           <div class="berth-allocated-card ${cardClass} draggable-node"
-            draggable="true"
-            data-id="${activeDragData.id}"
-            data-name="${activeDragData.name}"
-            data-cargo="${activeDragData.cargo}"
-            data-qty="${bl}"
-            data-total="${bl}"
-            data-balance="${balance}"
-            data-discharge="${discharge}">
-
-            <div class="berth-card-title">
-                ⚓ ${activeDragData.name}
-            </div>
-
-            <div class="berth-card-cargo">
-                ${activeDragData.cargo}
-            </div>
-
-            <div class="berth-card-metrics">
-                <b>BL :</b> ${bl.toLocaleString()} MT
-            </div>
-
-            <div class="berth-card-metrics" style="color:#b45309;">
-                <b>Bal :</b> ${balance.toLocaleString()} MT
-            </div>
-
-        </div>`;
-
-            writeLog(activeDragData.name, fromLocation, `${berth} ➜ ${position}`);
-            resetDragVariables();
-            updateInterfaceMetrics();
+                writeLog(activeDragData.name, fromLocation, `${berth} → ${position}`);
+                resetDragVars();
+                updateInterfaceMetrics();
+                markUnsaved();
+            });
         });
-    });
+    }
 
     const waitingZone = document.getElementById('waitingAreaZone');
     waitingZone.addEventListener('dragover', e => e.preventDefault());
@@ -2094,43 +2080,23 @@
         e.preventDefault();
         this.classList.remove('drag-active');
         if (!activeDragData) return;
-        if (sourceOriginElement && sourceOriginElement.classList.contains('draggable-node') && sourceOriginElement.parentElement === this) return;
+        if (sourceOriginElement?.parentElement === this) return;
 
         let fromLocation = 'WAITING AREA';
-        const oldZone = sourceOriginElement && sourceOriginElement.closest('.matrix-dropzone');
-        if (oldZone) fromLocation = `${oldZone.dataset.berth} ➜ ${oldZone.dataset.position}`;
+        const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
+        if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
 
         cleanSourceOrigin();
-        const pill = document.createElement('div');
-        pill.className = 'barge-pill-container draggable-node';
-        pill.setAttribute('draggable', 'true');
-        pill.dataset.id = activeDragData.id;
-        pill.dataset.name = activeDragData.name;
-        pill.dataset.cargo = activeDragData.cargo;
-        pill.dataset.qty = activeDragData.qty;
-        pill.dataset.balance = activeDragData.balance || activeDragData.qty;
-        pill.dataset.total = activeDragData.total || activeDragData.qty;
-        pill.innerHTML = `
-        <div class="barge-pill-header">
-            ⚓ ${activeDragData.name}
-        </div>
-
-        <div class="barge-pill-cargo">
-            ${activeDragData.cargo}
-        </div>
-
-        <div class="barge-pill-metrics">
-            Disch: ${activeDragData.discharge || 0} MT
-        </div>
-
-        <div class="barge-pill-metrics" style="color:#b45309;">
-            Bal: ${activeDragData.balance || activeDragData.qty || 0} MT
-        </div>`;
-        this.appendChild(pill);
+        this.appendChild(buildWaitingPill({
+            ...activeDragData,
+            balance: activeDragData.balance || activeDragData.qty,
+            total: activeDragData.total || activeDragData.qty,
+        }));
 
         writeLog(activeDragData.name, fromLocation, 'WAITING AREA');
-        resetDragVariables();
+        resetDragVars();
         updateInterfaceMetrics();
+        markUnsaved();
     });
 
     function cleanSourceOrigin() {
@@ -2139,303 +2105,323 @@
         if (pz) { pz.innerHTML = '—'; pz.classList.add('empty-slot'); }
         else sourceOriginElement.remove();
     }
-    function resetDragVariables() { activeDragData = null; sourceOriginElement = null; }
 
-    // ── Filter ────────────────────────────────────────────────────────────────────
+    function resetDragVars() { activeDragData = null; sourceOriginElement = null; }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  FILTERS
+    // ══════════════════════════════════════════════════════════════════════════════
     function triggerClientFilter() {
-        const nameQuery = document.getElementById('searchBargeName').value.toLowerCase().trim();
-        const cargoQuery = document.getElementById('searchCargo').value.toLowerCase().trim();
-        const jettyFilter = document.getElementById('selectJettyFilter').value;
-        const statusFilter = document.getElementById('selectStatusFilter').value;
+        const nameQ = document.getElementById('searchBargeName').value.toLowerCase().trim();
+        const cargoQ = document.getElementById('searchCargo').value.toLowerCase().trim();
+        const jettyF = document.getElementById('selectJettyFilter').value;
+        const statusF = document.getElementById('selectStatusFilter').value;
 
-        if (statusFilter === 'COMPLETED') { showCompletedPopup(); return; }
+        if (statusF === 'COMPLETED') { showCompletedPopup(); return; }
 
         document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(card => {
-            const ok = card.dataset.name.toLowerCase().includes(nameQuery)
-                && card.dataset.cargo.toLowerCase().includes(cargoQuery)
-                && (statusFilter === 'ALL' || statusFilter === 'WAITING')
-                && jettyFilter === 'ALL';
+            const ok = card.dataset.name.toLowerCase().includes(nameQ)
+                && card.dataset.cargo.toLowerCase().includes(cargoQ)
+                && (statusF === 'ALL' || statusF === 'WAITING')
+                && jettyF === 'ALL';
             card.style.display = ok ? 'flex' : 'none';
         });
 
         document.querySelectorAll('tr[data-jetty-row]').forEach(row => {
-            const jn = row.dataset.jettyRow;
-            const matchJetty = jettyFilter === 'ALL' || jettyFilter.toUpperCase() === jn.toUpperCase();
+            const matchJetty = jettyF === 'ALL' || jettyF.toUpperCase() === row.dataset.jettyRow.toUpperCase();
             row.style.display = matchJetty ? '' : 'none';
             row.querySelectorAll('.berth-allocated-card').forEach(card => {
-                const mn = card.dataset.name.toLowerCase().includes(nameQuery);
-                const mc = card.dataset.cargo.toLowerCase().includes(cargoQuery);
+                const mn = card.dataset.name.toLowerCase().includes(nameQ);
+                const mc = card.dataset.cargo.toLowerCase().includes(cargoQ);
                 let ms = true;
-                if (statusFilter === 'WAITING') ms = false;
-                if (statusFilter === 'DISCHARGING') ms = parseFloat(card.dataset.balance || 0) > 0;
+                if (statusF === 'WAITING') ms = false;
+                if (statusF === 'DISCHARGING') ms = parseFloat(card.dataset.balance || 0) > 0;
                 card.style.opacity = (mn && mc && ms) ? '1' : '0.15';
                 card.style.pointerEvents = (mn && mc && ms) ? 'auto' : 'none';
             });
         });
     }
 
-    // ── Metrics ───────────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  METRICS
+    // ══════════════════════════════════════════════════════════════════════════════
     function updateInterfaceMetrics() {
         const waitingCount = document.querySelectorAll('#waitingAreaZone .barge-pill-container').length;
         const dischargingCount = document.querySelectorAll('.berth-allocated-card').length;
         const occupiedBerths = new Set();
+
         document.querySelectorAll('.berth-allocated-card').forEach(c => {
             const z = c.closest('.matrix-dropzone');
             if (z) occupiedBerths.add(z.dataset.berth);
         });
-        const occ = occupiedBerths.size;
-        const totalBerths =
-            document.querySelectorAll("tr[data-jetty-row]").length;
 
-        const avail =
-            Math.max(0, totalBerths - occ);
+        const occ = occupiedBerths.size;
+        const totalBerths = document.querySelectorAll("tr[data-jetty-row]").length;
 
         document.getElementById('waitingCount').innerText = waitingCount;
         document.getElementById('metricTotal').innerText = waitingCount + dischargingCount;
         document.getElementById('metricWaiting').innerText = waitingCount;
         document.getElementById('metricDischarging').innerText = dischargingCount;
         document.getElementById('metricOccupied').innerText = occ;
-        document.getElementById('metricFree').innerText = avail;
+        document.getElementById('metricFree').innerText = Math.max(0, totalBerths - occ);
     }
 
-    // ── Logs ──────────────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOVEMENT LOGS
+    // ══════════════════════════════════════════════════════════════════════════════
     function writeLog(name, from, to) {
+        const reportDate = document.getElementById("report-date").value;
+        const shift = document.getElementById("report-shift").value;
+        const shiftIncharge = document.getElementById("shiftInchargeName").value || "—";
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-        const reportDate =
-            document.getElementById("report-date").value;
-
-        const shift =
-            document.getElementById("report-shift").value;
-
-        const shiftIncharge =
-            document.getElementById("shiftInchargeName").value || "-";
-
-        const now = new Date();
-
-        const time = now.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-        });
+        // ── Only log for the currently selected date & shift ──
+        const logEntry = { name, from, to, reportDate, shift, shiftIncharge, time };
+        _movementLogs.push(logEntry);
 
         const item = document.createElement("div");
         item.className = "log-item";
-
         item.innerHTML = `
-        <strong>${name}</strong> — Moved
-        <br>
-
-        <span>
-            ${from} ➜ ${to}
-        </span>
-
-        <span>
-            📅 ${reportDate}
-            &nbsp;&nbsp;|&nbsp;&nbsp;
-            🕒 ${time}
-            &nbsp;&nbsp;|&nbsp;&nbsp;
-            Shift : ${shift}
-        </span>
-
-        <span>
-            Shift Incharge : ${shiftIncharge}
-        </span>
-    `;
-
-        const box = document.getElementById("logConsole");
-
-        box.prepend(item);
-
-        document.getElementById("logCount").innerText =
-            box.querySelectorAll(".log-item").length;
+        <strong>${name}</strong> — Moved<br>
+        <span>${from} → ${to}</span><br>
+        <span>📅 ${reportDate} &nbsp;|&nbsp; 🕒 ${time} &nbsp;|&nbsp; Shift: ${shift}</span><br>
+        <span>Shift Incharge: ${shiftIncharge}</span>`;
+        document.getElementById("logConsole").prepend(item);
+        document.getElementById("logCount").textContent = _movementLogs.length;
     }
+
     function showMovementLogs() {
+        const reportDate = document.getElementById("report-date").value;
+        const shift = document.getElementById("report-shift").value;
+
+        const logConsoleHtml = document.getElementById('logConsole').innerHTML;
+
+        const header = `
+        <div style="background:#f0f9ff;border:1px solid #bfdbfe;border-radius:6px;
+                    padding:10px 14px;margin-bottom:14px;font-size:12px;">
+            <span style="font-weight:700;color:#1e40af;">📅 Date:</span>
+            <span style="margin-right:16px;">${reportDate}</span>
+            <span style="font-weight:700;color:#1e40af;">🔄 Shift:</span>
+            <span>${shift === 'ALL' ? 'All Shifts' : shift + ' Shift'}</span>
+            <span style="margin-left:16px;font-weight:700;color:#1e40af;">Total Logs:</span>
+            <span>${_movementLogs.length}</span>
+        </div>`;
+
         document.getElementById('logsModalBody').innerHTML =
-            document.getElementById('logConsole').innerHTML || '<div>No movement logs yet.</div>';
+            logConsoleHtml
+                ? header + logConsoleHtml
+                : header + '<div style="padding:20px;text-align:center;color:#94a3b8;">No movement logs yet.</div>';
+        document.getElementById('logsModalTitle').textContent = 'Movement Logs';
+        _modalExcelMode = 'logs';
+        _modalExcelData = [..._movementLogs];
         document.getElementById('logsModal').style.display = 'block';
     }
-    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
-    window.addEventListener('click', e => { const m = document.getElementById('logsModal'); if (e.target === m) m.style.display = 'none'; });
 
-    // ── Notes ─────────────────────────────────────────────────────────────────────
+    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+
+    window.addEventListener('click', e => {
+        const m = document.getElementById('logsModal');
+        if (e.target === m) m.style.display = 'none';
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  NOTES
+    // ══════════════════════════════════════════════════════════════════════════════
     function addNoteRow() {
         const list = document.getElementById('notesLogList');
         const row = document.createElement('div');
         row.className = 'note-entry-row';
-        row.innerHTML = `<span class="note-index">${list.children.length + 1}</span><div class="note-text" contenteditable="true">New note...</div><button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+        row.innerHTML = `
+        <span class="note-index">${list.children.length + 1}</span>
+        <div class="note-text" contenteditable="true" oninput="markUnsaved()">New note…</div>
+        <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
         list.appendChild(row);
+        markUnsaved();
     }
-    function removeNoteRow(btn) { btn.parentElement.remove(); renumberNotes(); }
+
+    function removeNoteRow(btn) {
+        btn.parentElement.remove();
+        renumberNotes();
+        markUnsaved();
+    }
+
     function renumberNotes() {
-        Array.from(document.getElementById('notesLogList').children).forEach((r, i) => r.querySelector('.note-index').textContent = i + 1);
+        Array.from(document.getElementById('notesLogList').children)
+            .forEach((r, i) => r.querySelector('.note-index').textContent = i + 1);
     }
 
-    // ── Completed popup ───────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  COMPLETED POPUP
+    // ══════════════════════════════════════════════════════════════════════════════
     async function showCompletedPopup() {
+        const reportDate = document.getElementById('report-date').value;
 
-        const reportDate =
-            document.getElementById('report-date').value;
+        document.getElementById('logsModalBody').innerHTML = `
+        <div style="padding:30px;text-align:center;color:#94a3b8;">
+            <div style="font-size:22px;margin-bottom:8px;">⏳</div>
+            Loading completed barges…
+        </div>`;
+        document.getElementById('logsModal').style.display = 'block';
 
-        const shift =
-            document.getElementById('report-shift').value;
+        try {
+            const shift = document.getElementById('report-shift').value;
+            const params = new URLSearchParams({ date: reportDate, shift: shift, completed: '1' });
+            const res = await fetch(`/api/module/RP01/berth-occupancy?${params}`);
+            const items = await res.json();
+            document.getElementById('logsModalTitle').textContent = 'Completed Barges & MBC';
+            _modalExcelMode = 'completed';
+            _modalExcelData = items;
 
-        const params = new URLSearchParams({
-            date: reportDate,
-            shift: shift,
-            completed: "1"
-        });
+            const header = `
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;
+                    padding:10px 14px;margin-bottom:14px;font-size:12px;">
+            <span style="font-weight:700;color:#166534;">✓ Completed Barges & MBC</span>
+            <span style="margin-left:12px;color:#166534;">Date: ${reportDate}</span>
+            <span style="margin-left:12px;font-weight:700;color:#166534;">Total: ${items.length}</span>
+        </div>`;
 
-        const items = await (
-            await fetch(
-                `/api/module/RP01/berth-occupancy?${params}`
-            )
-        ).json();
+            if (!items.length) {
+                document.getElementById('logsModalBody').innerHTML =
+                    header + '<div style="padding:20px;text-align:center;color:#94a3b8;">No completed barges / MBC found.</div>';
+                return;
+            }
 
-        let html =
-            '<div style="font-size:16px;font-weight:700;margin-bottom:15px;">Completed Barges / MBC</div>';
+            let tableHtml = `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+                <tr style="background:#f8fafc;">
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Type</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Name</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Cargo</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:right;color:#64748b;text-transform:uppercase;font-size:11px;">BL Qty (MT)</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Commenced</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:left;color:#64748b;text-transform:uppercase;font-size:11px;">Completed</th>
+                    <th style="border:1px solid #e2e8f0;padding:8px 10px;text-align:center;color:#64748b;text-transform:uppercase;font-size:11px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>`;
 
-        const completedItems =
-            items.filter(
-                x => x.status === 'Completed'
-            );
+            items.forEach((item, idx) => {
+                const typeBadge = item.type === 'MBC'
+                    ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:#dbeafe;color:#1e40af;">MBC</span>`
+                    : `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fef9c3;color:#92400e;">BARGE</span>`;
 
-        if (!completedItems.length) {
-
-            html =
-                '<div style="padding:20px;text-align:center;">No Completed Barges / MBC Found</div>';
-
-        } else {
-
-            completedItems.forEach(item => {
-
-                html += `
-                <div class="log-item">
-                    <strong>
-                        ${item.type} - ${item.name}
-                    </strong>
-
-                    <br>
-
-                    <span>
-                        ${item.cargo || ''}
-                    </span>
-
-                    <br>
-
-                    <span>
-                        Completed :
-                        ${item.completed_date || ''}
-                    </span>
-
-                    <br>
-
-                    <span style="color:green;font-weight:600;">
-                        ✓ Completed
-                    </span>
-                </div>
-            `;
+                tableHtml += `
+            <tr style="background:${idx % 2 === 0 ? '#fff' : '#f8fafc'};">
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;">${typeBadge}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;font-weight:700;">${item.name || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;">${item.cargo || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;text-align:right;">${(item.bl_qty || 0).toLocaleString()}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;color:#1d4ed8;">${item.commenced || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;color:#166534;font-weight:600;">${item.completed || '—'}</td>
+                <td style="border:1px solid #e2e8f0;padding:8px 10px;text-align:center;">
+                    <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;background:#dcfce7;color:#166534;">✓ Completed</span>
+                </td>
+            </tr>`;
             });
+
+            tableHtml += `</tbody></table>`;
+            document.getElementById('logsModalBody').innerHTML = header + tableHtml;
+
+        } catch (err) {
+            console.error('Completed barges load error:', err);
+            document.getElementById('logsModalBody').innerHTML =
+                '<div style="padding:20px;text-align:center;color:#dc2626;">Failed to load. Please try again.</div>';
         }
-
-        document.getElementById(
-            'logsModalBody'
-        ).innerHTML = html;
-
-        document.getElementById(
-            'logsModal'
-        ).style.display = 'block';
     }
 
-    // ── Shift details + multi-select ──────────────────────────────────────────────
-    const PORTBIRD_LIST = ["Rajendra Mhatre", "Bhushan Patil", "Vinit Thale", "Kedar Patil", "Siddhesh Patil", "Vrutant Shirke", "Rhitik Adsule", "Nikit Mhatre"];
-    let SHIFT_INCHARGE_LIST = [];
-    let CRANE_OPERATOR_LIST = [];
-
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT DETAILS — multi-select dropdowns
+    // ══════════════════════════════════════════════════════════════════════════════
     async function loadShiftDetails() {
         const data = await (await fetch("/api/module/RP01/shift-details")).json();
         SHIFT_INCHARGE_LIST = data.shift_incharge_list || [];
         CRANE_OPERATOR_LIST = data.crane_operator_list || [];
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-        loadShiftDetails();
+    function openMultiPicker(inputId, getList) {
+        const inp = document.getElementById(inputId);
+        const optList = getList();
+        const current = inp.value ? inp.value.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-        // Default date = today, auto-detect current shift
-        const dateInput = document.getElementById('report-date');
-        const shiftInput = document.getElementById('report-shift');
-        const today = new Date();
-        dateInput.value = today.toISOString().slice(0, 10);
-        shiftInput.value = 'ALL';
+        // Build dropdown
+        const dd = document.createElement('div');
+        dd.style.cssText = `
+        position:fixed;z-index:99999;background:#fff;border:1px solid #cbd5e0;
+        border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.18);padding:8px;
+        min-width:220px;max-height:280px;overflow-y:auto;`;
 
-        // Portbird / ShiftIncharge / CraneOp dropdowns
-        [
-            ['shiftBpoName', () => PORTBIRD_LIST],
-            ['shiftInchargeName', () => SHIFT_INCHARGE_LIST],
-            ['shiftIportName', () => CRANE_OPERATOR_LIST],
-        ].forEach(([id, getList]) => {
-            const inp = document.getElementById(id);
-            inp.addEventListener("click", function () {
-                makeMultiSelectEditor(getList())(
-                    { getValue: () => inp.value, getElement: () => inp },
-                    cb => cb(),
-                    val => { inp.value = val; },
-                    () => { }
-                );
-            });
-        });
-    });
+        const sb = document.createElement('input');
+        sb.type = 'text';
+        sb.placeholder = 'Search…';
+        sb.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
+        dd.appendChild(sb);
 
-    document.querySelector('.reset-btn').addEventListener('click', function () {
-        document.getElementById('reportContent').style.display = 'none';
-    });
+        const lc = document.createElement('div');
+        dd.appendChild(lc);
 
-    // ── Multi-select editor (unchanged) ──────────────────────────────────────────
-    function makeMultiSelectEditor(optionsList) {
-        return function (cell, onRendered, success, cancel) {
-            var cv = cell.getValue() || '';
-            var selected = cv ? cv.split(',').map(s => s.trim()).filter(Boolean) : [];
-            var wrapper = document.createElement('div');
-            wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
-            wrapper.textContent = cv || 'Select...';
+        let selected = [...current];
 
-            var dd = document.createElement('div');
-            dd.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.18);padding:8px;min-width:190px;max-height:280px;overflow-y:auto;display:none;';
-            var sb = document.createElement('input'); sb.type = 'text'; sb.placeholder = 'Search...';
-            sb.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;margin-bottom:6px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;';
-            dd.appendChild(sb);
-            var lc = document.createElement('div'); dd.appendChild(lc);
-
-            function renderOptions(f) {
-                lc.innerHTML = '';
-                (optionsList || []).filter(i => !f || i.toLowerCase().includes(f.toLowerCase())).forEach(item => {
-                    var label = document.createElement('label');
+        function renderOpts(filter) {
+            lc.innerHTML = '';
+            optList.filter(i => !filter || i.toLowerCase().includes(filter.toLowerCase()))
+                .forEach(item => {
+                    const label = document.createElement('label');
                     label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
-                    label.addEventListener('mouseenter', () => label.style.background = '#f1f5f9');
-                    label.addEventListener('mouseleave', () => label.style.background = 'none');
-                    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = item; cb.checked = selected.includes(item);
+                    label.onmouseenter = () => label.style.background = '#f1f5f9';
+                    label.onmouseleave = () => label.style.background = 'none';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = item;
+                    cb.checked = selected.includes(item);
                     cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;accent-color:#4a90d9;';
-                    cb.addEventListener('change', () => { if (cb.checked) { if (!selected.includes(item)) selected.push(item); } else { selected = selected.filter(s => s !== item); } });
-                    label.appendChild(cb); label.appendChild(document.createTextNode(item)); lc.appendChild(label);
+                    cb.addEventListener('change', () => {
+                        if (cb.checked) { if (!selected.includes(item)) selected.push(item); }
+                        else { selected = selected.filter(s => s !== item); }
+                    });
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(item));
+                    lc.appendChild(label);
                 });
-            }
-            renderOptions('');
-            sb.addEventListener('input', () => renderOptions(sb.value));
+        }
 
-            var br = document.createElement('div'); br.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
-            var ab = document.createElement('button'); ab.textContent = 'Apply'; ab.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
-            ab.addEventListener('click', e => { e.stopPropagation(); cleanup(); success(selected.join(', ')); });
-            var cb2 = document.createElement('button'); cb2.textContent = 'Cancel'; cb2.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
-            cb2.addEventListener('click', e => { e.stopPropagation(); cleanup(); cancel(); });
-            br.appendChild(ab); br.appendChild(cb2); dd.appendChild(br);
-            document.body.appendChild(dd);
+        renderOpts('');
+        sb.addEventListener('input', () => renderOpts(sb.value));
 
-            function cleanup() { if (dd.parentNode) dd.parentNode.removeChild(dd); document.removeEventListener('mousedown', oc); }
-            function oc(e) { if (!dd.contains(e.target) && !wrapper.contains(e.target)) { cleanup(); cancel(); } }
-            onRendered(function () { var r = cell.getElement().getBoundingClientRect(); dd.style.left = r.left + 'px'; dd.style.top = (r.bottom + 2) + 'px'; dd.style.display = 'block'; sb.focus(); setTimeout(() => document.addEventListener('mousedown', oc), 10); });
-            wrapper.addEventListener('keydown', e => { if (e.key === 'Escape') { cleanup(); cancel(); } if (e.key === 'Enter') { cleanup(); success(selected.join(', ')); } });
-            return wrapper;
-        };
+        // Buttons
+        const br = document.createElement('div');
+        br.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+
+        const applyBtn = document.createElement('button');
+        applyBtn.textContent = 'Apply';
+        applyBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#4a90d9;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+        applyBtn.onclick = e => { e.stopPropagation(); cleanup(); inp.value = selected.join(', '); markUnsaved(); };
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = 'flex:1;padding:5px 8px;font-size:12px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:600;';
+        cancelBtn.onclick = e => { e.stopPropagation(); cleanup(); };
+
+        br.appendChild(applyBtn);
+        br.appendChild(cancelBtn);
+        dd.appendChild(br);
+        document.body.appendChild(dd);
+
+        // Position under input
+        const rect = inp.getBoundingClientRect();
+        dd.style.left = rect.left + 'px';
+        dd.style.top = (rect.bottom + 2) + 'px';
+        dd.style.display = 'block';
+        sb.focus();
+
+        function cleanup() { if (dd.parentNode) dd.parentNode.removeChild(dd); document.removeEventListener('mousedown', outside); }
+        function outside(e) { if (!dd.contains(e.target) && !inp.contains(e.target)) { cleanup(); } }
+        setTimeout(() => document.addEventListener('mousedown', outside), 10);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  SHIFT WISE DISCHARGE
+    // ══════════════════════════════════════════════════════════════════════════════
     async function loadShiftWiseDischarge() {
         const reportDate = document.getElementById('report-date').value;
         const shift = document.getElementById('report-shift').value;
@@ -2458,19 +2444,24 @@
         const jetty = data.jetty_discharge || [];
         const barges = data.barge_discharge || [];
         const mbcs = data.mbc_discharge || [];
+
+        // Left table: all barges first, then all MBCs
         const bargeRows = [...barges, ...mbcs];
+
+        // Payloader column: collect all names from barges and MBCs
+        const payloaderRows = [...barges, ...mbcs]
+            .filter(r => r.payloader_cl)
+            .map(r => r.payloader_cl);
+
+        // Labour column: collect all names from barges and MBCs
+        const labourRows = [...barges, ...mbcs]
+            .filter(r => r.labour_cleaned)
+            .map(r => r.labour_cleaned);
 
         const maxRows = Math.max(jetty.length, bargeRows.length, 1);
 
         let jettyTotal = 0, blTotal = 0, actualTotal = 0;
 
-        const payloaderList = bargeRows
-            .filter(r => r.payloader_cl && r.payloader_cl.trim() !== "")
-            .map(r => r.payloader_cl);
-
-        const labourList = bargeRows
-            .filter(r => r.labour_cleaned && r.labour_cleaned.trim() !== "")
-            .map(r => r.labour_cleaned);
 
         for (let i = 0; i < maxRows; i++) {
             const j = jetty[i];
@@ -2481,8 +2472,8 @@
             if (b) actualTotal += b.actual_discharge || 0;
 
             const typeBadge = b ? `<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
-        background:${b.type === 'MBC' ? '#dbeafe' : '#fef9c3'};
-        color:${b.type === 'MBC' ? '#1e40af' : '#92400e'};">${b.type}</span>` : '';
+            background:${b.type === 'MBC' ? '#dbeafe' : '#fef9c3'};
+            color:${b.type === 'MBC' ? '#1e40af' : '#92400e'};">${b.type}</span>` : '';
 
             tbody.innerHTML += `<tr>
             <td>${j ? (j.cargo_name || '') : ''}</td>
@@ -2491,8 +2482,8 @@
             <td>${b ? b.cargo : ''}</td>
             <td style="text-align:right;">${b && b.bl_qty ? b.bl_qty.toLocaleString() : ''}</td>
             <td style="text-align:right;font-weight:600;">${b && b.actual_discharge ? b.actual_discharge.toLocaleString() : ''}</td>
-            <td style="font-size:11px;color:#6b7280;">${payloaderList[i] || ''}</td>
-            <td style="font-size:11px;color:#6b7280;">${labourList[i] || ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${payloaderRows[i] || ''}</td>
+            <td style="font-size:11px;color:#6b7280;">${labourRows[i] || ''}</td>
         </tr>`;
         }
 
@@ -2503,14 +2494,13 @@
         <td style="text-align:right;"><b>${blTotal.toLocaleString()}</b></td>
         <td style="text-align:right;"><b>${actualTotal.toLocaleString()}</b></td>
         <td></td><td></td>
-    </tr>`;
+        </tr>`;
         // ✅ DO NOT call updateSlagClinkerSummary() here
         // loadShiftSummary() will call it after totalDischarge is ready
     }
 
     async function loadShiftSummary() {
         const reportDate = document.getElementById('report-date').value;
-
         const shifts = ['A', 'B', 'C'];
         const discharge = { A: 0, B: 0, C: 0 };
 
@@ -2531,9 +2521,6 @@
         document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
 
         calculateShiftDiff();
-
-        // ✅ totalDischarge is now written to DOM by calculateShiftDiff()
-        // Safe to calculate Steel Plant now
         updateSlagClinkerSummary();
     }
 
@@ -2576,20 +2563,14 @@
     }
 
     function getNumber(id) {
-        return parseFloat(
-            document.getElementById(id)
-                .textContent
-                .replace(/,/g, '')
-        ) || 0;
+        return parseFloat(document.getElementById(id).textContent.replace(/,/g, '')) || 0;
     }
-    function formatNumber(value) {
-        return Number(value).toLocaleString('en-IN', {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 2
-        });
-    }
-    function calculateShiftDiff() {
 
+    function formatNumber(value) {
+        return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    }
+
+    function calculateShiftDiff() {
         const aDis = getNumber('aDischarge');
         const bDis = getNumber('bDischarge');
         const cDis = getNumber('cDischarge');
@@ -2598,38 +2579,22 @@
         const bPlan = parseFloat(document.getElementById('bPlan').value) || 0;
         const cPlan = parseFloat(document.getElementById('cPlan').value) || 0;
 
-        document.getElementById('aDiff').textContent =
-            document.getElementById('aPlan').value
-                ? formatNumber(aPlan - aDis)
-                : '';
-
-        document.getElementById('bDiff').textContent =
-            document.getElementById('bPlan').value
-                ? formatNumber(bPlan - bDis)
-                : '';
-
-        document.getElementById('cDiff').textContent =
-            document.getElementById('cPlan').value
-                ? formatNumber(cPlan - cDis)
-                : '';
+        document.getElementById('aDiff').textContent = document.getElementById('aPlan').value ? formatNumber(aPlan - aDis) : '';
+        document.getElementById('bDiff').textContent = document.getElementById('bPlan').value ? formatNumber(bPlan - bDis) : '';
+        document.getElementById('cDiff').textContent = document.getElementById('cPlan').value ? formatNumber(cPlan - cDis) : '';
 
         const totalDischarge = aDis + bDis + cDis;
         const totalPlan = aPlan + bPlan + cPlan;
-        const totalDiff = totalPlan - totalDischarge;
 
-        document.getElementById('totalDischarge').textContent =
-            formatNumber(totalDischarge);
-
-        document.getElementById('totalPlan').textContent =
-            totalPlan > 0 ? formatNumber(totalPlan) : '';
-
-        document.getElementById('totalDiff').textContent =
-            totalPlan > 0 ? formatNumber(totalDiff) : '';
+        document.getElementById('totalDischarge').textContent = formatNumber(totalDischarge);
+        document.getElementById('totalPlan').textContent = totalPlan > 0 ? formatNumber(totalPlan) : '';
+        document.getElementById('totalDiff').textContent = totalPlan > 0 ? formatNumber(totalPlan - totalDischarge) : '';
     }
 
-
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  EXCEL DOWNLOAD
+    // ══════════════════════════════════════════════════════════════════════════════
     async function downloadExcel() {
-
         const reportDate = document.getElementById('report-date').value;
         const shiftVal = document.getElementById('report-shift').value;
         const shiftIncharge = encodeURIComponent(document.getElementById('shiftInchargeName').value || '');
@@ -2639,47 +2604,119 @@
         document.getElementById("excelLoader").style.display = "flex";
 
         try {
-
             const response = await fetch(
                 `/api/module/RP01/download-barge-position-excel?date=${reportDate}&shift=${shiftVal}&shift_incharge=${shiftIncharge}&bpo=${bpo}&operator=${operator}`
             );
 
-            if (!response.ok) {
-                throw new Error("Download failed");
-            }
+            if (!response.ok) throw new Error("Download failed");
 
             const blob = await response.blob();
-
             const url = window.URL.createObjectURL(blob);
-
             const a = document.createElement("a");
             a.href = url;
 
             const disposition = response.headers.get("Content-Disposition");
             let filename = "Daily_Barge_Position_Report.xlsx";
-
             if (disposition) {
                 const match = disposition.match(/filename="?([^"]+)"?/);
                 if (match) filename = match[1];
             }
 
             a.download = filename;
-
             document.body.appendChild(a);
             a.click();
             a.remove();
-
             window.URL.revokeObjectURL(url);
 
         } catch (err) {
             console.error(err);
             alert("Excel download failed.");
         } finally {
-
             document.getElementById("excelLoader").style.display = "none";
-
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  RESET
+    // ══════════════════════════════════════════════════════════════════════════════
+    function resetReport() {
+        document.getElementById('reportContent').style.display = 'none';
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
+        document.getElementById('saveReportBtn').disabled = true;
+        _unsaved = false;
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  INIT
+    // ══════════════════════════════════════════════════════════════════════════════
+    document.addEventListener("DOMContentLoaded", () => {
+        loadShiftDetails();
+
+        const dateInput = document.getElementById('report-date');
+        const shiftInput = document.getElementById('report-shift');
+        dateInput.value = new Date().toISOString().slice(0, 10);
+        shiftInput.value = 'ALL';
+
+        // Warn before leaving with unsaved changes
+        window.addEventListener('beforeunload', e => {
+            if (_unsaved) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
+        // Initial dropzone binding
+        bindDropzones();
+    });
+    async function downloadModalExcel() {
+    if (!_modalExcelMode) return;
+    const reportDate = document.getElementById('report-date').value;
+    const shift = document.getElementById('report-shift').value;
+
+    try {
+        let response;
+        if (_modalExcelMode === 'logs') {
+            response = await fetch('/api/module/RP01/download-movement-logs-excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    movement_logs: _modalExcelData,
+                    report_date: reportDate,
+                    shift: shift
+                }),
+            });
+        } else {
+            const params = new URLSearchParams({ date: reportDate, shift });
+            response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+        }
+
+        if (!response.ok) throw new Error('Download failed');
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'export.xlsx';
+        if (disposition) {
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            if (match) filename = match[1];
+        }
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error(err);
+        alert('Excel download failed.');
+    }
+}
 </script>
 {% endraw %}
 
