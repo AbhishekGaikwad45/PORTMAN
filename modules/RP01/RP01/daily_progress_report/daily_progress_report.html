@@ -1209,7 +1209,6 @@ function renderBargeStatusReport(data) {
         "in_transit_jetty_to_mv",
         "breakdown",
         "remarks"
-        
     ];
 
     const statuses = [
@@ -1225,6 +1224,9 @@ function renderBargeStatusReport(data) {
         ["breakdown", "Breakdown / Off Hired / Coastal"],
         ["remarks", "Remarks"]
     ];
+
+    // Load any previously saved edits from localStorage
+    const savedEdits = JSON.parse(localStorage.getItem("bargeStatusEdits") || "{}");
 
     let html = `
     <div class="report-section" style="margin-top:30px">
@@ -1275,6 +1277,12 @@ function renderBargeStatusReport(data) {
 
             if (editableRows.includes(key)) {
 
+                // Prefer a saved edit over the server-computed value
+                const savedValue = savedEdits[ldudId] && savedEdits[ldudId][key];
+                const cellContent = (savedValue !== undefined && savedValue !== "")
+                    ? savedValue
+                    : displayValue;
+
                 html += `
                     <td
                         contenteditable="true"
@@ -1283,7 +1291,7 @@ function renderBargeStatusReport(data) {
                         data-status="${key}"
                         style="vertical-align:top;min-width:220px;"
                     >
-                        ${displayValue}
+                        ${cellContent}
                     </td>
                 `;
 
@@ -1314,61 +1322,42 @@ function renderBargeStatusReport(data) {
     </div>
     `;
 
-    container.innerHTML += html;
+    // Replace, don't append — avoids duplicate tables/rows on re-render
+    container.innerHTML = html;
 
-    // Auto Save
-    document.querySelectorAll(".barge-editable").forEach(cell => {
+    // Attach ONE delegated listener on the container instead of one per cell.
+    // Using capture phase because "blur" does not bubble.
+    // Guard against double-attaching if this function runs more than once.
+    if (!container.dataset.bargeListenerAttached) {
 
-        cell.addEventListener("blur", function () {
+        container.addEventListener("blur", function (e) {
 
-            fetch("/api/module/RP01/save_barge_status", {
+            const cell = e.target;
 
-                method: "POST",
+            if (!cell.classList || !cell.classList.contains("barge-editable"))
+                return;
 
-                headers: {
-                    "Content-Type": "application/json"
-                },
+            const ldudId = cell.dataset.ldud;
+            const status = cell.dataset.status;
+            const value = cell.innerText.trim();
 
-                body: JSON.stringify({
+            const store = JSON.parse(localStorage.getItem("bargeStatusEdits") || "{}");
 
-                    ldud_id: this.dataset.ldud,
+            if (!store[ldudId]) {
+                store[ldudId] = {};
+            }
+            store[ldudId][status] = value;
 
-                    status: this.dataset.status,
+            localStorage.setItem("bargeStatusEdits", JSON.stringify(store));
 
-                    value: this.innerHTML.trim()
+            console.log("Saved locally:", ldudId, status, value);
 
-                })
+        }, true); // capture = true, required since blur doesn't bubble
 
-            })
-            .then(r => r.json())
-            .then(res => {
-
-                console.log("Saved", res);
-
-            })
-            .catch(err => {
-
-                console.error(err);
-
-            });
-
-        });
-
-    });
+        container.dataset.bargeListenerAttached = "true";
+    }
 
 }
-
-const editedStatus = {};
-
-document.querySelectorAll(".barge-editable").forEach(td => {
-
-    const ldudId = td.dataset.ldud;
-
-    if (!editedStatus[ldudId])
-        editedStatus[ldudId] = {};
-
-    editedStatus[ldudId][td.dataset.status] = td.innerHTML.trim();
-});
 
 
 async function loadBargeDischargeReport(reportDate) {
@@ -2846,46 +2835,71 @@ document
     .getElementById('download_excel_btn')
     .addEventListener('click', function () {
 
-        console.log(
-            "========== DOWNLOAD EXCEL CLICKED =========="
-        );
+        console.log("========== DOWNLOAD EXCEL CLICKED ==========");
 
-        // GET REPORT DATE
         const reportDate =
             document.getElementById('report-date').value;
 
-        console.log(
-            "SELECTED REPORT DATE:",
-            reportDate
-        );
+        console.log("SELECTED REPORT DATE:", reportDate);
 
-        // VALIDATION
         if (!reportDate) {
-
-            alert(
-                'Please select report date'
-            );
-
+            alert('Please select report date');
             return;
         }
 
-        // DOWNLOAD URL
-        const downloadUrl =
+        // Safety net: sync any cell that still has focus / hasn't blurred yet
+        document.querySelectorAll(".barge-editable").forEach(cell => {
 
-            `/api/module/RP01/daily_progress_report_excel?report_date=${reportDate}`;
+            const ldudId = cell.dataset.ldud;
+            const status = cell.dataset.status;
+            const value = cell.innerText.trim();
 
-        console.log(
-            "DOWNLOAD URL:",
-            downloadUrl
-        );
+            const store = JSON.parse(localStorage.getItem("bargeStatusEdits") || "{}");
 
-        // DOWNLOAD FILE
-        window.location.href =
-            downloadUrl;
+            if (!store[ldudId]) {
+                store[ldudId] = {};
+            }
+            store[ldudId][status] = value;
 
-        console.log(
-            "========== DOWNLOAD STARTED =========="
-        );
+            localStorage.setItem("bargeStatusEdits", JSON.stringify(store));
+        });
+
+        // Pull the barge status edits saved in localStorage
+        const savedEdits =
+            JSON.parse(localStorage.getItem("bargeStatusEdits") || "{}");
+
+        console.log("SENDING BARGE EDITS:", savedEdits);
+
+        fetch('/api/module/RP01/daily_progress_report_excel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                report_date: reportDate,
+                barge_status_edits: savedEdits
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Excel generation failed');
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `daily_progress_report_${reportDate}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            console.log("========== DOWNLOAD COMPLETE ==========");
+        })
+        .catch(err => {
+            console.error("EXCEL DOWNLOAD ERROR:", err);
+            alert('Failed to download Excel report');
+        });
     });
 </script>
 
