@@ -950,7 +950,7 @@ def vessel_delay_report():
 
                 AND (
                     last_anchor.discharge_completed IS NULL
-                    OR last_anchor.discharge_completed >= %s
+                    OR last_anchor.discharge_completed > %s
                     OR EXISTS (
                         SELECT 1
                         FROM ldud_barge_lines b
@@ -971,11 +971,11 @@ def vessel_delay_report():
                 vo.vessel_seq,
                 vo.vessel_name,
 
-                COALESCE(ld.delay_name,'') AS delay_name,
+                COALESCE(ld.delay_name, '') AS delay_name,
 
-                COALESCE(ld.crane_number,'All') AS crane_number,
+                COALESCE(ld.crane_number, 'All') AS crane_number,
 
-                SUM(COALESCE(ld.total_time_mins,0)) AS total_mins
+                SUM(COALESCE(ld.total_time_mins, 0)) AS total_mins
 
             FROM vessel_order vo
 
@@ -998,7 +998,7 @@ def vessel_delay_report():
                     TO_TIMESTAMP(
                         ld.end_datetime,
                         'YYYY-MM-DD"T"HH24:MI'
-                    ) >= %s
+                    ) > %s
 
                 )
 
@@ -1215,7 +1215,7 @@ def barge_status_report():
                 AND first_anchor.discharge_started < %s
                 AND (
                     last_anchor.discharge_completed IS NULL
-                    OR last_anchor.discharge_completed > %s
+                    OR last_anchor.discharge_completed >= %s
                     OR EXISTS (
                         SELECT 1
                         FROM ldud_barge_lines b
