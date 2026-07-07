@@ -2922,12 +2922,18 @@ def vessel_discharge_summary():
 
 @bp.route(
     '/api/module/RP01/daily_progress_report_excel',
-    methods=['GET']
+    methods=['GET', 'POST']
 )
 @login_required
 def daily_progress_report_excel():
 
-    report_date = request.args.get('report_date')
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        report_date = payload.get('report_date')
+        barge_status_edits = payload.get('barge_status_edits', {}) or {}
+    else:
+        report_date = request.args.get('report_date')
+        barge_status_edits = {}
 
     if not report_date:
         return jsonify({
@@ -3484,29 +3490,30 @@ LEFT JOIN ldud_vessel_operations lco
             value(row_no, c + 1, v['vessel_name'] or '', span=VESSEL_BLOCK_WIDTH - 1, align=left)
         row_no += 1
 
-        # =====================================================
+# =====================================================
         # BARGE STATUS
         # =====================================================
 
         barge_status_rows = [
             ('At Jetty -Under Discharge / Loading', 'at_jetty'),
             ('At Jetty - Waiting for Discharge', 'waiting_discharge'),
-            ('At R-19 - Waiting (Loaded)', None),
+            ('At R-19 - Waiting (Loaded)', 'r19_waiting_loaded'),
             ('In transit - From MV/Gull to Jetty (Loaded )', None),
             ('At Gull - Waiting (Loaded)', 'at_gull_loaded'),
             ('Under Loading at MV', 'under_loading'),
             ('Waiting for loading', 'waiting_loading'),
             ('Waiting at Jetty- Empty', 'waiting_empty_jetty'),
-            ('Empty at Gull / R-19', None),
+            ('Empty at Gull / R-19', 'empty_at_gull_r19'),
             ('In transit - from Jetty to  MV', 'in_transit_jetty_to_mv'),
             ('Breakdown / Off Hired/ Coastal', 'breakdown'),
+            ('Remarks', 'remarks'),
         ]
 
         barge_stats = {
             lid: {
                 'at_jetty': [], 'waiting_discharge': [], 'waiting_empty_jetty': [],
                 'at_gull_loaded': [], 'under_loading': [], 'waiting_loading': [],
-                'in_transit_jetty_to_mv': [], 'breakdown': [],
+                'in_transit_jetty_to_mv': [], 'breakdown': [], 'remarks': [],
             }
             for lid in vessel_ids
         }
@@ -3547,37 +3554,58 @@ LEFT JOIN ldud_vessel_operations lco
                 if status:
                     barge_stats[r['ldud_id']][status].append(bn)
 
+        EDITABLE_BARGE_KEYS = {
+            'r19_waiting_loaded',
+            'empty_at_gull_r19',
+            'in_transit_jetty_to_mv',
+            'breakdown',
+            'remarks',
+        }
+
+        remarks_row_no = None
+
         for label, key in barge_status_rows:
             caption(row_no, 1, label, span=2)
             for v in vessels:
                 c = vessel_col_map[v['id']]
                 ws.merge_cells(start_row=row_no, start_column=c,
                                 end_row=row_no, end_column=c + VESSEL_BLOCK_WIDTH - 1)
-                barges = None if key is None else ' + '.join(barge_stats.get(v['id'], {}).get(key, []))
-                text = barges if barges else 'NA'
-                data(row_no, c, text, align=left, span=VESSEL_BLOCK_WIDTH)
+
+                text = None
+
+                if key in EDITABLE_BARGE_KEYS:
+                    # Manual edit from the UI wins if present
+                    manual_value = (
+                        barge_status_edits.get(str(v['id']), {}).get(key)
+                    )
+                    if manual_value:
+                        text = manual_value
+                    elif key is not None:
+                        computed = barge_stats.get(v['id'], {}).get(key, [])
+                        text = ' + '.join(computed) if computed else None
+                elif key is not None:
+                    computed = barge_stats.get(v['id'], {}).get(key, [])
+                    text = ' + '.join(computed) if computed else None
+
+                data(row_no, c, text if text else 'NA', align=left, span=VESSEL_BLOCK_WIDTH)
+
+            if key == 'remarks':
+                remarks_row_no = row_no
+
             row_no += 1
 
         tall_block_end = row_no - 1
         for r in range(tall_block_start, tall_block_end + 1):
             ws.row_dimensions[r].height = TALL_ROW_HEIGHT
 
-        ws.merge_cells(start_row=row_no, start_column=1, end_row=row_no, end_column=2)
-        ws.merge_cells(start_row=row_no, start_column=3, end_row=row_no, end_column=5)
-        ws.merge_cells(start_row=row_no, start_column=6, end_row=row_no, end_column=8)
-        ws.merge_cells(start_row=row_no, start_column=9, end_row=row_no, end_column=11)
-        ws.merge_cells(start_row=row_no, start_column=12, end_row=row_no, end_column=14)
+        # Style the Remarks row LAST so nothing overwrites it afterward
+        if remarks_row_no:
+            last_col = vessel_col_map[vessels[-1]['id']] + VESSEL_BLOCK_WIDTH - 1
+            for c2 in range(1, last_col + 1):
+                ws.cell(row=remarks_row_no, column=c2).fill = yellow_fill
+            ws.row_dimensions[remarks_row_no].height = 20
 
-        cell = ws.cell(row=row_no, column=1)
-        cell.value = "Remarks:"
-        cell.font = header_font
-        cell.fill = yellow_fill
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-        for col in range(1, 15):
-            ws.cell(row=row_no, column=col).border = thin
-
-        row_no += 2
+        row_no += 1
 
         # =====================================================
         # CARGO TYPE WISE DISCHARGE
