@@ -1215,7 +1215,7 @@ def barge_status_report():
                 AND first_anchor.discharge_started < %s
                 AND (
                     last_anchor.discharge_completed IS NULL
-                    OR last_anchor.discharge_completed >= %s
+                    OR last_anchor.discharge_completed > %s
                     OR EXISTS (
                         SELECT 1
                         FROM ldud_barge_lines b
