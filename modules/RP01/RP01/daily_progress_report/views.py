@@ -674,19 +674,24 @@ def monthly_cargo_report():
 
         if ldud_ids:
             cur.execute("""
-                SELECT
-                    d.ldud_id,
-                    d.start_datetime,
-                    d.end_datetime,
-                    vdt.type AS delay_type
-                FROM ldud_delays d
-                JOIN vessel_delay_types vdt
-                    ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
-                WHERE d.ldud_id = ANY(%s)
-                AND vdt.type IN ('MOTHER VESSEL ACCOUNT', 'FORCE MAJEURE', 'MbPT')
-                AND d.start_datetime IS NOT NULL
-                AND d.end_datetime IS NOT NULL
-            """, (ldud_ids,))
+    SELECT
+    d.ldud_id,
+    d.start_datetime,
+    d.end_datetime,
+    d.crane_number,
+    vdt.type AS delay_type
+    FROM ldud_delays d
+    JOIN vessel_delay_types vdt
+        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+    WHERE d.ldud_id = ANY(%s)
+      AND vdt.type IN (
+            'MOTHER VESSEL ACCOUNT',
+            'FORCE MAJEURE',
+            'MbPT'
+      )
+      AND d.start_datetime IS NOT NULL
+      AND d.end_datetime IS NOT NULL
+""", (ldud_ids,))
 
             for r in cur.fetchall():
                 try:
@@ -694,7 +699,22 @@ def monthly_cargo_report():
                     d_end = datetime.fromisoformat(r["end_datetime"])
                 except (ValueError, TypeError):
                     continue
-                delay_map.setdefault(r["ldud_id"], []).append((d_start, d_end))
+
+                try:
+                    crane_count = int(r["crane_number"] or 0)
+                except:
+                    crane_count = 0
+
+                delay_map.setdefault(
+                    r["ldud_id"],
+                    []
+                ).append(
+                    (
+                        d_start,
+                        d_end,
+                        crane_count
+                    )
+                )
 
         print("\nTOTAL ROWS:", len(rows))
         print("VCN IDS:", vcn_ids)
@@ -770,45 +790,90 @@ def monthly_cargo_report():
             # ---------- W/W HRS CALCULATION ----------
             # Window for a given day_label D is 8:00 AM (D) -> 8:00 AM (D+1)
             d_start = vessel["discharge_started"]
-            d_end   = vessel["discharge_completed_dt"]  # may be None if still discharging
+            d_end = vessel["discharge_completed_dt"]  # None if still discharging
             vessel_id = vessel["ldud_id"]
             vessel_delays = delay_map.get(vessel_id, [])
 
-            total_ww_hours = 0.0  # running total in decimal hours, for the TOTAL row
+            total_ww_hours = 0.0
 
             for day in vessel["daily_data"]:
-                day_win_start = datetime.strptime(day["date_day"], "%d-%m-%Y").replace(
-                    hour=8, minute=0, second=0, microsecond=0
+
+                day_win_start = datetime.strptime(
+                    day["date_day"], "%d-%m-%Y"
+                ).replace(
+                    hour=8,
+                    minute=0,
+                    second=0,
+                    microsecond=0
                 )
+
                 day_win_end = day_win_start + timedelta(hours=24)
 
                 if d_start is None:
                     day["ww_hrs"] = "-"
+                    day["total_delay"] = "-"
                     continue
 
+                # ---------------- Gross Working Hours ----------------
                 gross_start = max(d_start, day_win_start)
                 gross_end = min(d_end, day_win_end) if d_end else day_win_end
 
-                gross_seconds = (gross_end - gross_start).total_seconds()
-                gross_hours = max(gross_seconds / 3600, 0)
+                gross_hours = max(
+                    (gross_end - gross_start).total_seconds() / 3600,
+                    0
+                )
                 gross_hours = min(gross_hours, 24)
+                # ---------------- Total Delay Hours ----------------
+                # ---------------- Total Delay Hours ----------------
+                deduction_hours = 0.0
 
-                # --- Subtract delay hours (Mother Vessel Agent / Force Majeure / MBP) ---
-                deduction_hours = 0
-                for delay_start, delay_end in vessel_delays:
-                    clip_start = max(delay_start, day_win_start)
-                    clip_end = min(delay_end, day_win_end)
-                    overlap = (clip_end - clip_start).total_seconds() / 3600
-                    if overlap > 0:
-                        deduction_hours += overlap
+                for delay_start, delay_end, crane_count in vessel_delays:
 
-                ww_hours = max(gross_hours - deduction_hours, 0)
+                    if not delay_start or not delay_end:
+                        continue
+
+                    overlap_start = max(delay_start, day_win_start)
+                    overlap_end = min(delay_end, day_win_end)
+
+                    if overlap_end <= overlap_start:
+                        continue
+
+                    overlap_hours = (
+                        overlap_end - overlap_start
+                    ).total_seconds() / 3600
+
+                    # Crane-wise adjustment
+                    if crane_count == 1:
+                        adjusted_hours = overlap_hours / 4
+
+                    elif crane_count == 2:
+                        adjusted_hours = overlap_hours / 2
+
+                    elif crane_count == 3:
+                        adjusted_hours = overlap_hours * 3 / 4
+
+                    else:       # 4 cranes
+                        adjusted_hours = overlap_hours
+
+                    deduction_hours += adjusted_hours
+
+                # Do not allow deduction greater than gross working hours
+                deduction_hours = min(deduction_hours, gross_hours)
+
+                day["total_delay"] = format_hrs_to_hms(deduction_hours)
+
+                ww_hours = gross_hours - deduction_hours
 
                 total_ww_hours += ww_hours
+
                 day["ww_hrs"] = format_hrs_to_hms(ww_hours)
 
-            # TOTAL row value for this vessel, same HH:MM:SS format
-            vessel["ww_hrs_total"] = format_hrs_to_hms(total_ww_hours) if total_ww_hours > 0 else "-"
+            # TOTAL W/W Hours
+            vessel["ww_hrs_total"] = (
+                format_hrs_to_hms(total_ww_hours)
+                if total_ww_hours > 0
+                else "-"
+            )
 
             # ---------- AVG DISCHARGE RATE PWWD ----------
             # = total discharged quantity / total W/W hours
@@ -3183,12 +3248,32 @@ def daily_progress_report_excel():
             """, (vessel_ids,))
 
             for r in cur.fetchall():
+
                 try:
                     d_start = datetime.fromisoformat(r["start_datetime"])
                     d_end = datetime.fromisoformat(r["end_datetime"])
                 except (ValueError, TypeError):
                     continue
-                delay_map.setdefault(r["ldud_id"], []).append((d_start, d_end))
+
+                crane_text = (r["crane_number"] or "").strip()
+
+                if crane_text:
+                    crane_count = len(
+                        [x for x in crane_text.split(",") if x.strip()]
+                    )
+                else:
+                    crane_count = 0
+
+                delay_map.setdefault(
+                    r["ldud_id"],
+                    []
+                ).append(
+                    (
+                        d_start,
+                        d_end,
+                        crane_count
+                    )
+                )
 
         def compute_ww_hours(ldud_id, discharge_started, discharge_completed, day_label):
             """Gross hours for the 8am(day_label)->8am(day_label+1) window,
