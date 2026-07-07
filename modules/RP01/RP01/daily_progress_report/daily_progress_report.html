@@ -1225,11 +1225,10 @@ function renderBargeStatusReport(data) {
         ["remarks", "Remarks"]
     ];
 
-    // Load any previously saved edits from localStorage
     const savedEdits = JSON.parse(localStorage.getItem("bargeStatusEdits") || "{}");
 
     let html = `
-    <div class="report-section" style="margin-top:30px">
+    <div id="barge-status-section" class="report-section" style="margin-top:30px">
 
         <h4>Barge Status Report</h4>
 
@@ -1243,13 +1242,11 @@ function renderBargeStatusReport(data) {
     `;
 
     Object.keys(data).forEach(ldudId => {
-
         html += `
             <th style="min-width:250px">
                 ${data[ldudId].vessel_name || `Vessel ${ldudId}`}
             </th>
         `;
-
     });
 
     html += `</tr>`;
@@ -1277,7 +1274,6 @@ function renderBargeStatusReport(data) {
 
             if (editableRows.includes(key)) {
 
-                // Prefer a saved edit over the server-computed value
                 const savedValue = savedEdits[ldudId] && savedEdits[ldudId][key];
                 const cellContent = (savedValue !== undefined && savedValue !== "")
                     ? savedValue
@@ -1299,13 +1295,11 @@ function renderBargeStatusReport(data) {
 
                 html += `
                     <td style="vertical-align:top">
-
                         ${
                             Array.isArray(value)
                                 ? (value.length ? value.join("<br>") : "-")
                                 : (value || "-")
                         }
-
                     </td>
                 `;
             }
@@ -1322,12 +1316,15 @@ function renderBargeStatusReport(data) {
     </div>
     `;
 
-    // Replace, don't append — avoids duplicate tables/rows on re-render
-    container.innerHTML = html;
+    // Remove any previously rendered barge status section only,
+    // then append the fresh one — leaves the rest of the container intact.
+    const existing = document.getElementById("barge-status-section");
+    if (existing) {
+        existing.remove();
+    }
+    container.innerHTML += html;
 
-    // Attach ONE delegated listener on the container instead of one per cell.
-    // Using capture phase because "blur" does not bubble.
-    // Guard against double-attaching if this function runs more than once.
+    // Delegated listener on the container (attach once)
     if (!container.dataset.bargeListenerAttached) {
 
         container.addEventListener("blur", function (e) {
@@ -1352,7 +1349,7 @@ function renderBargeStatusReport(data) {
 
             console.log("Saved locally:", ldudId, status, value);
 
-        }, true); // capture = true, required since blur doesn't bubble
+        }, true);
 
         container.dataset.bargeListenerAttached = "true";
     }
