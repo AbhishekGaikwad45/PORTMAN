@@ -842,6 +842,7 @@
         table = new Tabulator("#table", {
             height: "calc(100vh - 200px)",
             layout: "fitDataFill",
+            columnDefaults: {headerSort: false}, // sort was local-only (current page) — misleading with remote pagination
             columns: columns,
             pagination: true,
             paginationMode: "remote",
@@ -1088,6 +1089,8 @@
 
     async function saveAll() {
         cancelAutoSave();
+        if (!table || !currentEquipment) return;
+        const equip = currentEquipment; // snapshot: goBack() nulls the global while the save loop is awaiting
         showStatus('Saving...', 'saving');
         const rows = table.getRows();
         let savedCount = 0;
@@ -1099,8 +1102,9 @@
             // Skip unchanged existing rows
             if (data.id && !dirtyRowIds.has(String(data.id))) continue;
 
-            // Set equipment name
-            data.equipment_name = currentEquipment;
+            // Row keeps its own equipment; fall back to the snapshot. Reading the
+            // live global here saved null/wrong equipment on mid-save navigation.
+            data.equipment_name = data.equipment_name || equip;
 
             // Determine source type and id
             const vcnMatch = vcnOptions.find(v => v.label === data.source_display);
@@ -1126,14 +1130,19 @@
                         upd.quantity = null;
                         const scopeTxt = rej.scope_label ? ` ${rej.scope_label}` : ' trip quantity';
                         rejectionMessages.push(
-                            `${currentEquipment} / ${label}: quantity ${rej.attempted} exceeds remaining ${rej.remaining} for${scopeTxt} — quantity not saved.`);
+                            `${equip} / ${label}: quantity ${rej.attempted} exceeds remaining ${rej.remaining} for${scopeTxt} — quantity not saved.`);
                     } else if (rej.field === 'time') {
                         upd.from_time = null;
                         upd.to_time = null;
                         upd.diff_hrs = '';
-                        const c = rej.conflict || {};
-                        rejectionMessages.push(
-                            `${currentEquipment} / ${label}: time overlaps existing ${c.from_time || '?'}–${c.to_time || '?'} — From/To not saved.`);
+                        if (rej.reason === 'zero_duration') {
+                            rejectionMessages.push(
+                                `${equip} / ${label}: From and To are the same time (zero duration) — From/To not saved.`);
+                        } else {
+                            const c = rej.conflict || {};
+                            rejectionMessages.push(
+                                `${equip} / ${label}: time overlaps existing ${c.from_time || '?'}–${c.to_time || '?'} — From/To not saved.`);
+                        }
                     }
                 });
                 row.update(upd);

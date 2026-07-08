@@ -49,6 +49,8 @@ def save_data():
         return jsonify({'error': 'No permission'}), 403
 
     data = request.json
+    if not data.get('equipment_name'):
+        return jsonify({'error': 'Missing equipment name'}), 400
     data['created_by'] = session.get('username')
     result = model.save_line(data)   # {'id': ..., 'rejections': [...]}
     return jsonify(result)

@@ -99,6 +99,13 @@ def compute_rejections(data, limit_checks, overlap_candidates):
     # ── Time overlap vs same equipment + same date ───────────────────────────
     ft = clean.get('from_time'); tt = clean.get('to_time')
     if _hhmm_to_minutes(ft) is not None and _hhmm_to_minutes(tt) is not None:
+        # From == To reads as a 24h overnight range everywhere (calcDiffHrs,
+        # _intervals_overlap, reports) — reject it outright.
+        if _hhmm_to_minutes(ft) == _hhmm_to_minutes(tt):
+            clean['from_time'] = None
+            clean['to_time'] = None
+            rejections.append({'field': 'time', 'reason': 'zero_duration'})
+            return clean, rejections
         for cf, ct in overlap_candidates:
             if _intervals_overlap(ft, tt, cf, ct):
                 clean['from_time'] = None
@@ -443,7 +450,18 @@ def get_all_lines(page=1, size=20, equipment_name=None, filters=None):
 
     cur.execute(f'SELECT COUNT(*) as cnt FROM lueu_lines {where_sql}', params)
     total = cur.fetchone()['cnt']
-    cur.execute(f'SELECT * FROM lueu_lines {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s',
+    # Chronological, newest-first, honouring the shift-date convention:
+    # entry_date is the shift START date, so C-shift times before noon belong
+    # past midnight (+1440). Plain from_time DESC was tried and reverted
+    # (90e7619) because it sank those post-midnight C rows below A/B rows.
+    order_sql = '''ORDER BY entry_date DESC,
+                 CASE WHEN from_time ~ '^[0-2][0-9]:[0-5][0-9]$' THEN
+                      CAST(SPLIT_PART(from_time, ':', 1) AS INT) * 60
+                    + CAST(SPLIT_PART(from_time, ':', 2) AS INT)
+                    + CASE WHEN shift = 'C' AND from_time < '12:00' THEN 1440 ELSE 0 END
+                 ELSE -1 END DESC,
+                 id DESC'''
+    cur.execute(f'SELECT * FROM lueu_lines {where_sql} {order_sql} LIMIT %s OFFSET %s',
                 params + [size, offset])
     rows = [dict(r) for r in cur.fetchall()]
 
