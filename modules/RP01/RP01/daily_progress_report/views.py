@@ -674,19 +674,24 @@ def monthly_cargo_report():
 
         if ldud_ids:
             cur.execute("""
-                SELECT
-                    d.ldud_id,
-                    d.start_datetime,
-                    d.end_datetime,
-                    vdt.type AS delay_type
-                FROM ldud_delays d
-                JOIN vessel_delay_types vdt
-                    ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
-                WHERE d.ldud_id = ANY(%s)
-                AND vdt.type IN ('MOTHER VESSEL ACCOUNT', 'FORCE MAJEURE', 'MbPT')
-                AND d.start_datetime IS NOT NULL
-                AND d.end_datetime IS NOT NULL
-            """, (ldud_ids,))
+    SELECT
+    d.ldud_id,
+    d.start_datetime,
+    d.end_datetime,
+    d.crane_number,
+    vdt.type AS delay_type
+    FROM ldud_delays d
+    JOIN vessel_delay_types vdt
+        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+    WHERE d.ldud_id = ANY(%s)
+      AND vdt.type IN (
+            'MOTHER VESSEL ACCOUNT',
+            'FORCE MAJEURE',
+            'MbPT'
+      )
+      AND d.start_datetime IS NOT NULL
+      AND d.end_datetime IS NOT NULL
+""", (ldud_ids,))
 
             for r in cur.fetchall():
                 try:
@@ -694,7 +699,22 @@ def monthly_cargo_report():
                     d_end = datetime.fromisoformat(r["end_datetime"])
                 except (ValueError, TypeError):
                     continue
-                delay_map.setdefault(r["ldud_id"], []).append((d_start, d_end))
+
+                try:
+                    crane_count = int(r["crane_number"] or 0)
+                except:
+                    crane_count = 0
+
+                delay_map.setdefault(
+                    r["ldud_id"],
+                    []
+                ).append(
+                    (
+                        d_start,
+                        d_end,
+                        crane_count
+                    )
+                )
 
         print("\nTOTAL ROWS:", len(rows))
         print("VCN IDS:", vcn_ids)
@@ -770,45 +790,90 @@ def monthly_cargo_report():
             # ---------- W/W HRS CALCULATION ----------
             # Window for a given day_label D is 8:00 AM (D) -> 8:00 AM (D+1)
             d_start = vessel["discharge_started"]
-            d_end   = vessel["discharge_completed_dt"]  # may be None if still discharging
+            d_end = vessel["discharge_completed_dt"]  # None if still discharging
             vessel_id = vessel["ldud_id"]
             vessel_delays = delay_map.get(vessel_id, [])
 
-            total_ww_hours = 0.0  # running total in decimal hours, for the TOTAL row
+            total_ww_hours = 0.0
 
             for day in vessel["daily_data"]:
-                day_win_start = datetime.strptime(day["date_day"], "%d-%m-%Y").replace(
-                    hour=8, minute=0, second=0, microsecond=0
+
+                day_win_start = datetime.strptime(
+                    day["date_day"], "%d-%m-%Y"
+                ).replace(
+                    hour=8,
+                    minute=0,
+                    second=0,
+                    microsecond=0
                 )
+
                 day_win_end = day_win_start + timedelta(hours=24)
 
                 if d_start is None:
                     day["ww_hrs"] = "-"
+                    day["total_delay"] = "-"
                     continue
 
+                # ---------------- Gross Working Hours ----------------
                 gross_start = max(d_start, day_win_start)
                 gross_end = min(d_end, day_win_end) if d_end else day_win_end
 
-                gross_seconds = (gross_end - gross_start).total_seconds()
-                gross_hours = max(gross_seconds / 3600, 0)
+                gross_hours = max(
+                    (gross_end - gross_start).total_seconds() / 3600,
+                    0
+                )
                 gross_hours = min(gross_hours, 24)
+                # ---------------- Total Delay Hours ----------------
+                # ---------------- Total Delay Hours ----------------
+                deduction_hours = 0.0
 
-                # --- Subtract delay hours (Mother Vessel Agent / Force Majeure / MBP) ---
-                deduction_hours = 0
-                for delay_start, delay_end in vessel_delays:
-                    clip_start = max(delay_start, day_win_start)
-                    clip_end = min(delay_end, day_win_end)
-                    overlap = (clip_end - clip_start).total_seconds() / 3600
-                    if overlap > 0:
-                        deduction_hours += overlap
+                for delay_start, delay_end, crane_count in vessel_delays:
 
-                ww_hours = max(gross_hours - deduction_hours, 0)
+                    if not delay_start or not delay_end:
+                        continue
+
+                    overlap_start = max(delay_start, day_win_start)
+                    overlap_end = min(delay_end, day_win_end)
+
+                    if overlap_end <= overlap_start:
+                        continue
+
+                    overlap_hours = (
+                        overlap_end - overlap_start
+                    ).total_seconds() / 3600
+
+                    # Crane-wise adjustment
+                    if crane_count == 1:
+                        adjusted_hours = overlap_hours / 4
+
+                    elif crane_count == 2:
+                        adjusted_hours = overlap_hours / 2
+
+                    elif crane_count == 3:
+                        adjusted_hours = overlap_hours * 3 / 4
+
+                    else:       # 4 cranes
+                        adjusted_hours = overlap_hours
+
+                    deduction_hours += adjusted_hours
+
+                # Do not allow deduction greater than gross working hours
+                deduction_hours = min(deduction_hours, gross_hours)
+
+                day["total_delay"] = format_hrs_to_hms(deduction_hours)
+
+                ww_hours = gross_hours - deduction_hours
 
                 total_ww_hours += ww_hours
+
                 day["ww_hrs"] = format_hrs_to_hms(ww_hours)
 
-            # TOTAL row value for this vessel, same HH:MM:SS format
-            vessel["ww_hrs_total"] = format_hrs_to_hms(total_ww_hours) if total_ww_hours > 0 else "-"
+            # TOTAL W/W Hours
+            vessel["ww_hrs_total"] = (
+                format_hrs_to_hms(total_ww_hours)
+                if total_ww_hours > 0
+                else "-"
+            )
 
             # ---------- AVG DISCHARGE RATE PWWD ----------
             # = total discharged quantity / total W/W hours
@@ -950,7 +1015,7 @@ def vessel_delay_report():
 
                 AND (
                     last_anchor.discharge_completed IS NULL
-                    OR last_anchor.discharge_completed >= %s
+                    OR last_anchor.discharge_completed > %s
                     OR EXISTS (
                         SELECT 1
                         FROM ldud_barge_lines b
@@ -971,11 +1036,11 @@ def vessel_delay_report():
                 vo.vessel_seq,
                 vo.vessel_name,
 
-                COALESCE(ld.delay_name,'') AS delay_name,
+                COALESCE(ld.delay_name, '') AS delay_name,
 
-                COALESCE(ld.crane_number,'All') AS crane_number,
+                COALESCE(ld.crane_number, 'All') AS crane_number,
 
-                SUM(COALESCE(ld.total_time_mins,0)) AS total_mins
+                SUM(COALESCE(ld.total_time_mins, 0)) AS total_mins
 
             FROM vessel_order vo
 
@@ -998,7 +1063,7 @@ def vessel_delay_report():
                     TO_TIMESTAMP(
                         ld.end_datetime,
                         'YYYY-MM-DD"T"HH24:MI'
-                    ) >= %s
+                    ) > %s
 
                 )
 
@@ -2922,12 +2987,18 @@ def vessel_discharge_summary():
 
 @bp.route(
     '/api/module/RP01/daily_progress_report_excel',
-    methods=['GET']
+    methods=['GET', 'POST']
 )
 @login_required
 def daily_progress_report_excel():
 
-    report_date = request.args.get('report_date')
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        report_date = payload.get('report_date')
+        barge_status_edits = payload.get('barge_status_edits', {}) or {}
+    else:
+        report_date = request.args.get('report_date')
+        barge_status_edits = {}
 
     if not report_date:
         return jsonify({
@@ -3177,12 +3248,32 @@ def daily_progress_report_excel():
             """, (vessel_ids,))
 
             for r in cur.fetchall():
+
                 try:
                     d_start = datetime.fromisoformat(r["start_datetime"])
                     d_end = datetime.fromisoformat(r["end_datetime"])
                 except (ValueError, TypeError):
                     continue
-                delay_map.setdefault(r["ldud_id"], []).append((d_start, d_end))
+
+                crane_text = (r["crane_number"] or "").strip()
+
+                if crane_text:
+                    crane_count = len(
+                        [x for x in crane_text.split(",") if x.strip()]
+                    )
+                else:
+                    crane_count = 0
+
+                delay_map.setdefault(
+                    r["ldud_id"],
+                    []
+                ).append(
+                    (
+                        d_start,
+                        d_end,
+                        crane_count
+                    )
+                )
 
         def compute_ww_hours(ldud_id, discharge_started, discharge_completed, day_label):
             """Gross hours for the 8am(day_label)->8am(day_label+1) window,
@@ -3484,29 +3575,30 @@ LEFT JOIN ldud_vessel_operations lco
             value(row_no, c + 1, v['vessel_name'] or '', span=VESSEL_BLOCK_WIDTH - 1, align=left)
         row_no += 1
 
-        # =====================================================
+# =====================================================
         # BARGE STATUS
         # =====================================================
 
         barge_status_rows = [
             ('At Jetty -Under Discharge / Loading', 'at_jetty'),
             ('At Jetty - Waiting for Discharge', 'waiting_discharge'),
-            ('At R-19 - Waiting (Loaded)', None),
+            ('At R-19 - Waiting (Loaded)', 'r19_waiting_loaded'),
             ('In transit - From MV/Gull to Jetty (Loaded )', None),
             ('At Gull - Waiting (Loaded)', 'at_gull_loaded'),
             ('Under Loading at MV', 'under_loading'),
             ('Waiting for loading', 'waiting_loading'),
             ('Waiting at Jetty- Empty', 'waiting_empty_jetty'),
-            ('Empty at Gull / R-19', None),
+            ('Empty at Gull / R-19', 'empty_at_gull_r19'),
             ('In transit - from Jetty to  MV', 'in_transit_jetty_to_mv'),
             ('Breakdown / Off Hired/ Coastal', 'breakdown'),
+            ('Remarks', 'remarks'),
         ]
 
         barge_stats = {
             lid: {
                 'at_jetty': [], 'waiting_discharge': [], 'waiting_empty_jetty': [],
                 'at_gull_loaded': [], 'under_loading': [], 'waiting_loading': [],
-                'in_transit_jetty_to_mv': [], 'breakdown': [],
+                'in_transit_jetty_to_mv': [], 'breakdown': [], 'remarks': [],
             }
             for lid in vessel_ids
         }
@@ -3547,37 +3639,58 @@ LEFT JOIN ldud_vessel_operations lco
                 if status:
                     barge_stats[r['ldud_id']][status].append(bn)
 
+        EDITABLE_BARGE_KEYS = {
+            'r19_waiting_loaded',
+            'empty_at_gull_r19',
+            'in_transit_jetty_to_mv',
+            'breakdown',
+            'remarks',
+        }
+
+        remarks_row_no = None
+
         for label, key in barge_status_rows:
             caption(row_no, 1, label, span=2)
             for v in vessels:
                 c = vessel_col_map[v['id']]
                 ws.merge_cells(start_row=row_no, start_column=c,
                                 end_row=row_no, end_column=c + VESSEL_BLOCK_WIDTH - 1)
-                barges = None if key is None else ' + '.join(barge_stats.get(v['id'], {}).get(key, []))
-                text = barges if barges else 'NA'
-                data(row_no, c, text, align=left, span=VESSEL_BLOCK_WIDTH)
+
+                text = None
+
+                if key in EDITABLE_BARGE_KEYS:
+                    # Manual edit from the UI wins if present
+                    manual_value = (
+                        barge_status_edits.get(str(v['id']), {}).get(key)
+                    )
+                    if manual_value:
+                        text = manual_value
+                    elif key is not None:
+                        computed = barge_stats.get(v['id'], {}).get(key, [])
+                        text = ' + '.join(computed) if computed else None
+                elif key is not None:
+                    computed = barge_stats.get(v['id'], {}).get(key, [])
+                    text = ' + '.join(computed) if computed else None
+
+                data(row_no, c, text if text else 'NA', align=left, span=VESSEL_BLOCK_WIDTH)
+
+            if key == 'remarks':
+                remarks_row_no = row_no
+
             row_no += 1
 
         tall_block_end = row_no - 1
         for r in range(tall_block_start, tall_block_end + 1):
             ws.row_dimensions[r].height = TALL_ROW_HEIGHT
 
-        ws.merge_cells(start_row=row_no, start_column=1, end_row=row_no, end_column=2)
-        ws.merge_cells(start_row=row_no, start_column=3, end_row=row_no, end_column=5)
-        ws.merge_cells(start_row=row_no, start_column=6, end_row=row_no, end_column=8)
-        ws.merge_cells(start_row=row_no, start_column=9, end_row=row_no, end_column=11)
-        ws.merge_cells(start_row=row_no, start_column=12, end_row=row_no, end_column=14)
+        # Style the Remarks row LAST so nothing overwrites it afterward
+        if remarks_row_no:
+            last_col = vessel_col_map[vessels[-1]['id']] + VESSEL_BLOCK_WIDTH - 1
+            for c2 in range(1, last_col + 1):
+                ws.cell(row=remarks_row_no, column=c2).fill = yellow_fill
+            ws.row_dimensions[remarks_row_no].height = 20
 
-        cell = ws.cell(row=row_no, column=1)
-        cell.value = "Remarks:"
-        cell.font = header_font
-        cell.fill = yellow_fill
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-        for col in range(1, 15):
-            ws.cell(row=row_no, column=col).border = thin
-
-        row_no += 2
+        row_no += 1
 
         # =====================================================
         # CARGO TYPE WISE DISCHARGE

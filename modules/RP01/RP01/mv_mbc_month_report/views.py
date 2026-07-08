@@ -65,13 +65,33 @@ def _fetch_mv_monthly_data(
     """
     Pivot daily quantity data by Mother Vessel OR MBC.
 
-    Previous Month Qty logic:
-    Only shows last previous-month carry-forward qty
-    for the same MV/MBC.
+    CHANGES:
+    1. Date axis is now the FULL calendar range from_date..to_date
+       (previously only dates that had at least one row showed up).
+       to_date is capped at today so the current month never shows
+       future empty dates; a past month you pick still shows every
+       day of the range you selected.
+    2. Carry-forward fix: vessels/MBCs whose BL qty has not been
+       fully discharged yet now show up in the report even if they
+       have ZERO lueu_lines rows in the selected period (i.e.
+       discharge hasn't started). They appear with dashes for every
+       date and their outstanding qty sitting in Previous Month Qty.
     """
 
     conn = get_db()
     cur = get_cursor(conn)
+
+    # ---- resolve period, default to current month, cap at today ----
+    today = date.today()
+
+    if not to_date:
+        to_date = today.strftime('%Y-%m-%d')
+    if not from_date:
+        from_date = today.replace(day=1).strftime('%Y-%m-%d')
+
+    from_date_obj = datetime.strptime(from_date, '%Y-%m-%d').date()
+    to_date_obj   = min(datetime.strptime(to_date, '%Y-%m-%d').date(), today)
+    to_date = to_date_obj.strftime('%Y-%m-%d')
 
     sql = """
     SELECT
@@ -232,7 +252,6 @@ def _fetch_mv_monthly_data(
 
     vessel_meta = {}
     date_vessel_qty = defaultdict(lambda: defaultdict(float))
-    all_dates = set()
 
     for r in rows:
 
@@ -244,7 +263,6 @@ def _fetch_mv_monthly_data(
         dt = str(r['entry_date'])
         qty = _safe_float(r['quantity'])
 
-        all_dates.add(dt)
         date_vessel_qty[dt][v_name] += qty
 
         if v_name not in vessel_meta:
@@ -265,35 +283,28 @@ def _fetch_mv_monthly_data(
 
         if cn and cn not in vessel_meta[v_name]['cargo_names']:
             vessel_meta[v_name]['cargo_names'].append(cn)
-            
+
+    # ─────────────────────────────────────────────
+    # FULL CALENDAR DATE AXIS (from_date .. to_date)
+    # ─────────────────────────────────────────────
+
+    all_dates_list = []
+    _d = from_date_obj
+    while _d <= to_date_obj:
+        all_dates_list.append(_d.strftime('%Y-%m-%d'))
+        _d += timedelta(days=1)
 
     # ─────────────────────────────────────────────
     # Previous Month Continuing Qty
     # ─────────────────────────────────────────────
 
-    from datetime import date as _date
+    prev_month_end   = from_date_obj - timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
 
-    if from_date:
-        try:
-            fd               = datetime.strptime(from_date, '%Y-%m-%d').date()
-            prev_month_end   = fd - timedelta(days=1)
-            prev_month_start = prev_month_end.replace(day=1)
-        except Exception:
-            prev_month_start = None
-            prev_month_end   = None
-    else:
-        today            = _date.today()
-        prev_month_end   = today.replace(day=1) - timedelta(days=1)
-        prev_month_start = prev_month_end.replace(day=1)
+    conn2 = get_db()
+    cur2  = get_cursor(conn2)
 
-    if prev_month_start and prev_month_end:
-
-        current_month_vessels = set(vessel_meta.keys())
-
-        conn2 = get_db()
-        cur2  = get_cursor(conn2)
-
-        prev_sql = """
+    prev_sql = """
     SELECT
         COALESCE(
             CASE
@@ -327,57 +338,157 @@ def _fetch_mv_monthly_data(
       AND l.quantity IS NOT NULL
       AND l.quantity > 0
       AND l.source_type IN ('VCN', 'MBC')
-      AND l.entry_date >= %s
       AND l.entry_date <= %s
 
     GROUP BY header_name
-        """
+    """
 
-        cur2.execute(
-            prev_sql,
-            [
-                prev_month_start.strftime('%Y-%m-%d'),
-                prev_month_end.strftime('%Y-%m-%d')
-            ]
-        )
+    # NOTE: changed to "<= prev_month_end" (all-time up to period start)
+    # instead of a start/end window, so a vessel that has been
+    # sitting idle for several months still carries its full
+    # outstanding qty forward correctly.
+    cur2.execute(prev_sql, [prev_month_end.strftime('%Y-%m-%d')])
 
-        prev_rows = cur2.fetchall()
-        conn2.close()
+    prev_rows = cur2.fetchall()
+    conn2.close()
 
-        prev_qty_map = {}
+    prev_qty_map = {}
 
-        for pr in prev_rows:
-            vn = re.sub(
-                r'\s+', ' ',
-                (pr['header_name'] or '').strip()
-            ).upper()
+    for pr in prev_rows:
+        vn = re.sub(
+            r'\s+', ' ',
+            (pr['header_name'] or '').strip()
+        ).upper()
+        prev_qty_map[vn] = _safe_float(pr['prev_qty'])
 
-            # ONLY CONTINUING VESSELS
-            if vn in current_month_vessels:
-                prev_qty_map[vn] = _safe_float(pr['prev_qty'])
+    for v_name in vessel_meta:
+        vessel_meta[v_name]['previous_month_qty'] = prev_qty_map.get(v_name, 0)
 
-        for v_name in vessel_meta:
-            vessel_meta[v_name]['previous_month_qty'] = prev_qty_map.get(v_name, 0)
+    # ─────────────────────────────────────────────
+    # CARRY-FORWARD: BL exists but discharge hasn't
+    # started / hasn't finished, and it has ZERO rows
+    # in this period so it never entered vessel_meta above.
+    # ─────────────────────────────────────────────
+
+    conn3 = get_db()
+    cur3  = get_cursor(conn3)
+
+    carry_sql = """
+        SELECT
+            CONCAT(v.vcn_doc_num, ' / ', v.vessel_name) AS header_name,
+            'VCN' AS source_type,
+            vcd.cargo_name AS cargo_name,
+            COALESCE(vcargo.cargo_type, vcd.cargo_name) AS cargo_type,
+            'Mother Vessel' AS company,
+            COALESCE(vc_total.bl_quantity, 0) AS bl_qty,
+            COALESCE(disc_total.disc_qty, 0)  AS discharged_qty
+        FROM vcn_header v
+        LEFT JOIN vcn_cargo_declaration vcd
+            ON vcd.vcn_id = v.id
+        LEFT JOIN LATERAL (
+            SELECT cargo_type FROM vessel_cargo
+            WHERE cargo_name = vcd.cargo_name
+            LIMIT 1
+        ) vcargo ON true
+        LEFT JOIN (
+            SELECT vcn_id, SUM(bl_quantity) AS bl_quantity
+            FROM vcn_cargo_declaration
+            GROUP BY vcn_id
+        ) vc_total ON vc_total.vcn_id = v.id
+        LEFT JOIN (
+            SELECT source_id, SUM(quantity) AS disc_qty
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
+            GROUP BY source_id
+        ) disc_total ON disc_total.source_id = v.id
+
+        UNION ALL
+
+        SELECT
+            CONCAT(m.doc_num, ' / ', m.mbc_name) AS header_name,
+            'MBC' AS source_type,
+            COALESCE(m.cargo_name, mcd.cargo_name) AS cargo_name,
+            COALESCE(m.cargo_type, m.cargo_name)   AS cargo_type,
+            CASE
+                WHEN UPPER(COALESCE(mm.mbc_owner_name,'')) LIKE '%%SHIPPING%%' THEN 'JSW SHIPPING'
+                WHEN UPPER(COALESCE(mm.mbc_owner_name,'')) LIKE '%%INFRA%%'    THEN 'JSW INFRA'
+                ELSE 'OTHERS'
+            END AS company,
+            COALESCE(mc_total.quantity, 0) AS bl_qty,
+            COALESCE(disc_total.disc_qty, 0) AS discharged_qty
+        FROM mbc_header m
+        LEFT JOIN mbc_master mm
+            ON UPPER(TRIM(m.mbc_name)) = UPPER(TRIM(mm.mbc_name))
+        LEFT JOIN mbc_customer_details mcd
+            ON mcd.mbc_id = m.id
+        LEFT JOIN (
+            SELECT mbc_id, SUM(quantity) AS quantity
+            FROM mbc_customer_details
+            GROUP BY mbc_id
+        ) mc_total ON mc_total.mbc_id = m.id
+        LEFT JOIN (
+            SELECT source_id, SUM(quantity) AS disc_qty
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND source_type = 'MBC'
+            GROUP BY source_id
+        ) disc_total ON disc_total.source_id = m.id
+    """
+
+    cur3.execute(carry_sql)
+    carry_rows = cur3.fetchall()
+    conn3.close()
+
+    for cr in carry_rows:
+        v_name = re.sub(
+            r'\s+', ' ',
+            (cr['header_name'] or '').strip()
+        ).upper()
+
+        # already present via current-period lueu_lines rows -> skip
+        if v_name in vessel_meta:
+            continue
+
+        bl_qty        = _safe_float(cr['bl_qty'])
+        discharged    = _safe_float(cr['discharged_qty'])
+        outstanding   = round(bl_qty - discharged, 2)
+
+        # only carry it forward if there is still undischarged qty
+        if bl_qty <= 0 or outstanding <= 0:
+            continue
+
+        cn = (cr['cargo_name'] or '').strip()
+
+        vessel_meta[v_name] = {
+            'vessel_name':        v_name,
+            'cargo_name':         cn or '-',
+            'cargo_type':         cr['cargo_type'] or cn or '-',
+            'cargo_names':        [cn] if cn else [],
+            'bl_qty':             bl_qty,
+            'company':            cr['company'] or 'Mother Vessel',
+            'source_type':        cr['source_type'],
+            'previous_month_qty': discharged,   # everything discharged so far, carried in
+        }
+
+        # zero quantity for every date in the current axis -> shows as "-"
 
     # ─────────────────────────────────────────────
     # Sorting & Final Output
     # ─────────────────────────────────────────────
 
-    sorted_dates = sorted(all_dates, reverse=False)
-
     vessel_totals = {}
 
     for v_name in vessel_meta:
         total = 0
-        for dt in sorted_dates:
+        for dt in all_dates_list:
             total += date_vessel_qty[dt].get(v_name, 0)
         vessel_totals[v_name] = total
 
-
-
+    # keep a vessel if it had discharge activity in period OR is
+    # a valid carry-forward candidate (BL still outstanding)
     vessels_with_data = [
         v for v in vessel_meta.values()
         if vessel_totals.get(v['vessel_name'], 0) > 0
+        or round(v['bl_qty'] - v['previous_month_qty'], 2) > 0
     ]
 
     def _vessel_sort_key(v):
@@ -390,7 +501,6 @@ def _fetch_mv_monthly_data(
             return (1, num)
 
     for v in vessel_meta.values():
-
         if v['cargo_names']:
             v['cargo_name'] = ' / '.join(v['cargo_names'])
 
@@ -398,10 +508,10 @@ def _fetch_mv_monthly_data(
 
     return {
         'vessels': sorted_vessels,
-        'dates':   sorted_dates,
+        'dates':   all_dates_list,
         'data': {
             dt: dict(date_vessel_qty[dt])
-            for dt in sorted_dates
+            for dt in all_dates_list
         }
     }
 
