@@ -859,7 +859,10 @@ def _fetch_shift_wise_discharge(report_date):
         LEFT JOIN vessel_cargo vc
           ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
 
-        WHERE l.entry_date::date=%s
+        WHERE
+        NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+        AND NULLIF(BTRIM(l.entry_date), '') ~ '^\d{4}-\d{2}-\d{2}$'
+        AND TO_DATE(NULLIF(BTRIM(l.entry_date), ''), 'YYYY-MM-DD') = %s
 
         GROUP BY
             TRIM(l.shift),
