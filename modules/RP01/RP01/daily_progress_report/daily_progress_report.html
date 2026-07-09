@@ -748,16 +748,13 @@ vesselList.forEach(v => {
 
         let totalMvQty = 0;
 
-        vesselList.forEach(vessel => {
+        const firstVesselDay =
+            (vesselList[0].daily_data || [])
+            .find(d => d.date_day === currentDate);
 
-            const dayData =
-                (vessel.daily_data || [])
-                .find(d => d.date_day === currentDate);
-
-            if (dayData) {
-                totalMvQty += Number(dayData.total_qty || 0);
-            }
-        });
+        if (firstVesselDay) {
+            totalMvQty = Number(firstVesselDay.total_mv || 0);
+        }
 
         grandTotalQty += totalMvQty;
 
