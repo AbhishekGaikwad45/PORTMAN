@@ -150,6 +150,7 @@
                     <th>Status</th>
                     <th>Service</th>
                     <th>Cargo</th>
+                    <th>Material PO</th>
                     <th>Proof Docs</th>
                     <th>BL Date</th>
                     <th>BL Qty</th>
@@ -161,7 +162,7 @@
                 </tr>
             </thead>
             <tbody id="cargoLinesBody">
-                <tr><td colspan="13" class="empty-state">Select customer and click Load Billables</td></tr>
+                <tr><td colspan="14" class="empty-state">Select customer and click Load Billables</td></tr>
             </tbody>
         </table>
     </div>
@@ -360,7 +361,7 @@ function renderCargoCards(cards) {
     const tbody = document.getElementById('cargoLinesBody');
 
     if (!cards || cards.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" class="empty-state">No cargo handling lines found for this customer</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" class="empty-state">No cargo handling lines found for this customer</td></tr>';
         return;
     }
 
@@ -389,6 +390,7 @@ function renderCargoCards(cards) {
             <td><span style="background:${statusColor};color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;">${statusLabel}</span></td>
             <td style="font-size:10px;">${card.service_name || '-'}</td>
             <td>${card.cargo_name || '-'}</td>
+            <td style="font-size:10px;">${card.material_po || '-'}</td>
             <td>${proofCell}</td>
             <td style="font-size:10px;">${card.bl_date ? card.bl_date.substring(0, 10) : '-'}</td>
             <td style="text-align:right;">${totalQty.toFixed(2)}</td>
