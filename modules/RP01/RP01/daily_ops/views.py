@@ -1673,6 +1673,113 @@ def _fetch_cargo_statistics(report_date):
 
 
 
+# def _fetch_mbc_cargo_handling(report_date):
+
+#     target_date = report_date - timedelta(days=1)
+
+#     month_start = date(
+#         target_date.year,
+#         target_date.month,
+#         1
+#     )
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+
+#     def _period(start_date, end_date):
+
+#         cur.execute("""
+#             SELECT
+#                 h.cargo_type,
+#                 COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+#                 COALESCE(SUM(l.quantity),0) AS qty
+#             FROM lueu_lines l
+#             JOIN mbc_header h
+#                 ON h.id = l.source_id
+#             LEFT JOIN mbc_master m
+#                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
+#             WHERE l.is_deleted = false
+#               AND l.source_type = 'MBC'
+#               AND l.entry_date::date BETWEEN %s AND %s
+#             GROUP BY
+#                 h.cargo_type,
+#                 m.mbc_owner_name
+#             ORDER BY
+#                 owner,
+#                 cargo_type
+#         """, (start_date, end_date))
+
+#         return cur.fetchall()
+
+#     # Previous Day
+#     day_rows = _period(
+#         target_date,
+#         target_date
+#     )
+
+#     # Month To Date
+#     month_rows = _period(
+#         month_start,
+#         target_date
+#     )
+
+#     # Financial Year (Historical + Live)
+#     cur.execute("""
+#         SELECT
+#             cargo_type,
+#             owner,
+#             SUM(qty) AS qty
+#         FROM (
+
+#             ----------------------------------------------------------------
+#             -- Historical Data (April 2026)
+#             ----------------------------------------------------------------
+#             SELECT
+#                 'IBRM' AS cargo_type,
+#                 COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+#                 h.quantity AS qty
+#             FROM rp01_historical_lueu h
+#             LEFT JOIN mbc_master m
+#                 ON TRIM(UPPER(h.source_display)) = TRIM(UPPER(m.mbc_name))
+#             WHERE h.entry_date BETWEEN DATE '2026-04-01'
+#                                   AND DATE '2026-04-30'
+#               AND h.source_display NOT ILIKE 'MV%%'
+#               AND h.source_display NOT ILIKE 'CL Hengyang%%'
+
+#             UNION ALL
+
+#             ----------------------------------------------------------------
+#             -- Live Data (May onwards)
+#             ----------------------------------------------------------------
+#             SELECT
+#                 h.cargo_type,
+#                 COALESCE(m.mbc_owner_name, 'OTHERS') AS owner,
+#                 l.quantity AS qty
+#             FROM lueu_lines l
+#             JOIN mbc_header h
+#                 ON h.id = l.source_id
+#             LEFT JOIN mbc_master m
+#                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
+#             WHERE l.is_deleted = false
+#               AND l.source_type = 'MBC'
+#               AND l.entry_date::date BETWEEN DATE '2026-05-01' AND %s
+
+#         ) x
+#         GROUP BY
+#             cargo_type,
+#             owner
+#         ORDER BY
+#             owner,
+#             cargo_type
+#     """, (target_date,))
+
+#     year_rows = cur.fetchall()
+
+#     cur.close()
+#     conn.close()
+
+#     return day_rows, month_rows, year_rows
+
 def _fetch_mbc_cargo_handling(report_date):
 
     target_date = report_date - timedelta(days=1)
@@ -1700,7 +1807,10 @@ def _fetch_mbc_cargo_handling(report_date):
                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
             WHERE l.is_deleted = false
               AND l.source_type = 'MBC'
-              AND l.entry_date::date BETWEEN %s AND %s
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND BTRIM(l.entry_date) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD')
+                    BETWEEN %s AND %s
             GROUP BY
                 h.cargo_type,
                 m.mbc_owner_name
@@ -1712,16 +1822,10 @@ def _fetch_mbc_cargo_handling(report_date):
         return cur.fetchall()
 
     # Previous Day
-    day_rows = _period(
-        target_date,
-        target_date
-    )
+    day_rows = _period(target_date, target_date)
 
     # Month To Date
-    month_rows = _period(
-        month_start,
-        target_date
-    )
+    month_rows = _period(month_start, target_date)
 
     # Financial Year (Historical + Live)
     cur.execute("""
@@ -1762,7 +1866,10 @@ def _fetch_mbc_cargo_handling(report_date):
                 ON TRIM(m.mbc_name) = TRIM(h.mbc_name)
             WHERE l.is_deleted = false
               AND l.source_type = 'MBC'
-              AND l.entry_date::date BETWEEN DATE '2026-05-01' AND %s
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND BTRIM(l.entry_date) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD')
+                    BETWEEN DATE '2026-05-01' AND %s
 
         ) x
         GROUP BY
