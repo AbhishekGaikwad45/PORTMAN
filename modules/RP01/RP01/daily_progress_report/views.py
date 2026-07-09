@@ -644,6 +644,27 @@ def monthly_cargo_report():
         )
         rows = cur.fetchall()
 
+        # ---------------- TOTAL DISCHARGE PER DAY ----------------
+        cur.execute("""
+            SELECT
+                entry_date::date AS report_date,
+                SUM(quantity) AS total_mv
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE
+            AND quantity IS NOT NULL
+            AND entry_date::date BETWEEN %s::date AND %s::date
+            GROUP BY entry_date::date
+            ORDER BY entry_date::date
+        """, (
+            report_dt.replace(day=1).date(),   # Month start
+            report_dt.date()                   # Selected report date
+        ))
+
+        day_total_map = {
+            r["report_date"].strftime("%d-%m-%Y"): float(r["total_mv"] or 0)
+            for r in cur.fetchall()
+        }
+
         # --- Combined BL + Discharged + Balance, computed directly in SQL per vcn_id ---
         vcn_ids = list({r["vcn_id"] for r in rows if r["vcn_id"]})
 
@@ -764,7 +785,8 @@ def monthly_cargo_report():
                         "date_day": day,
                         "cargo_name": "",
                         "total_qty": 0,
-                        "ww_hrs": "-"
+                        "ww_hrs": "-",
+                        "total_mv": day_total_map.get(day, 0)
                     }
 
                 report_data[key]["daily_data"][day]["total_qty"] += float(row["total_qty"] or 0)
