@@ -126,6 +126,7 @@ from modules.PSOM01 import bp as psom01_bp, MODULE_INFO as psom01_info
 
 # Import reports module
 from modules.RP01 import bp as rp01_bp, MODULE_INFO as rp01_info
+from modules.RP02 import bp as rp02_bp, MODULE_INFO as rp02_info
 
 # Import audit logs module
 from modules.AUD01 import bp as aud01_bp, MODULE_INFO as aud01_info
@@ -186,6 +187,7 @@ register_module(psom01_info['code'], psom01_info['name'], psom01_bp)
 
 # Register reports module
 register_module(rp01_info['code'], rp01_info['name'], rp01_bp)
+register_module(rp02_info['code'], rp02_info['name'], rp02_bp)
 
 # Register audit logs module
 register_module(aud01_info['code'], aud01_info['name'], aud01_bp)
