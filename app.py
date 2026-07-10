@@ -247,6 +247,14 @@ import sap_inbound
 sap_inbound.ensure_token_table()
 app.add_url_rule('/api/sap/callback', view_func=sap_inbound.sap_callback_view, methods=['POST'])
 
+# One-shot self-heal: bills rejected before rejection released cargo tracking
+# left their declarations stuck as non-billable. Idempotent — safe every boot.
+from modules.FIN01 import model as fin01_model
+try:
+    fin01_model.reconcile_rejected_bill_sources()
+except Exception:
+    app.logger.exception('FIN01 rejected-bill reconciliation failed at startup')
+
 
 @app.route('/')
 def index():

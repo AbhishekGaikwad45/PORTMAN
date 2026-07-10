@@ -188,6 +188,39 @@ def _service_sale_flag(lines, svc_map):
 # Item builder (shared by all non-reversal document types)
 # ---------------------------------------------------------------------------
 
+# Fields that are summed when merging; everything else must match for two
+# items to collapse into one SAP line (GL, tax code, HSN, GST/TDS/TCS GLs,
+# centers, plant, text, UOM).
+_MERGE_SUM_FIELDS = ('CGST_AMT', 'SGST_AMT', 'IGST_AMT', 'TDS_amount', 'TCS_amount')
+_MERGE_SKIP_FIELDS = _MERGE_SUM_FIELDS + (
+    'Amount', 'Quantity', 'Unit_Price', 'Round_off_GL', 'Round_off_Value')
+
+
+def _merge_same_gl_items(items):
+    """Collapse items posting to the same GL into a single SAP line.
+
+    SAP expects one ITEM per GL account: amounts, GST, TDS/TCS and quantity
+    are summed. Unit_Price survives only when uniform across the merged
+    lines — Amount is authoritative, so mixed rates leave it blank.
+    """
+    merged = {}
+    for it in items:
+        key = tuple(v for k, v in it.items() if k not in _MERGE_SKIP_FIELDS)
+        tgt = merged.get(key)
+        if tgt is None:
+            merged[key] = it
+            continue
+        tgt['Amount'] = _fmt_amount_required(float(tgt['Amount'] or 0) + float(it['Amount'] or 0))
+        for f in _MERGE_SUM_FIELDS:
+            tgt[f] = _fmt_amount(float(tgt[f] or 0) + float(it[f] or 0))
+        if tgt['Quantity'] and it['Quantity']:
+            tgt['Quantity'] = f"{float(tgt['Quantity']) + float(it['Quantity']):.3f}"
+        else:
+            tgt['Quantity'] = ''
+        if tgt['Unit_Price'] != it['Unit_Price']:
+            tgt['Unit_Price'] = ''
+    return list(merged.values())
+
 def _build_items(lines, reference, amount_field='line_amount',
                  config_defaults=None, svc_map=None, doc_type='DR',
                  round_off=0):
@@ -303,6 +336,9 @@ def _build_items(lines, reference, amount_field='line_amount',
             'Round_off_GL':     '',
             'Round_off_Value':  '',
         })
+
+    # Merge lines posting to the same GL before round-off placement.
+    items = _merge_same_gl_items(items)
 
     # Apply header-level round-off to the first item (positive sign, per SAP).
     if items and float(round_off or 0):

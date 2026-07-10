@@ -43,6 +43,12 @@ def next_invoice_seq(cur, doc_series, financial_year):
 
 # ===== CARGO BILLING HELPERS =====
 
+_CARGO_TABLES = {
+    'VCN_IMPORT': ('vcn_cargo_declaration', 'bl_quantity'),
+    'VCN_EXPORT': ('vcn_export_cargo_declaration', 'bl_quantity'),
+    'MBC':        ('mbc_customer_details', 'quantity'),
+}
+
 def _mark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qty, bill_id):
     """Increment billed_quantity on the correct declaration row."""
     if not cargo_source_type or not cargo_source_id:
@@ -88,12 +94,7 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
     if not cargo_source_type or not cargo_source_id:
         return
     bill_qty = float(bill_qty or 0)
-    table_map = {
-        'VCN_IMPORT': ('vcn_cargo_declaration', 'bl_quantity'),
-        'VCN_EXPORT': ('vcn_export_cargo_declaration', 'bl_quantity'),
-        'MBC':        ('mbc_customer_details', 'quantity'),
-    }
-    entry = table_map.get(cargo_source_type)
+    entry = _CARGO_TABLES.get(cargo_source_type)
     if not entry:
         return
     table, total_col = entry
@@ -111,6 +112,84 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
             END
         WHERE id = %s
     ''', [bill_qty, bill_qty, bill_qty, cargo_source_id])
+
+
+def release_bill_sources(cur, bill_id, only_if_still_linked=False):
+    """Reverse cargo + service-record billed tracking held by one bill
+    (used on bill rejection and by the startup reconciliation).
+
+    Clears the declaration's bill_id link afterwards so a second pass can
+    never release the same quantities twice.
+
+    only_if_still_linked: skip cargo lines whose declaration no longer points
+    at this bill — keeps the startup reconciliation idempotent.
+    Runs inside the caller's transaction — does NOT commit."""
+    cur.execute('''
+        SELECT cargo_source_type, cargo_source_id, quantity
+        FROM bill_lines
+        WHERE bill_id = %s AND cargo_source_type IS NOT NULL AND cargo_source_id IS NOT NULL
+    ''', [bill_id])
+    for row in cur.fetchall():
+        entry = _CARGO_TABLES.get(row['cargo_source_type'])
+        if not entry:
+            continue
+        table = entry[0]
+        if only_if_still_linked:
+            cur.execute(f'SELECT 1 FROM {table} WHERE id = %s AND bill_id = %s',
+                        [row['cargo_source_id'], bill_id])
+            if not cur.fetchone():
+                continue
+        _unmark_cargo_source_billed(
+            cur,
+            row['cargo_source_type'],
+            row['cargo_source_id'],
+            float(row['quantity'] or 0)
+        )
+        cur.execute(f'UPDATE {table} SET bill_id = NULL WHERE id = %s AND bill_id = %s',
+                    [row['cargo_source_id'], bill_id])
+    cur.execute('UPDATE service_records SET is_billed=0, bill_id=NULL WHERE bill_id = %s',
+                [bill_id])
+
+
+def reapply_bill_sources(cur, bill_id):
+    """Re-mark cargo + service records as billed when a rejected bill is
+    resubmitted for approval. Mirror image of release_bill_sources.
+    Runs inside the caller's transaction — does NOT commit."""
+    cur.execute('''
+        SELECT cargo_source_type, cargo_source_id, quantity, service_record_id
+        FROM bill_lines
+        WHERE bill_id = %s
+    ''', [bill_id])
+    for row in cur.fetchall():
+        _mark_cargo_source_billed(
+            cur,
+            row['cargo_source_type'],
+            row['cargo_source_id'],
+            float(row['quantity'] or 0),
+            bill_id
+        )
+        if row.get('service_record_id'):
+            cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s',
+                        [bill_id, row['service_record_id']])
+
+
+def reconcile_rejected_bill_sources():
+    """Startup self-heal: bills rejected before rejection started releasing
+    cargo tracking still hold billed_quantity on their declarations, keeping
+    them stuck as non-billable. Release them exactly once.
+
+    Idempotent: only touches declaration rows whose bill_id still points at
+    the rejected bill, and release_bill_sources clears that link afterwards.
+    ponytail: a declaration partially billed by two bills where the ACTIVE
+    bill marked last is skipped (bill_id points elsewhere) — safe direction,
+    reject that bill again through the UI if it ever comes up."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("SELECT id FROM bill_header WHERE bill_status = 'Rejected'")
+    for row in cur.fetchall():
+        release_bill_sources(cur, row['id'], only_if_still_linked=True)
+    conn.commit()
+    conn.close()
 
 
 def unbill_invoice_sources(cur, invoice_id):

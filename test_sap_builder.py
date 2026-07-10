@@ -160,3 +160,73 @@ def test_fdcn_standalone_falls_back_to_doc_number(monkeypatch):
     assert record['Document_type'] == 'DR'
     assert record['Reference'] == 'DPPLDN/26-27/9'
     assert record['ITEM'][0]['Reference'] == 'DPPLDN/26-27/9'
+
+
+# --- Same-GL lines merge into a single SAP ITEM ------------------------------
+# Prod case DPPL/26-27/158: five cargo lines, identical GL/tax/HSN/rate,
+# must post as one line with summed Amount, GST and Quantity.
+
+def test_same_gl_lines_merge_into_one_item():
+    quantities = [7787.0, 7762.0, 3765.0, 3765.0, 7833.0]
+    lines = [
+        _scrap_line(
+            line_amount=round(q * 174.46, 2),
+            cgst_amount=round(q * 174.46 * 0.09, 2),
+            sgst_amount=round(q * 174.46 * 0.09, 2),
+            quantity=q, unit_price=174.46,
+            service_name='Cargo Handling Unloading',
+        )
+        for q in quantities
+    ]
+    items = sap_builder._build_items(
+        lines, 'DPPL/26-27/158',
+        config_defaults=CONFIG, svc_map={'SCRAP': SCRAP_SVC},
+    )
+    assert len(items) == 1
+    it = items[0]
+    assert it['Amount'] == f"{sum(round(q * 174.46, 2) for q in quantities):.2f}"
+    assert it['CGST_AMT'] == f"{sum(round(q * 174.46 * 0.09, 2) for q in quantities):.2f}"
+    assert it['Quantity'] == f"{sum(quantities):.3f}"
+    assert it['Unit_Price'] == '174.46'   # uniform rate survives the merge
+
+
+def test_different_gl_lines_do_not_merge():
+    other_svc = dict(SCRAP_SVC, sap_gl_account='4101076010')
+    lines = [
+        _scrap_line(cgst_amount=18000.0, sgst_amount=18000.0),
+        _scrap_line(cgst_amount=18000.0, sgst_amount=18000.0, service_code='CHGU01'),
+    ]
+    items = sap_builder._build_items(
+        lines, 'DPPL/26-27/158',
+        config_defaults=CONFIG, svc_map={'SCRAP': SCRAP_SVC, 'CHGU01': other_svc},
+    )
+    assert len(items) == 2
+
+
+def test_merged_mixed_rates_blank_unit_price():
+    lines = [
+        _scrap_line(line_amount=1000.0, quantity=10.0, unit_price=100.0),
+        _scrap_line(line_amount=1100.0, quantity=10.0, unit_price=110.0),
+    ]
+    items = sap_builder._build_items(
+        lines, 'DPPL/26-27/158',
+        config_defaults=CONFIG, svc_map={'SCRAP': SCRAP_SVC},
+    )
+    assert len(items) == 1
+    assert items[0]['Amount'] == '2100.00'
+    assert items[0]['Unit_Price'] == ''   # Amount is authoritative on mixed rates
+
+
+def test_round_off_lands_on_merged_first_item():
+    lines = [
+        _scrap_line(line_amount=1000.0, quantity=10.0),
+        _scrap_line(line_amount=500.0, quantity=5.0),
+    ]
+    items = sap_builder._build_items(
+        lines, 'DPPL/26-27/158',
+        config_defaults=CONFIG, svc_map={'SCRAP': SCRAP_SVC},
+        round_off=0.12,
+    )
+    assert len(items) == 1
+    assert items[0]['Round_off_GL'] == '5501260001'
+    assert items[0]['Round_off_Value'] == '0.12'

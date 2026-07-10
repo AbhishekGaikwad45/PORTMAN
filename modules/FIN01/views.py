@@ -364,6 +364,11 @@ def submit_bill():
     bill_id = request.json.get('id')
     conn = get_db()
     cur = get_cursor(conn)
+    cur.execute('SELECT bill_status FROM bill_header WHERE id=%s FOR UPDATE', [bill_id])
+    row = cur.fetchone()
+    if row and row['bill_status'] == 'Rejected':
+        # Rejection released the cargo — re-mark it billed before resubmitting
+        model.reapply_bill_sources(cur, bill_id)
     cur.execute('''UPDATE bill_header
         SET bill_status='Pending Approval'
         WHERE id=%s''', [bill_id])
@@ -401,6 +406,14 @@ def reject_bill():
     reason = request.json.get('reason', '')
     conn = get_db()
     cur = get_cursor(conn)
+    cur.execute('SELECT bill_status FROM bill_header WHERE id=%s FOR UPDATE', [bill_id])
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Bill not found'})
+    if row['bill_status'] != 'Rejected':
+        # Release cargo/service billed tracking so the lines are billable again
+        model.release_bill_sources(cur, bill_id)
     cur.execute('''UPDATE bill_header
         SET bill_status='Rejected', rejection_reason=%s
         WHERE id=%s''', [reason, bill_id])
