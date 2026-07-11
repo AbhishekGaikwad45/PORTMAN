@@ -432,45 +432,5 @@ def post_sap():
     })
 
 
-@bp.route('/api/module/FDCN01/fetch-irn', methods=['POST'])
-@login_required
-def fetch_irn():
-    """Fetch IRN details from SAP (populated by Cygnet after e-invoice generation)"""
-    perms = get_perms()
-    if not perms.get('can_edit'):
-        return jsonify({'success': False, 'error': 'No permission'}), 403
-
-    fdcn_id = request.json.get('id')
-    header = model.get_fdcn_by_id(fdcn_id)
-    if not header:
-        return jsonify({'success': False, 'error': 'Document not found'}), 404
-
-    if not header.get('sap_document_number'):
-        return jsonify({'success': False, 'error': 'Document not yet posted to SAP'})
-
-    if header.get('gst_irn'):
-        return jsonify({'success': False, 'error': 'IRN already present',
-                        'irn': header['gst_irn']})
-
-    doc_type_label = 'DebitNote' if header['doc_type'] == 'DN' else 'CreditNote'
-    result = sap_client.fetch_irn_from_sap(
-        header.get('doc_number', ''), doc_type_label, fdcn_id,
-        session.get('username')
-    )
-
-    if result['ok']:
-        model.update_gst_details(
-            fdcn_id, result['irn'], result['ack_no'],
-            result.get('ack_date') or result.get('irn_date'),
-            None  # qr_code not fetched
-        )
-
-    return jsonify({
-        'success': result['ok'],
-        'irn': result.get('irn', ''),
-        'ack_no': result.get('ack_no', ''),
-        'irn_date': result.get('irn_date', ''),
-        'message': result['message'],
-    })
 
 

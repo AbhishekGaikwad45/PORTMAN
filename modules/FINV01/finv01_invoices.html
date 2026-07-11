@@ -138,9 +138,6 @@
                 {% elif row.invoice_status == 'SAP Failed' and not row.sap_document_number %}
                 <button class="btn btn-retry" onclick="pushToSAP({{ row.id }}, this)" style="font-size:10px;padding:3px 8px;" title="All auto-retries used while SAP was unavailable. Click to send manually.">Manual Send</button>
                 {% endif %}
-                {% if row.sap_document_number and not row.gst_irn %}
-                <button class="btn btn-success" onclick="fetchIRN({{ row.id }})" style="font-size:10px;padding:3px 8px;">Fetch IRN</button>
-                {% endif %}
                 {% if row.invoice_status in ('Posted to SAP', 'Posted to GST') %}
                     {% if row.within_cancel_window %}
                 <button class="btn btn-danger" onclick="cancelInSAP({{ row.id }})" style="font-size:10px;padding:3px 8px;" title="FB08 reversal (within 24h). Queues the reversal; cancels linked bills and returns cargo to unbilled once SAP confirms.">Cancel</button>
@@ -315,23 +312,6 @@ async function exportGSTR1() {
 
 function printInvoice(id) {
     window.open(`/module/FINV01/invoice/print/${id}`, '_blank');
-}
-
-async function fetchIRN(id) {
-    try {
-        const res = await fetch('/api/module/FINV01/invoice/fetch-irn', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({invoice_id: id})
-        });
-        const result = await res.json();
-        if (result.success) {
-            alert('IRN fetched: ' + (result.irn || 'Success'));
-            location.reload();
-        } else {
-            alert(result.message || result.error || 'IRN not yet available');
-        }
-    } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function pushToSAP(id, btn) {

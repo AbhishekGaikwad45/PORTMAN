@@ -104,9 +104,6 @@
         if ((row.doc_status === 'Approved' || row.doc_status === 'SAP Failed') && canEdit && !row.sap_document_number) {
             btns += `<button class="btn" style="background:#e67e22;color:white;padding:2px 8px;font-size:10px;margin-right:3px" onclick="event.stopPropagation();postSAP(${row.id})">${row.doc_status === 'SAP Failed' ? 'Retry SAP' : 'Post SAP'}</button>`;
         }
-        if (row.sap_document_number && !row.gst_irn && canEdit) {
-            btns += `<button class="btn" style="background:#27ae60;color:white;padding:2px 8px;font-size:10px;margin-right:3px" onclick="event.stopPropagation();fetchIRN(${row.id})">Fetch IRN</button>`;
-        }
         if (row.doc_status !== 'Cancelled' && row.id) {
             btns += `<button class="btn" style="background:#95a5a6;color:white;padding:2px 8px;font-size:10px" onclick="event.stopPropagation();printDoc(${row.id})">Print</button>`;
         }
@@ -195,15 +192,6 @@
         const d = await r.json();
         alert(d.message || (d.success ? 'Posted to SAP' : 'Error'));
         if (d.success) loadData();
-    }
-
-    async function fetchIRN(id) {
-        try {
-            const r = await fetch('/api/module/FDCN01/fetch-irn', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
-            const d = await r.json();
-            if (d.success) { alert('IRN fetched: ' + (d.irn || 'Success')); loadData(); }
-            else { alert(d.message || d.error || 'IRN not yet available'); }
-        } catch(e) { alert('Error: ' + e.message); }
     }
 
     function printDoc(id) { window.open(`/module/FDCN01/print/${id}`, '_blank'); }

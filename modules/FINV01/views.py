@@ -866,50 +866,6 @@ def retry_sap():
     })
 
 
-@bp.route('/api/module/FINV01/invoice/fetch-irn', methods=['POST'])
-def fetch_irn():
-    """Fetch IRN details from SAP (populated by Cygnet after e-invoice generation)"""
-    if 'user_id' not in session:
-        return jsonify({'success': False, 'error': 'Not logged in'}), 401
-
-    invoice_id = request.json.get('invoice_id')
-    invoice = model.get_invoice_by_id(invoice_id)
-    if not invoice:
-        return jsonify({'success': False, 'error': 'Invoice not found'}), 404
-
-    if not invoice.get('sap_document_number'):
-        return jsonify({'success': False, 'error': 'Invoice not yet posted to SAP'})
-
-    if invoice.get('gst_irn'):
-        return jsonify({'success': False, 'error': 'IRN already present',
-                        'irn': invoice['gst_irn']})
-
-    result = sap_client.fetch_irn_from_sap(
-        invoice['invoice_number'], 'Invoice', invoice_id,
-        session.get('username')
-    )
-
-    if result['ok']:
-        conn = get_db()
-        cur = get_cursor(conn)
-        cur.execute('''UPDATE invoice_header
-            SET gst_irn=%s, gst_ack_number=%s, gst_ack_date=%s
-            WHERE id=%s''',
-            [result['irn'], result['ack_no'],
-             result.get('ack_date') or result.get('irn_date') or None,
-             invoice_id])
-        conn.commit()
-        conn.close()
-
-    return jsonify({
-        'success': result['ok'],
-        'irn': result.get('irn', ''),
-        'ack_no': result.get('ack_no', ''),
-        'irn_date': result.get('irn_date', ''),
-        'message': result['message'],
-    })
-
-
 @bp.route('/api/module/FINV01/invoice/cancel-sap', methods=['POST'])
 def cancel_invoice_sap():
     """Cancel/reverse an SAP-posted invoice (FB08 rule: within 24 hours only)"""

@@ -389,3 +389,170 @@ def delete_row(row_id):
         conn.commit()
     finally:
         conn.close()
+
+
+# ── Bill Master Report (uploaded rows + live invoice-derived rows) ──────────
+
+# ponytail: hardcoded billing go-live boundary — the uploaded bill master
+# covers everything before invoice DPPL/26-27/158; rows from that invoice
+# onward are derived live from invoice/cargo data. Bump if the boundary moves.
+LIVE_FROM_FY = '2026-27'
+LIVE_FROM_SEQ = 158
+
+# One row per invoiced cargo declaration line, shaped like the bill master.
+# Discharge timings reuse the RP01 cargo-report logic (ldud_anchorage /
+# mbc_discharge_port_lines); Material PO comes from the latest LDUD per VCN
+# (vessels) or the MBC customer detail line (MBCs).
+_LIVE_ROWS_SQL = """
+WITH inv AS (
+    SELECT id, invoice_number, financial_year, invoice_date, customer_name
+    FROM invoice_header
+    WHERE invoice_status <> 'Cancelled'
+      AND (financial_year > %(fy)s
+           OR (financial_year = %(fy)s AND COALESCE(doc_series_seq, 0) >= %(seq)s))
+),
+cn AS (
+    SELECT original_invoice_number, STRING_AGG(doc_number, ', ') AS credit_notes
+    FROM fdcn_header
+    WHERE doc_type = 'CN' AND COALESCE(doc_status, '') <> 'Cancelled'
+      AND COALESCE(original_invoice_number, '') <> ''
+    GROUP BY original_invoice_number
+),
+ldud_latest AS (
+    SELECT DISTINCT ON (vcn_id) vcn_id, id AS ldud_id, material_po_number
+    FROM ldud_header
+    ORDER BY vcn_id, id DESC
+),
+ldud_times AS (
+    SELECT ldud_id,
+           MIN(discharge_started) AS commence,
+           CASE WHEN SUM(CASE WHEN discharge_started IS NOT NULL
+                               AND discharge_commenced IS NULL THEN 1 ELSE 0 END) > 0
+                THEN NULL ELSE MAX(discharge_commenced) END AS completed
+    FROM ldud_anchorage
+    GROUP BY ldud_id
+),
+mbc_times AS (
+    SELECT mbc_id,
+           MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS commence,
+           MAX(NULLIF(TRIM(unloading_completed), '')::timestamp) AS completed
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+)
+SELECT inv.financial_year, inv.invoice_date, inv.invoice_number, inv.customer_name,
+       vh.vessel_name, ll.material_po_number AS material_po,
+       vh.cargo_type, cd.cargo_name, cd.bl_quantity AS bl_qty, vh.load_port,
+       'MV' AS mv_mbc,
+       lt.commence::text AS discharge_commence,
+       lt.completed::text AS discharge_completed,
+       cn.credit_notes
+FROM inv
+JOIN invoice_bill_mapping ibm ON ibm.invoice_id = inv.id
+JOIN bill_lines bl ON bl.bill_id = ibm.bill_id AND bl.cargo_source_type = 'VCN_IMPORT'
+JOIN vcn_cargo_declaration cd ON cd.id = bl.cargo_source_id
+JOIN vcn_header vh ON vh.id = cd.vcn_id
+LEFT JOIN ldud_latest ll ON ll.vcn_id = cd.vcn_id
+LEFT JOIN ldud_times lt ON lt.ldud_id = ll.ldud_id
+LEFT JOIN cn ON cn.original_invoice_number = inv.invoice_number
+
+UNION ALL
+
+SELECT inv.financial_year, inv.invoice_date, inv.invoice_number, inv.customer_name,
+       vh.vessel_name, ll.material_po_number AS material_po,
+       vh.cargo_type, cd.cargo_name, cd.bl_quantity AS bl_qty, vh.load_port,
+       'MV' AS mv_mbc,
+       lt.commence::text AS discharge_commence,
+       lt.completed::text AS discharge_completed,
+       cn.credit_notes
+FROM inv
+JOIN invoice_bill_mapping ibm ON ibm.invoice_id = inv.id
+JOIN bill_lines bl ON bl.bill_id = ibm.bill_id AND bl.cargo_source_type = 'VCN_EXPORT'
+JOIN vcn_export_cargo_declaration cd ON cd.id = bl.cargo_source_id
+JOIN vcn_header vh ON vh.id = cd.vcn_id
+LEFT JOIN ldud_latest ll ON ll.vcn_id = cd.vcn_id
+LEFT JOIN ldud_times lt ON lt.ldud_id = ll.ldud_id
+LEFT JOIN cn ON cn.original_invoice_number = inv.invoice_number
+
+UNION ALL
+
+SELECT inv.financial_year, inv.invoice_date, inv.invoice_number, inv.customer_name,
+       mh.mbc_name AS vessel_name, cd.material_po,
+       mh.cargo_type, cd.cargo_name, cd.quantity AS bl_qty, mh.load_port,
+       'MBC' AS mv_mbc,
+       mt.commence::text AS discharge_commence,
+       mt.completed::text AS discharge_completed,
+       cn.credit_notes
+FROM inv
+JOIN invoice_bill_mapping ibm ON ibm.invoice_id = inv.id
+JOIN bill_lines bl ON bl.bill_id = ibm.bill_id AND bl.cargo_source_type = 'MBC'
+JOIN mbc_customer_details cd ON cd.id = bl.cargo_source_id
+JOIN mbc_header mh ON mh.id = cd.mbc_id
+LEFT JOIN mbc_times mt ON mt.mbc_id = cd.mbc_id
+LEFT JOIN cn ON cn.original_invoice_number = inv.invoice_number
+
+ORDER BY financial_year, invoice_number, vessel_name
+"""
+
+
+def _month_label(d):
+    """invoice_date → 'Apr-26' style label (matches the bill master CSV)."""
+    if not d:
+        return None
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime(str(d)[:10], '%Y-%m-%d').strftime('%b-%y')
+    except ValueError:
+        return None
+
+
+def _fmt_ts(ts):
+    """DB timestamp text → 'DD-MM-YYYY HH:MM' (matches the bill master CSV)."""
+    if not ts:
+        return None
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime(str(ts).replace('T', ' ')[:16], '%Y-%m-%d %H:%M').strftime('%d-%m-%Y %H:%M')
+    except ValueError:
+        return str(ts)
+
+
+def get_bill_master_report():
+    """The bill-master-shaped report: all uploaded rows as-is (file order),
+    followed by rows derived from actual invoice data from
+    DPPL/{LIVE_FROM_FY}/{LIVE_FROM_SEQ} onward. Each row carries a `source`
+    of 'Uploaded' or 'Live'."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute(f"SELECT * FROM {TABLE} ORDER BY id")
+        out = []
+        for r in cur.fetchall():
+            d = {c: r.get(c) for c in COLUMNS}
+            if d.get('bl_qty') is not None:
+                d['bl_qty'] = float(d['bl_qty'])
+            d['source'] = 'Uploaded'
+            out.append(d)
+
+        cur.execute(_LIVE_ROWS_SQL, {'fy': LIVE_FROM_FY, 'seq': LIVE_FROM_SEQ})
+        for r in cur.fetchall():
+            out.append({
+                'financial_year':      r['financial_year'],
+                'month_label':         _month_label(r['invoice_date']),
+                'vessel_name':         r['vessel_name'],
+                'material_po':         r['material_po'],
+                'customer_name':       r['customer_name'],
+                'cargo_type':          r['cargo_type'],
+                'cargo_name':          r['cargo_name'],
+                'bl_qty':              float(r['bl_qty']) if r['bl_qty'] is not None else None,
+                'load_port':           r['load_port'],
+                'mv_mbc':              r['mv_mbc'],
+                'discharge_commence':  _fmt_ts(r['discharge_commence']),
+                'discharge_completed': _fmt_ts(r['discharge_completed']),
+                'bill_no':             r['invoice_number'],
+                'credit_note':         r['credit_notes'],
+                'old_bill':            None,
+                'source':              'Live',
+            })
+        return out
+    finally:
+        conn.close()

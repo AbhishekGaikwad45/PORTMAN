@@ -47,6 +47,18 @@ def bill_master_index():
                            status=model.get_status(), can_upload=_can_upload())
 
 
+@bp.route('/module/RP02/bill-master-report/')
+@login_required
+def bill_master_report_index():
+    return render_template('bill_master_report.html', username=session.get('username'))
+
+
+@bp.route('/api/module/RP02/bill-master-report/data')
+@login_required
+def bill_master_report_data():
+    return jsonify({'data': model.get_bill_master_report()})
+
+
 @bp.route('/api/module/RP02/bill-master/template')
 @login_required
 def bill_master_template():

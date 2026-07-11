@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Bill Master Report - RP02{% endblock %}
+{% block content %}
+<div class="module-header">
+    <h2>Bill Master Report</h2>
+    <span class="module-code">RP02</span>
+</div>
+
+<div style="padding:14px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="color:#718096;font-size:12px;">
+            Uploaded bill master rows as-is, then rows built from actual invoice data
+            (from invoice DPPL/26-27/158 onward). Type in a column header box to filter.
+        </span>
+        <button class="btn" onclick="rptDownload()" style="margin-left:auto;background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">⬇ Download CSV</button>
+        <button class="btn" onclick="rptGrid && rptGrid.clearHeaderFilter()" style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">Clear filters</button>
+    </div>
+    <div id="rpt-grid"></div>
+    <div id="rpt-status" style="font-size:11px;color:#718096;margin-top:6px;"></div>
+</div>
+
+<script>
+try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
+
+let rptGrid = null;
+
+function rptInit() {
+    rptGrid = new Tabulator('#rpt-grid', {
+        layout: 'fitDataFill',
+        height: 'calc(100vh - 220px)',
+        placeholder: 'No data — upload the bill master or generate invoices.',
+        pagination: true,
+        paginationSize: 100,
+        paginationSizeSelector: [50, 100, 200, 500],
+        columnDefaults: {headerSort: true, headerFilter: 'input'},
+        ajaxURL: '/api/module/RP02/bill-master-report/data',
+        ajaxResponse: (url, params, response) => {
+            const rows = response.data || [];
+            const live = rows.filter(r => r.source === 'Live').length;
+            document.getElementById('rpt-status').textContent =
+                `${rows.length} row(s) — ${rows.length - live} uploaded, ${live} live from invoices`;
+            return rows;
+        },
+        columns: [
+            {title: 'Sr', formatter: 'rownum', width: 55, headerFilter: false, headerSort: false, frozen: true},
+            {title: 'Year', field: 'financial_year', width: 85},
+            {title: 'Month', field: 'month_label', width: 85},
+            {title: 'M.Vessel Name', field: 'vessel_name', width: 190, frozen: true},
+            {title: 'Material PO', field: 'material_po', width: 120},
+            {title: 'Customer Name', field: 'customer_name', width: 160},
+            {title: 'Type of Cargo', field: 'cargo_type', width: 110},
+            {title: 'Cargo', field: 'cargo_name', width: 150},
+            {title: 'B/L Qty. (MT)', field: 'bl_qty', width: 115, hozAlign: 'right',
+                formatter: c => c.getValue() != null ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''},
+            {title: 'Load Port', field: 'load_port', width: 100},
+            {title: 'MV/MBC', field: 'mv_mbc', width: 80},
+            {title: 'Discharge Commence', field: 'discharge_commence', width: 150},
+            {title: 'Discharge Completed', field: 'discharge_completed', width: 150},
+            {title: 'Bill No', field: 'bill_no', width: 130},
+            {title: 'Credit Note', field: 'credit_note', width: 120},
+            {title: 'Old Bill', field: 'old_bill', width: 100},
+            {title: 'Source', field: 'source', width: 95,
+                formatter: c => c.getValue() === 'Live'
+                    ? '<span style="background:#c6f6d5;color:#276749;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;">Live</span>'
+                    : '<span style="background:#ebf8ff;color:#2b6cb0;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;">Uploaded</span>'},
+        ],
+    });
+    if (localStorage.getItem('theme') === 'dark')
+        document.getElementById('rpt-grid').classList.add('tabulator-dark');
+}
+
+function rptDownload() {
+    if (rptGrid) rptGrid.download('csv', 'bill_master_report.csv');
+}
+
+document.addEventListener('DOMContentLoaded', rptInit);
+</script>
+{% endblock %}
