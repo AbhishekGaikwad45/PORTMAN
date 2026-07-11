@@ -140,11 +140,13 @@ def parse_rows(headers, raw_rows):
 
 
 def parse_upload(file_storage):
-    """Parse a werkzeug FileStorage (.csv/.xlsx/.xls) → (rows, errors).
+    """Parse a werkzeug FileStorage (.csv/.xlsx) → (rows, errors).
     The header row is the first row containing both 'Customer Name' and
-    'Bill No' (normalized), so leading title rows are tolerated."""
+    'Bill No' (normalized), so leading title rows are tolerated.
+    The format is detected from the CONTENT, not the extension — a CSV
+    saved with any extension still parses, and unreadable files come back
+    as a friendly format error instead of a 500."""
     import io, csv as _csv
-    name = (file_storage.filename or '').lower()
     raw = file_storage.read()
 
     def from_matrix(matrix):
@@ -159,16 +161,21 @@ def parse_upload(file_storage):
         headers = [str(c).strip() if c is not None else '' for c in matrix[header_idx]]
         return parse_rows(headers, matrix[header_idx + 1:])
 
-    if name.endswith('.csv'):
-        text = raw.decode('utf-8-sig', errors='replace')
-        matrix = list(_csv.reader(io.StringIO(text)))
+    if raw[:2] == b'PK':  # zip container → real .xlsx
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            ws = wb.active
+            matrix = [list(r) for r in ws.iter_rows(values_only=True)]
+        except Exception:
+            return [], [{'row': 0, 'message': 'Could not read the Excel file — re-save it as .xlsx or CSV and try again'}]
         return from_matrix(matrix)
-    else:
-        import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-        ws = wb.active
-        matrix = [list(r) for r in ws.iter_rows(values_only=True)]
-        return from_matrix(matrix)
+    if raw[:4] == b'\xd0\xcf\x11\xe0':  # OLE2 container → legacy .xls
+        return [], [{'row': 0, 'message': "Old Excel '.xls' format is not supported — save the file as .xlsx or CSV"}]
+    # Anything else is treated as CSV text regardless of extension.
+    text = raw.decode('utf-8-sig', errors='replace')
+    matrix = list(_csv.reader(io.StringIO(text)))
+    return from_matrix(matrix)
 
 
 def build_template_csv():
