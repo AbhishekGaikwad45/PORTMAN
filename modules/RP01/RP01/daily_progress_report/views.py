@@ -644,21 +644,9 @@ def monthly_cargo_report():
         )
         rows = cur.fetchall()
 
-        # ---------------- TOTAL DISCHARGE PER DAY ----------------
-        cur.execute("""
-            SELECT
-                entry_date::date AS report_date,
-                SUM(quantity) AS total_mv
-            FROM lueu_lines
-            WHERE is_deleted IS NOT TRUE
-            AND quantity IS NOT NULL
-            GROUP BY entry_date::date
-        """)
-
-        day_total_map = {
-            r["report_date"].strftime("%d-%m-%Y"): float(r["total_mv"] or 0)
-            for r in cur.fetchall()
-        }
+        # NOTE: Total MV is no longer sourced from lueu_lines.
+        # It is now derived from the vessel quantities actually shown on the UI
+        # (see cumulative calculation further below, after report_data is built).
 
         # --- Combined BL + Discharged + Balance, computed directly in SQL per vcn_id ---
         vcn_ids = list({r["vcn_id"] for r in rows if r["vcn_id"]})
@@ -781,7 +769,7 @@ def monthly_cargo_report():
                         "cargo_name": "",
                         "total_qty": 0,
                         "ww_hrs": "-",
-                        "total_mv": day_total_map.get(day, 0)
+                        "total_mv": 0  # filled in later via cumulative calculation
                     }
 
                 report_data[key]["daily_data"][day]["total_qty"] += float(row["total_qty"] or 0)
@@ -840,7 +828,6 @@ def monthly_cargo_report():
                     0
                 )
                 gross_hours = min(gross_hours, 24)
-                # ---------------- Total Delay Hours ----------------
                 # ---------------- Total Delay Hours ----------------
                 deduction_hours = 0.0
 
@@ -904,6 +891,42 @@ def monthly_cargo_report():
             del vessel["discharge_completed_dt"]
             del vessel["ldud_id"]
 
+        # ==================================================================
+        # NEW: TOTAL MV = cumulative sum of vessel quantities shown on UI.
+        #
+        # Step 1: for every date, sum total_qty across ALL vessels for that
+        #         date (this is the "day's own" total, e.g. 06-06 =
+        #         3,881 + 14,600 + 4,900).
+        # Step 2: sort dates chronologically and build a running (cumulative)
+        #         total, so each date carries forward everything before it
+        #         for as long as that date row stays on the UI.
+        # Step 3: write the cumulative value back into every vessel's
+        #         "total_mv" for the matching date.
+        # ==================================================================
+        date_qty_totals = {}
+        for vessel in report_data.values():
+            for day in vessel["daily_data"]:
+                d_key = day["date_day"]
+                date_qty_totals[d_key] = date_qty_totals.get(d_key, 0) + float(day["total_qty"] or 0)
+
+        sorted_dates = sorted(
+            date_qty_totals.keys(),
+            key=lambda d: datetime.strptime(d, "%d-%m-%Y")
+        )
+
+        cumulative_map = {}
+        running_total = 0.0
+        for d_key in sorted_dates:
+            running_total += date_qty_totals[d_key]
+            cumulative_map[d_key] = running_total
+
+        for vessel in report_data.values():
+            for day in vessel["daily_data"]:
+                day["total_mv"] = cumulative_map.get(day["date_day"], 0)
+
+        print("\nDATE QTY TOTALS:", date_qty_totals)
+        print("CUMULATIVE TOTAL MV MAP:", cumulative_map)
+
         final_data = sorted(
             report_data.values(),
             key=lambda x: x["vessel_seq"]
@@ -932,7 +955,7 @@ def monthly_cargo_report():
                 "Avg Rate:", item['avg_discharge_rate']
             )
             for d in item['daily_data']:
-                print("   ", d['date_day'], "qty:", d['total_qty'], "ww_hrs:", d['ww_hrs'])
+                print("   ", d['date_day'], "qty:", d['total_qty'], "ww_hrs:", d['ww_hrs'], "total_mv:", d['total_mv'])
 
         print("\n========== MONTHLY REPORT END ==========\n")
 
