@@ -547,6 +547,7 @@ td.pvtAxisContainer.pvtCols::before {
             <option value="mbc-ops">MBC Operation</option>
             <option value="vessel-ops">Vessel Operation</option>
             <option value="vessel-barge">Vessel - Barge Lines</option>
+            <option value="vessel-anchorage">Vessel - Anchorage Recording</option>
             <option value="lueu-equipment">LUEU - Equipment Utilization</option>
             <option value="lueu-historical">LUEU (incl. historical)</option>
             <option value="mbc-tat">MBC TAT Analysis</option>
@@ -672,6 +673,15 @@ const DATE_COLS = {
             { key: 'discharge_completed', label: 'Discharge Completed' },
             { key: 'commenced_loading',   label: 'Commenced Loading' },
             { key: 'completed_loading',   label: 'Completed Loading' },
+        ],
+    },
+    'vessel-anchorage': {
+        filterable: [
+            { key: 'nor_tendered',        label: 'NOR Tendered' },
+            { key: 'anchored',            label: 'Anchored' },
+            { key: 'discharge_started',   label: 'Discharge Started' },
+            { key: 'discharge_commenced', label: 'Discharge Commenced' },
+            { key: 'anchor_aweigh',       label: 'Anchor Aweigh' },
         ],
     },
     'lueu-equipment': {
@@ -1360,6 +1370,7 @@ function srcLabel(s) {
         'mbc-ops':        'MBC Operation',
         'vessel-ops':     'Vessel Operation',
         'vessel-barge':   'Vessel - Barge Lines',
+        'vessel-anchorage': 'Vessel - Anchorage Recording',
         'lueu-equipment': 'LUEU - Equipment Utilization',
         'lueu-historical': 'LUEU (incl. historical)',
         'mbc-tat':        'MBC TAT Analysis',

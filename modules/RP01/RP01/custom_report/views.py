@@ -64,7 +64,7 @@ def custom_report_index():
 
 # ── Data sources ─────────────────────────────────────────────────────────────
 
-VALID_SOURCES = {'mbc-ops', 'vessel-ops', 'vessel-barge', 'lueu-equipment', 'lueu-historical', 'mbc-tat'}
+VALID_SOURCES = {'mbc-ops', 'vessel-ops', 'vessel-barge', 'vessel-anchorage', 'lueu-equipment', 'lueu-historical', 'mbc-tat'}
 
 # Maps date_col key → (sql_expression, is_datetime)
 # is_datetime=True  → filter uses LEFT(expr::TEXT, 10)
@@ -90,6 +90,13 @@ DATE_COL_FILTERS = {
         'commenced_loading':     ("bl.commenced_loading", True),
         'completed_loading':     ("bl.completed_loading", True),
     },
+    'vessel-anchorage': {
+        'nor_tendered':        ("h.nor_tendered", True),
+        'anchored':            ("a.anchored", True),
+        'discharge_started':   ("a.discharge_started", True),
+        'discharge_commenced': ("a.discharge_commenced", True),
+        'anchor_aweigh':       ("a.anchor_aweigh", True),
+    },
     'lueu-equipment': {
         'entry_date': ("l.entry_date", False),
     },
@@ -109,6 +116,7 @@ DATE_COL_DEFAULTS = {
     'mbc-ops':        'doc_date',
     'vessel-ops':     'nor_tendered',
     'vessel-barge':   'nor_tendered',
+    'vessel-anchorage': 'nor_tendered',
     'lueu-equipment': 'entry_date',
     'lueu-historical': 'entry_date',
     'mbc-tat':        'doc_date',
@@ -223,7 +231,7 @@ def pivot_data(source):
                 WHERE {where_clause}
                 GROUP BY h.id, h.doc_date, lp.id, elp.id, dp.id, vc.cargo_category, vc.cargo_category_2, vc.cargo_sub_category, vc.cargo_sub_category_2
                 ORDER BY h.id DESC
-                LIMIT 10000
+                LIMIT 100000
             """, where_params)
 
         elif source == 'vessel-ops':
@@ -259,7 +267,7 @@ def pivot_data(source):
                          v.operation_type, h.operation_type, v.vessel_agent_name,
                          h.nor_tendered, h.discharge_commenced, h.discharge_completed, h.doc_status
                 ORDER BY h.nor_tendered DESC
-                LIMIT 10000
+                LIMIT 100000
             """, where_params)
 
         elif source == 'vessel-barge':
@@ -299,7 +307,44 @@ def pivot_data(source):
                 ) vc ON TRUE
                 WHERE {where_clause}
                 ORDER BY h.nor_tendered DESC, h.id, bl.trip_number
-                LIMIT 10000
+                LIMIT 100000
+            """, where_params)
+
+        elif source == 'vessel-anchorage':
+            cur.execute(f"""
+                SELECT
+                    h.doc_num                                          AS "Doc No",
+                    COALESCE(h.vcn_doc_num, '')                        AS "VCN No",
+                    COALESCE(h.vessel_name, '')                        AS "Vessel",
+                    COALESCE(v.operation_type, h.operation_type, '')   AS "Operation Type",
+                    COALESCE(v.vessel_agent_name, '')                  AS "Vessel Agent",
+                    COALESCE(h.doc_status, '')                         AS "Status",
+                    COALESCE(h.created_by, '')                         AS "Created By",
+                    COALESCE(a.anchorage_name, '')                     AS "Anchorage",
+                    COALESCE(a.anchored::TEXT, '')                     AS "Anchored",
+                    COALESCE(a.discharge_started::TEXT, '')            AS "Discharge Started",
+                    COALESCE(a.discharge_commenced::TEXT, '')          AS "Discharge Commenced",
+                    COALESCE(a.anchor_aweigh::TEXT, '')                AS "Anchor Aweigh",
+                    COALESCE(a.cargo_quantity, 0)                      AS "Cargo Qty",
+                    COALESCE(a.cargo_name, '')                         AS "Cargo",
+                    COALESCE(vc.cargo_type, '')                        AS "Cargo Type",
+                    COALESCE(vc.cargo_category, '')                    AS "Cargo Category",
+                    COALESCE(vc.cargo_category_2, '')                  AS "Cargo Category 2",
+                    COALESCE(vc.cargo_sub_category, '')                AS "Cargo Sub Category",
+                    COALESCE(vc.cargo_sub_category_2, '')              AS "Cargo Sub Category 2",
+                    COALESCE(LEFT(h.nor_tendered::TEXT, 10), '')       AS "NOR Date",
+                    COALESCE(LEFT(h.nor_tendered::TEXT, 4), '')        AS "Year",
+                    COALESCE(LEFT(h.nor_tendered::TEXT, 7), '')        AS "Year-Month"
+                FROM ldud_header h
+                LEFT JOIN vcn_header v ON v.id = h.vcn_id
+                LEFT JOIN ldud_anchorage a ON a.ldud_id = h.id
+                LEFT JOIN LATERAL (
+                    SELECT cargo_type, cargo_category, cargo_category_2, cargo_sub_category, cargo_sub_category_2
+                    FROM vessel_cargo WHERE cargo_name = a.cargo_name LIMIT 1
+                ) vc ON TRUE
+                WHERE {where_clause}
+                ORDER BY h.nor_tendered DESC, h.id, a.id
+                LIMIT 100000
             """, where_params)
 
         elif source == 'lueu-equipment':
@@ -341,7 +386,7 @@ def pivot_data(source):
                 ) vc ON TRUE
                 WHERE {where_clause}
                 ORDER BY l.id DESC
-                LIMIT 10000
+                LIMIT 100000
             """, where_params)
 
         elif source == 'lueu-historical':
@@ -396,7 +441,7 @@ def pivot_data(source):
                     FROM vessel_cargo WHERE cargo_name = b.cargo_name LIMIT 1
                 ) vc ON TRUE
                 ORDER BY b.entry_date DESC
-                LIMIT 10000
+                LIMIT 100000
             """, where_params + where_params)
 
         elif source == 'mbc-tat':
@@ -429,7 +474,7 @@ def pivot_data(source):
                 ) vc ON TRUE
                 WHERE {where_clause}
                 ORDER BY h.doc_date ASC, h.id ASC
-                LIMIT 10000
+                LIMIT 100000
             """, where_params)
 
         rows = [_row_to_dict(r) for r in cur.fetchall()]
