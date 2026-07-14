@@ -61,8 +61,9 @@ def entry(agreement_id=None):
     perms = get_user_permissions(session['user_id'], 'FCAM01')
 
     # Get master data
-    agents = vam01_model.get_data()[0] or []
-    customers = vcum_model.get_data()[0] or []
+    # ponytail: get_data is paginated (default 20 rows) — fetch all for dropdowns
+    agents = vam01_model.get_data(1, 100000)[0] or []
+    customers = vcum_model.get_data(1, 100000)[0] or []
     service_types = fstm_model.get_all_service_types() or []
     currencies = fcrm_model.get_all_currencies() or []
     cargo_list = vcg_model.get_all() or []
