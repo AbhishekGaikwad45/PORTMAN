@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MBC TAT Tracker — RP01</title>
+<title>MBC TAT Tracker — PORTBIRD DPPL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -153,7 +153,7 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
     <div class="card">
       <div class="card-title">Leg-wise Target Benchmark (SOP Hours)</div>
       <div class="tbl-wrap"><table id="legs-tbl">
-        <thead><tr><th>Process Leg</th><th>Target (Hrs)</th></tr></thead><tbody></tbody>
+        <thead><tr><th>Process Leg</th><th>Target (Hrs)</th><th>Avg Actual (Hrs)</th></tr></thead><tbody></tbody>
       </table></div>
     </div>
     <div class="card">
@@ -223,8 +223,15 @@ function render(d) {
     keys.map(k => `<td class="muted">${esc(v.milestones[k.key])}</td>`).join('') + '</tr>').join('');
 
   // Static target tables + bar chart
-  document.querySelector('#legs-tbl tbody').innerHTML = d.legs.map(l =>
-    `<tr${l.total ? ' class="total-row"' : ''}><td>${esc(l.leg)}</td><td class="num">${l.target.toFixed(1)}</td></tr>`).join('');
+  document.querySelector('#legs-tbl tbody').innerHTML = d.legs.map(l => {
+    const over = l.actual != null && l.actual > l.target;
+    const act = l.actual != null
+      ? `<span style="color:${over ? '#DC2626' : '#059669'};font-weight:600">${l.actual.toFixed(1)}</span>`
+      : '<span class="muted">—</span>';
+    return `<tr${l.total ? ' class="total-row"' : ''}><td>${esc(l.leg)}</td>` +
+           `<td class="num">${l.target.toFixed(1)}</td>` +
+           `<td class="num" title="avg of ${l.trips} trips">${act}</td></tr>`;
+  }).join('');
   document.querySelector('#ref-tbl tbody').innerHTML = d.milestone_targets.map(m =>
     `<tr><td>${esc(m.milestone)}</td><td class="num">${m.target.toFixed(1)}</td></tr>`).join('');
   drawBar(d.legs);
@@ -243,14 +250,26 @@ function drawPie(rows) {
   });
 }
 function drawBar(legs) {
-  const labels = legs.map(l => l.leg), vals = legs.map(l => l.target);
+  const labels = legs.map(l => l.leg);
+  const tgt = legs.map(l => l.target);
+  const act = legs.map(l => l.actual);
   const bg = legs.map(l => l.total ? '#1E3A5F' : '#5B9BD5');
-  if (barChart) { barChart.data.labels = labels; barChart.data.datasets[0].data = vals; barChart.update('none'); return; }
+  if (barChart) {
+    barChart.data.labels = labels;
+    barChart.data.datasets[0].data = tgt;
+    barChart.data.datasets[0].backgroundColor = bg;
+    barChart.data.datasets[1].data = act;
+    barChart.update('none');
+    return;
+  }
   barChart = new Chart(document.getElementById('bar'), {
     type: 'bar',
-    data: { labels, datasets: [{ data: vals, backgroundColor: bg }] },
+    data: { labels, datasets: [
+      { label: 'Target',     data: tgt, backgroundColor: bg },
+      { label: 'Avg Actual', data: act, backgroundColor: '#ED7D31' },
+    ] },
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { position: 'top', labels: { font: { family: 'Outfit', size: 11 }, boxWidth: 12 } } },
       scales: { x: { title: { display: true, text: 'Hours', font: { family: 'Outfit' } } },
                 y: { ticks: { font: { family: 'Outfit', size: 10 } } } } }
   });
@@ -384,15 +403,19 @@ async function exportExcel() {
 
   /* ── Sheet 3: SOP targets ── */
   const ts = wb.addWorksheet('Targets', { views:[{ showGridLines:false }] });
-  ts.columns = [44, 16].map(w => ({ width:w }));
-  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP HOURS)', 2);
-  let next = xlTable(ts, 2, ['Process Leg', 'Target (Hrs)'],
-    D.legs.map(l => [l.leg, l.target]),
+  ts.columns = [44, 16, 16].map(w => ({ width:w }));
+  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP HOURS)', 3);
+  let next = xlTable(ts, 2, ['Process Leg', 'Target (Hrs)', 'Avg Actual (Hrs)'],
+    D.legs.map(l => [l.leg, l.target, l.actual]),
     (row, ri) => {
-      if (D.legs[ri].total) row.eachCell(c => {
+      const l = D.legs[ri];
+      if (l.total) row.eachCell(c => {
         c.fill = xlFill(XL.YELLOW);
         c.font = { size:10, bold:true, name:'Calibri' };
       });
+      if (l.actual != null)
+        row.getCell(3).font = { size:10, bold:true, name:'Calibri',
+          color:{ argb: l.actual > l.target ? XL.RED : XL.GREEN } };
     });
   xlSection(ts, next, 'TARGET REFERENCE: HOURS ALLOWED FROM EACH MILESTONE TO THE NEXT', 2);
   xlTable(ts, next + 1, ['Milestone', 'Target to Next (Hrs)'],

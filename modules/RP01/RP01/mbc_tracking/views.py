@@ -56,6 +56,24 @@ LEGS = [
     {'leg': 'Total TAT',                                'target': 60, 'total': True},
 ]
 
+# (from_col, to_col) per leg for computing actuals — index-aligned with LEGS
+LEG_COLS = [
+    ('arrived_load_port',     'loading_commenced'),
+    ('loading_commenced',     'loading_completed'),
+    ('loading_completed',     'cast_off_load_port'),
+    ('arrived_load_port',     'cast_off_load_port'),
+    ('cast_off_load_port',    'arrival_gull_island'),
+    ('arrival_gull_island',   'departure_gull_island'),
+    ('departure_gull_island', 'vessel_arrival_port'),
+    ('cast_off_load_port',    'vessel_arrival_port'),
+    ('vessel_arrival_port',   'unloading_commenced'),
+    ('unloading_commenced',   'unloading_completed'),
+    ('unloading_completed',   'vessel_cast_off'),
+    ('vessel_arrival_port',   'vessel_cast_off'),
+    ('sailed_out_load_port',  'reached_load_port'),
+    ('arrived_load_port',     'reached_load_port'),
+]
+
 ONE_WAY_TARGET = 44   # hours: Jaigad (7) + transit (26) + Dharamtar (11)
 TOTAL_TAT_TARGET = 60  # hours
 
@@ -123,7 +141,40 @@ def mbc_tracking_data():
         ORDER BY f.mbc_name
     ''')
     rows = cur.fetchall()
+
+    # All Jaigad trips (not just latest per vessel) for leg-wise actuals
+    cur.execute('''
+        SELECT lp.arrived_load_port, lp.loading_commenced, lp.loading_completed,
+               lp.cast_off_load_port,
+               dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
+               dp.unloading_commenced, dp.unloading_completed, dp.vessel_cast_off,
+               dp.sailed_out_load_port, dp.reached_load_port
+        FROM mbc_header h
+        LEFT JOIN LATERAL (
+            SELECT * FROM mbc_load_port_lines WHERE mbc_id = h.id ORDER BY id DESC LIMIT 1
+        ) lp ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT * FROM mbc_discharge_port_lines WHERE mbc_id = h.id ORDER BY id DESC LIMIT 1
+        ) dp ON TRUE
+        WHERE h.load_port ILIKE '%JAIGAD%'
+    ''')
+    trips = cur.fetchall()
     conn.close()
+
+    sums = [0.0] * len(LEG_COLS)
+    counts = [0] * len(LEG_COLS)
+    for t in trips:
+        for i, (col_a, col_b) in enumerate(LEG_COLS):
+            ta, tb = _parse_ts(t.get(col_a)), _parse_ts(t.get(col_b))
+            if ta and tb:
+                dh = (tb - ta).total_seconds() / 3600.0
+                # ponytail: drop negative and >30-day diffs — bad data entry
+                if 0 <= dh <= 720:
+                    sums[i] += dh
+                    counts[i] += 1
+    legs = [dict(l, actual=round(sums[i] / counts[i], 1) if counts[i] else None,
+                 trips=counts[i])
+            for i, l in enumerate(LEGS)]
 
     now = datetime.now()
     vessels = []
@@ -207,7 +258,7 @@ def mbc_tracking_data():
         'kpis': kpis,
         'vessels': vessels,
         'status_breakdown': [{'status': s, 'count': c} for s, c in breakdown.items()],
-        'legs': LEGS,
+        'legs': legs,
         'milestone_targets': [
             {'milestone': label, 'target': target}
             for (_k, _l, _c, label, _s, target) in MILESTONES if target is not None
