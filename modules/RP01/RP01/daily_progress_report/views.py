@@ -644,21 +644,9 @@ def monthly_cargo_report():
         )
         rows = cur.fetchall()
 
-        # ---------------- TOTAL DISCHARGE PER DAY ----------------
-        cur.execute("""
-            SELECT
-                entry_date::date AS report_date,
-                SUM(quantity) AS total_mv
-            FROM lueu_lines
-            WHERE is_deleted IS NOT TRUE
-            AND quantity IS NOT NULL
-            GROUP BY entry_date::date
-        """)
-
-        day_total_map = {
-            r["report_date"].strftime("%d-%m-%Y"): float(r["total_mv"] or 0)
-            for r in cur.fetchall()
-        }
+        # NOTE: Total MV is no longer sourced from lueu_lines.
+        # It is now derived from the vessel quantities actually shown on the UI
+        # (see cumulative calculation further below, after report_data is built).
 
         # --- Combined BL + Discharged + Balance, computed directly in SQL per vcn_id ---
         vcn_ids = list({r["vcn_id"] for r in rows if r["vcn_id"]})
@@ -781,7 +769,7 @@ def monthly_cargo_report():
                         "cargo_name": "",
                         "total_qty": 0,
                         "ww_hrs": "-",
-                        "total_mv": day_total_map.get(day, 0)
+                        "total_mv": 0  # filled in later via cumulative calculation
                     }
 
                 report_data[key]["daily_data"][day]["total_qty"] += float(row["total_qty"] or 0)
@@ -840,7 +828,6 @@ def monthly_cargo_report():
                     0
                 )
                 gross_hours = min(gross_hours, 24)
-                # ---------------- Total Delay Hours ----------------
                 # ---------------- Total Delay Hours ----------------
                 deduction_hours = 0.0
 
@@ -904,6 +891,62 @@ def monthly_cargo_report():
             del vessel["discharge_completed_dt"]
             del vessel["ldud_id"]
 
+        # ==================================================================
+        # NEW: TOTAL MV = cumulative sum of vessel quantities shown on UI.
+        #
+        # Step 1: for every date, sum total_qty across ALL vessels for that
+        #         date (this is the "day's own" total, e.g. 06-06 =
+        #         3,881 + 14,600 + 4,900).
+        # Step 2: sort dates chronologically and build a running (cumulative)
+        #         total, so each date carries forward everything before it
+        #         for as long as that date row stays on the UI.
+        # Step 3: write the cumulative value back into every vessel's
+        #         "total_mv" for the matching date.
+        # ==================================================================
+# ==================================================================
+# TOTAL MV = Cargo Quantity from ldud_anchorage
+# Report Window : Previous Day 08:00 -> Selected Day 08:00
+# ==================================================================
+
+        mv_map = {}
+
+        # Get all dates shown in the report
+        report_days = sorted({
+            datetime.strptime(day["date_day"], "%d-%m-%Y").date()
+            for vessel in report_data.values()
+            for day in vessel["daily_data"]
+        })
+
+        for report_day in report_days:
+
+            day_start = datetime.combine(
+                report_day - timedelta(days=1),
+                datetime.min.time()
+            ).replace(hour=8)
+
+            day_end = datetime.combine(
+                report_day,
+                datetime.min.time()
+            ).replace(hour=8)
+
+            cur.execute("""
+                SELECT
+                    COALESCE(SUM(cargo_quantity),0) AS total_mv
+                FROM ldud_anchorage
+                WHERE discharge_started >= %s
+                AND discharge_started < %s
+            """, (day_start, day_end))
+
+            result = cur.fetchone()
+
+            mv_map[report_day.strftime("%d-%m-%Y")] = float(result["total_mv"] or 0)
+
+        print("TOTAL MV MAP:", mv_map)
+
+        for vessel in report_data.values():
+            for day in vessel["daily_data"]:
+                day["total_mv"] = mv_map.get(day["date_day"], 0)
+
         final_data = sorted(
             report_data.values(),
             key=lambda x: x["vessel_seq"]
@@ -932,7 +975,7 @@ def monthly_cargo_report():
                 "Avg Rate:", item['avg_discharge_rate']
             )
             for d in item['daily_data']:
-                print("   ", d['date_day'], "qty:", d['total_qty'], "ww_hrs:", d['ww_hrs'])
+                print("   ", d['date_day'], "qty:", d['total_qty'], "ww_hrs:", d['ww_hrs'], "total_mv:", d['total_mv'])
 
         print("\n========== MONTHLY REPORT END ==========\n")
 
@@ -4489,16 +4532,22 @@ def daily_progress_report_excel():
         # ---------------- TOTAL DISCHARGE PER DAY (matches monthly_cargo_report) ----------------
         cur.execute("""
             SELECT
-                entry_date::date AS report_date,
-                SUM(quantity) AS total_mv
-            FROM lueu_lines
-            WHERE is_deleted IS NOT TRUE
-            AND quantity IS NOT NULL
-            GROUP BY entry_date::date
+                report_day,
+                COALESCE(SUM(cargo_quantity), 0) AS total_mv
+            FROM (
+                SELECT
+                    DATE(discharge_started + INTERVAL '16 hours') AS report_day,
+                    cargo_quantity
+                FROM ldud_anchorage
+                WHERE discharge_started IS NOT NULL
+                AND cargo_quantity IS NOT NULL
+            ) x
+            GROUP BY report_day
+            ORDER BY report_day
         """)
 
         day_total_map = {
-            r["report_date"].strftime("%d-%m-%Y"): float(r["total_mv"] or 0)
+            r["report_day"].strftime("%d-%m-%Y"): float(r["total_mv"] or 0)
             for r in cur.fetchall()
         }
 
