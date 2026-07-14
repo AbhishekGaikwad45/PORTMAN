@@ -51,7 +51,7 @@ html, body { background: var(--bg); color: var(--text); font-family: 'Outfit', s
 #app { padding: 12px 16px 24px; max-width: 1700px; margin: 0 auto; }
 
 /* ── KPI tiles ── */
-.kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 12px; }
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
 .kpi {
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
 }
@@ -113,8 +113,6 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
     <div class="kpi green"><div class="k-hdr">On Track</div><div class="k-val" id="kpi-ontrack">—</div></div>
     <div class="kpi amber"><div class="k-hdr">Watch</div><div class="k-val" id="kpi-watch">—</div></div>
     <div class="kpi red"><div class="k-hdr">Delayed</div><div class="k-val" id="kpi-delayed">—</div></div>
-    <div class="kpi"><div class="k-hdr">Avg Days in Current Stage</div><div class="k-val" id="kpi-avg">—</div></div>
-    <div class="kpi"><div class="k-hdr">One-Way Target (Jaigad&rarr;Dharamtar sail-out)</div><div class="k-val" id="kpi-target">—</div></div>
   </div>
 
   <div class="card">
@@ -123,11 +121,11 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
       <thead><tr>
         <th>Sr.No</th><th>MBC Name</th><th>Doc No</th><th>Cargo</th><th>Qty</th>
         <th>Current Status</th><th>Last Milestone</th><th>Milestone Time</th>
-        <th>Days in Stage</th><th>Target for Stage</th><th>Variance (Days)</th><th>RAG Status</th>
+        <th>Hrs in Stage</th><th>Target for Stage (Hrs)</th><th>Variance (Hrs)</th><th>RAG Status</th>
       </tr></thead>
       <tbody></tbody>
     </table></div>
-    <div id="status-note">RAG: Delayed = over stage target · Watch = within 1 day of target · On Track otherwise. Stage targets are SOP days from each milestone to the next.</div>
+    <div id="status-note">RAG: Delayed = over stage target · Watch = within 1 hour of target · On Track otherwise. Stage targets are SOP hours from each milestone to the next.</div>
   </div>
 
   <div class="two-col">
@@ -141,7 +139,7 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Target Days by Process Leg (SOP)</div>
+      <div class="card-title">Target Hours by Process Leg (SOP)</div>
       <div class="card-body"><div class="chart-holder" style="height:420px"><canvas id="bar"></canvas></div></div>
     </div>
   </div>
@@ -153,15 +151,15 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
 
   <div class="two-col">
     <div class="card">
-      <div class="card-title">Leg-wise Target Benchmark (SOP Days)</div>
+      <div class="card-title">Leg-wise Target Benchmark (SOP Hours)</div>
       <div class="tbl-wrap"><table id="legs-tbl">
-        <thead><tr><th>Process Leg</th><th>Target (Days)</th></tr></thead><tbody></tbody>
+        <thead><tr><th>Process Leg</th><th>Target (Hrs)</th></tr></thead><tbody></tbody>
       </table></div>
     </div>
     <div class="card">
-      <div class="card-title">Target Reference: Days Allowed From Each Milestone to the Next</div>
+      <div class="card-title">Target Reference: Hours Allowed From Each Milestone to the Next</div>
       <div class="tbl-wrap"><table id="ref-tbl">
-        <thead><tr><th>Milestone</th><th>Target to Next (Days)</th></tr></thead><tbody></tbody>
+        <thead><tr><th>Milestone</th><th>Target to Next (Hrs)</th></tr></thead><tbody></tbody>
       </table></div>
     </div>
   </div>
@@ -190,8 +188,6 @@ function render(d) {
   document.getElementById('kpi-ontrack').textContent = d.kpis.on_track;
   document.getElementById('kpi-watch').textContent   = d.kpis.watch;
   document.getElementById('kpi-delayed').textContent = d.kpis.delayed;
-  document.getElementById('kpi-avg').textContent     = d.kpis.avg_days;
-  document.getElementById('kpi-target').innerHTML    = d.one_way_target + ' <small>days</small>';
 
   // Vessel table
   document.querySelector('#vessel-tbl tbody').innerHTML = d.vessels.map((v, i) => `
@@ -204,8 +200,8 @@ function render(d) {
       <td>${esc(v.status)}</td>
       <td>${esc(v.last_milestone)}</td>
       <td class="muted">${esc(v.milestone_date)}</td>
-      <td class="num">${v.days_in_stage ?? ''}</td>
-      <td class="num">${v.target ?? (v.active && v.days_in_stage != null ? 'N/A' : '')}</td>
+      <td class="num">${v.hrs_in_stage ?? ''}</td>
+      <td class="num">${v.target ?? (v.active && v.hrs_in_stage != null ? 'N/A' : '')}</td>
       <td class="num">${v.variance ?? ''}</td>
       <td>${v.rag ? `<span class="rag ${ragCls(v.rag)}">${v.rag}</span>` : ''}</td>
     </tr>`).join('');
@@ -255,7 +251,7 @@ function drawBar(legs) {
     data: { labels, datasets: [{ data: vals, backgroundColor: bg }] },
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { x: { title: { display: true, text: 'Days', font: { family: 'Outfit' } } },
+      scales: { x: { title: { display: true, text: 'Hours', font: { family: 'Outfit' } } },
                 y: { ticks: { font: { family: 'Outfit', size: 10 } } } } }
   });
 }
@@ -318,7 +314,7 @@ async function exportExcel() {
   ws.getRow(1).height = 30;
   ws.mergeCells('A2:L2');
   const sub = ws.getCell('A2');
-  sub.value = 'As of ' + D.as_of + '  ·  auto-generated from RP01 MBC TAT Tracker';
+  sub.value = 'As of ' + D.as_of + '  ·  auto-generated from Portbird DPPL MBC TAT Tracker';
   sub.font = { italic:true, size:9, color:{argb:'FF94A3B8'}, name:'Calibri' };
   sub.alignment = { horizontal:'center' };
 
@@ -328,13 +324,11 @@ async function exportExcel() {
     ['ON TRACK',       D.kpis.on_track,   XL.GREEN],
     ['WATCH',          D.kpis.watch,      XL.AMBER],
     ['DELAYED',        D.kpis.delayed,    XL.RED],
-    ['AVG DAYS IN CURRENT STAGE', D.kpis.avg_days, XL.NAVY],
-    ['ONE-WAY TARGET (DAYS)',     D.one_way_target, XL.NAVY],
   ];
   tiles.forEach((t, i) => {
-    const c1 = 1 + i * 2;
-    ws.mergeCells(4, c1, 4, c1 + 1);
-    ws.mergeCells(5, c1, 5, c1 + 1);
+    const c1 = 1 + i * 3;
+    ws.mergeCells(4, c1, 4, c1 + 2);
+    ws.mergeCells(5, c1, 5, c1 + 2);
     const h = ws.getCell(4, c1);
     h.value = t[0];
     h.fill = xlFill(t[2]);
@@ -362,9 +356,9 @@ async function exportExcel() {
   const vTop = Math.max(8 + D.status_breakdown.length + 2, 24);
   xlSection(ws, vTop, 'VESSEL-WISE TURNAROUND STATUS', 12);
   xlTable(ws, vTop + 1,
-    ['Sr.No','MBC Name','Doc No','Cargo','Qty','Current Status','Last Milestone','Milestone Time','Days in Stage','Target for Stage','Variance (Days)','RAG Status'],
+    ['Sr.No','MBC Name','Doc No','Cargo','Qty','Current Status','Last Milestone','Milestone Time','Hrs in Stage','Target for Stage (Hrs)','Variance (Hrs)','RAG Status'],
     D.vessels.map((v, i) => [i + 1, v.mbc_name, v.doc_num, v.cargo, v.qty, v.status,
-      v.last_milestone, v.milestone_date, v.days_in_stage, v.target, v.variance, v.rag]),
+      v.last_milestone, v.milestone_date, v.hrs_in_stage, v.target, v.variance, v.rag]),
     (row, ri) => {
       const v = D.vessels[ri];
       row.getCell(2).font = { size:10, bold:true, name:'Calibri' };
@@ -391,8 +385,8 @@ async function exportExcel() {
   /* ── Sheet 3: SOP targets ── */
   const ts = wb.addWorksheet('Targets', { views:[{ showGridLines:false }] });
   ts.columns = [44, 16].map(w => ({ width:w }));
-  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP DAYS)', 2);
-  let next = xlTable(ts, 2, ['Process Leg', 'Target (Days)'],
+  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP HOURS)', 2);
+  let next = xlTable(ts, 2, ['Process Leg', 'Target (Hrs)'],
     D.legs.map(l => [l.leg, l.target]),
     (row, ri) => {
       if (D.legs[ri].total) row.eachCell(c => {
@@ -400,8 +394,8 @@ async function exportExcel() {
         c.font = { size:10, bold:true, name:'Calibri' };
       });
     });
-  xlSection(ts, next, 'TARGET REFERENCE: DAYS ALLOWED FROM EACH MILESTONE TO THE NEXT', 2);
-  xlTable(ts, next + 1, ['Milestone', 'Target to Next (Days)'],
+  xlSection(ts, next, 'TARGET REFERENCE: HOURS ALLOWED FROM EACH MILESTONE TO THE NEXT', 2);
+  xlTable(ts, next + 1, ['Milestone', 'Target to Next (Hrs)'],
     D.milestone_targets.map(m => [m.milestone, m.target]));
 
   const buf = await wb.xlsx.writeBuffer();

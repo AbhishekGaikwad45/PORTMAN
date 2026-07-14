@@ -15,10 +15,10 @@ def login_required(f):
     return decorated
 
 
-# ── Hardcoded SOP targets (days) ─────────────────────────────────────────────
+# ── Hardcoded SOP targets (hours) ────────────────────────────────────────────
 # Milestone chain in cycle order. Each entry:
 # (key, line ('lp'|'dp'), column, milestone label, status while this is the
-#  last recorded milestone, target days allowed until the next milestone —
+#  last recorded milestone, target hours allowed until the next milestone —
 #  None means no SOP target for that stage)
 MILESTONES = [
     ('arrived_jaigad',    'lp', 'arrived_load_port',        'Arrived & Anchored at Jaigad',     'Waiting at Jaigad',                  1),
@@ -37,7 +37,7 @@ MILESTONES = [
     ('reached_jaigad',    'dp', 'reached_load_port',        'Reached Jaigad',                   'Cycle Completed',                    None),
 ]
 
-# Leg-wise SOP benchmark exactly as given (days); total=True rows are the
+# Leg-wise SOP benchmark exactly as given (hours); total=True rows are the
 # yellow subtotal rows in the SOP sheet.
 LEGS = [
     {'leg': 'Jaigad Arrival - Loading commence',        'target': 1,  'total': False},
@@ -56,8 +56,8 @@ LEGS = [
     {'leg': 'Total TAT',                                'target': 60, 'total': True},
 ]
 
-ONE_WAY_TARGET = 44   # Jaigad (7) + transit (26) + Dharamtar (11)
-TOTAL_TAT_TARGET = 60
+ONE_WAY_TARGET = 44   # hours: Jaigad (7) + transit (26) + Dharamtar (11)
+TOTAL_TAT_TARGET = 60  # hours
 
 
 def _parse_ts(v):
@@ -142,35 +142,35 @@ def mbc_tracking_data():
                 'mbc_name': r['mbc_name'], 'doc_num': r.get('doc_num') or '',
                 'cargo': '', 'qty': None, 'status': '—',
                 'last_milestone': 'Not yet arrived', 'milestone_date': '',
-                'days_in_stage': None, 'target': None, 'variance': None,
+                'hrs_in_stage': None, 'target': None, 'variance': None,
                 'rag': '', 'stage_idx': len(MILESTONES) + 1, 'active': False,
                 'milestones': milestones,
             })
             continue
 
         key, _line, _col, label, status, target = MILESTONES[last_idx]
-        days = round((now - last_ts).total_seconds() / 86400.0, 1)
+        hrs = round((now - last_ts).total_seconds() / 3600.0, 1)
         # ponytail: reached_load_port is almost never filled by operators, so a
-        # sail-out older than 2x the return target (16d) counts as a finished
+        # sail-out older than 2x the return target (16h) counts as a finished
         # cycle instead of "in transit" forever; drops out when data improves.
-        completed = key == 'reached_jaigad' or (key == 'sailed_out' and days > 32)
+        completed = key == 'reached_jaigad' or (key == 'sailed_out' and hrs > 32)
         if completed and key == 'sailed_out':
             status = 'Cycle Completed'
 
         if completed:
-            rag, variance, days_disp, target_disp = '', None, None, None
+            rag, variance, hrs_disp, target_disp = '', None, None, None
         else:
-            variance = round(days - target, 1) if target is not None else None
+            variance = round(hrs - target, 1) if target is not None else None
             if target is None:
                 rag = ''
-            elif days > target:
+            elif hrs > target:
                 rag = 'Delayed'
-            elif target - days <= 1:
-                # ponytail: Watch = within 1 day of breaching target
+            elif target - hrs <= 1:
+                # ponytail: Watch = within 1 hour of breaching target
                 rag = 'Watch'
             else:
                 rag = 'On Track'
-            days_disp, target_disp = days, target
+            hrs_disp, target_disp = hrs, target
 
         vessels.append({
             'mbc_name': r['mbc_name'], 'doc_num': r.get('doc_num') or '',
@@ -178,7 +178,7 @@ def mbc_tracking_data():
             'qty': float(r['bl_quantity']) if r.get('bl_quantity') is not None else None,
             'status': status, 'last_milestone': label,
             'milestone_date': last_ts.strftime('%d-%b-%y %H:%M'),
-            'days_in_stage': days_disp, 'target': target_disp,
+            'hrs_in_stage': hrs_disp, 'target': target_disp,
             'variance': variance, 'rag': rag,
             'stage_idx': last_idx, 'active': not completed,
             'milestones': milestones,
@@ -192,14 +192,14 @@ def mbc_tracking_data():
     for v in active:
         breakdown[v['status']] = breakdown.get(v['status'], 0) + 1
 
-    days_vals = [v['days_in_stage'] for v in active if v['days_in_stage'] is not None]
+    hrs_vals = [v['hrs_in_stage'] for v in active if v['hrs_in_stage'] is not None]
     kpis = {
         'fleet':      len(vessels),
         'active':     len(active),
         'on_track':   sum(1 for v in active if v['rag'] == 'On Track'),
         'watch':      sum(1 for v in active if v['rag'] == 'Watch'),
         'delayed':    sum(1 for v in active if v['rag'] == 'Delayed'),
-        'avg_days':   round(sum(days_vals) / len(days_vals), 1) if days_vals else 0,
+        'avg_hrs':    round(sum(hrs_vals) / len(hrs_vals), 1) if hrs_vals else 0,
     }
 
     return jsonify({
