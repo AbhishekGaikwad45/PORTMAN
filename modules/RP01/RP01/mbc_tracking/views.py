@@ -144,7 +144,8 @@ def mbc_tracking_data():
 
     # All Jaigad trips (not just latest per vessel) for leg-wise actuals
     cur.execute('''
-        SELECT lp.arrived_load_port, lp.loading_commenced, lp.loading_completed,
+        SELECT h.id, h.mbc_name,
+               lp.arrived_load_port, lp.loading_commenced, lp.loading_completed,
                lp.cast_off_load_port,
                dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
                dp.unloading_commenced, dp.unloading_completed, dp.vessel_cast_off,
@@ -158,8 +159,20 @@ def mbc_tracking_data():
         ) dp ON TRUE
         WHERE h.load_port ILIKE '%JAIGAD%'
     ''')
-    trips = cur.fetchall()
+    trips = [dict(t) for t in cur.fetchall()]
     conn.close()
+
+    # reached_load_port is never entered by operators, so the return to Jaigad
+    # is taken from the same vessel's NEXT trip arrival ("Reached Load Port"
+    # := next "Arrived Load Port"); a real reached_load_port wins if present.
+    by_vessel = {}
+    for t in trips:
+        by_vessel.setdefault(t['mbc_name'], []).append(t)
+    for vt in by_vessel.values():
+        vt.sort(key=lambda t: (_parse_ts(t['arrived_load_port']) or datetime.max, t['id']))
+        for cur_t, nxt in zip(vt, vt[1:]):
+            if cur_t.get('reached_load_port') is None:
+                cur_t['reached_load_port'] = nxt.get('arrived_load_port')
 
     sums = [0.0] * len(LEG_COLS)
     counts = [0] * len(LEG_COLS)
