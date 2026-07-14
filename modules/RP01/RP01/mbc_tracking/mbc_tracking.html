@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBC TAT Tracker — RP01</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #F1F5F9; --surface: #FFFFFF; --border: #E2E8F0; --border2: #CBD5E1;
+  --text: #0F172A; --text2: #475569; --text3: #94A3B8;
+  --blue: #2563EB; --blue-lt: #EFF6FF; --blue-bd: #BFDBFE;
+  --green: #059669; --green-lt: #ECFDF5;
+  --amber: #D97706; --amber-lt: #FFFBEB;
+  --red: #DC2626; --red-lt: #FEF2F2;
+  --navy: #1E3A5F;
+  --hdr-h: 52px;
+}
+html, body { background: var(--bg); color: var(--text); font-family: 'Outfit', system-ui, sans-serif; }
+
+/* ── Header ── */
+#hdr {
+  position: sticky; top: 0; height: var(--hdr-h);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 16px; gap: 12px;
+  z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,.05);
+}
+#hdr h1 { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+.hdr-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--blue); background: var(--blue-lt); border: 1px solid var(--blue-bd);
+  padding: 2px 7px; border-radius: 4px;
+}
+.hdr-live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; color: var(--green); }
+.hdr-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: live 2s ease-in-out infinite; }
+@keyframes live { 0%,100% { box-shadow: 0 0 0 0 rgba(5,150,105,.5);} 50% { box-shadow: 0 0 0 4px rgba(5,150,105,0);} }
+.hdr-flex { flex: 1; }
+.hdr-meta { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; text-align: right; }
+.hdr-btn {
+  border: 1px solid var(--border2); background: var(--surface); color: var(--text2);
+  font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 500;
+  padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; transition: all .15s;
+}
+.hdr-btn:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-lt); }
+
+#app { padding: 12px 16px 24px; max-width: 1700px; margin: 0 auto; }
+
+/* ── KPI tiles ── */
+.kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 12px; }
+.kpi {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.kpi .k-hdr { padding: 5px 10px; font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: #fff; background: var(--navy); text-align: center; }
+.kpi.green .k-hdr { background: #22A06B; }
+.kpi.amber .k-hdr { background: #C9971C; }
+.kpi.red   .k-hdr { background: #C0392B; }
+.kpi .k-val { padding: 8px 10px 10px; font-size: 26px; font-weight: 700; text-align: center; color: var(--navy); font-family: 'DM Mono', monospace; }
+.kpi.green .k-val { color: #22A06B; }
+.kpi.amber .k-val { color: #C9971C; }
+.kpi.red   .k-val { color: #C0392B; }
+.kpi .k-val small { font-size: 12px; font-weight: 500; color: var(--text3); }
+
+/* ── Cards / tables ── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+.card-title { padding: 8px 12px; font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--navy); border-bottom: 1px solid var(--border); }
+.card-body { padding: 10px 12px; }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th {
+  background: var(--navy); color: #fff; font-weight: 600; font-size: 11px;
+  padding: 6px 8px; text-align: left; white-space: nowrap; position: sticky; top: 0;
+}
+td { padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody tr:nth-child(even) { background: #F8FAFC; }
+td.num { text-align: right; font-family: 'DM Mono', monospace; }
+tr.total-row td { background: #FEF9C3; font-weight: 700; }
+.rag { display: inline-block; min-width: 66px; text-align: center; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; }
+.rag.ontrack { background: #2ECC8F; }
+.rag.watch   { background: #E3B341; }
+.rag.delayed { background: #F16A6A; }
+.muted { color: var(--text3); }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.chart-holder { position: relative; height: 300px; }
+@media (max-width: 1100px) { .two-col { grid-template-columns: 1fr; } .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+
+#status-note { padding: 6px 12px; font-size: 11px; color: var(--text3); }
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>MBC TAT Tracker</h1>
+  <span class="hdr-tag">RP01 · JSW Jaigad Cycle</span>
+  <div class="hdr-live"><div class="hdr-live-dot"></div>LIVE</div>
+  <div class="hdr-flex"></div>
+  <div class="hdr-meta">
+    <div id="as-of">—</div>
+    <div>next refresh in <span id="countdown">10:00</span></div>
+  </div>
+  <button class="hdr-btn" onclick="exportExcel()">&#8595; Export Excel</button>
+  <button class="hdr-btn" onclick="reload()">&#10227; Refresh</button>
+</div>
+
+<div id="app">
+  <div class="kpi-row">
+    <div class="kpi"><div class="k-hdr">Active Vessels</div><div class="k-val" id="kpi-active">—</div></div>
+    <div class="kpi green"><div class="k-hdr">On Track</div><div class="k-val" id="kpi-ontrack">—</div></div>
+    <div class="kpi amber"><div class="k-hdr">Watch</div><div class="k-val" id="kpi-watch">—</div></div>
+    <div class="kpi red"><div class="k-hdr">Delayed</div><div class="k-val" id="kpi-delayed">—</div></div>
+    <div class="kpi"><div class="k-hdr">Avg Days in Current Stage</div><div class="k-val" id="kpi-avg">—</div></div>
+    <div class="kpi"><div class="k-hdr">One-Way Target (Jaigad&rarr;Dharamtar sail-out)</div><div class="k-val" id="kpi-target">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Vessel-wise Turnaround Status</div>
+    <div class="tbl-wrap"><table id="vessel-tbl">
+      <thead><tr>
+        <th>Sr.No</th><th>MBC Name</th><th>Doc No</th><th>Cargo</th><th>Qty</th>
+        <th>Current Status</th><th>Last Milestone</th><th>Milestone Time</th>
+        <th>Days in Stage</th><th>Target for Stage</th><th>Variance (Days)</th><th>RAG Status</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div id="status-note">RAG: Delayed = over stage target · Watch = within 1 day of target · On Track otherwise. Stage targets are SOP days from each milestone to the next.</div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">Fleet Status Mix</div>
+      <div class="card-body">
+        <div class="chart-holder"><canvas id="pie"></canvas></div>
+        <div class="tbl-wrap" style="margin-top:10px"><table id="breakdown-tbl">
+          <thead><tr><th>Status</th><th>Vessel Count</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Target Days by Process Leg (SOP)</div>
+      <div class="card-body"><div class="chart-holder" style="height:420px"><canvas id="bar"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">MBC Status — Milestone Matrix</div>
+    <div class="tbl-wrap"><table id="matrix-tbl"><thead></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">Leg-wise Target Benchmark (SOP Days)</div>
+      <div class="tbl-wrap"><table id="legs-tbl">
+        <thead><tr><th>Process Leg</th><th>Target (Days)</th></tr></thead><tbody></tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Target Reference: Days Allowed From Each Milestone to the Next</div>
+      <div class="tbl-wrap"><table id="ref-tbl">
+        <thead><tr><th>Milestone</th><th>Target to Next (Days)</th></tr></thead><tbody></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REFRESH = 600;              // seconds — auto-update every 10 minutes
+let cd = REFRESH, D = null, pieChart = null, barChart = null;
+
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const ragCls = r => r === 'Delayed' ? 'delayed' : r === 'Watch' ? 'watch' : 'ontrack';
+
+function loadData() {
+  fetch('/api/module/RP01/mbc-tracking/data')
+    .then(r => { if (!r.ok) throw new Error('Server error ' + r.status); return r.json(); })
+    .then(d => { D = d; render(d); })
+    .catch(e => { document.getElementById('as-of').textContent = 'load failed — ' + e.message; });
+}
+
+function render(d) {
+  document.getElementById('as-of').textContent = 'as of ' + d.as_of;
+
+  // KPIs
+  document.getElementById('kpi-active').textContent  = d.kpis.active + ' ';
+  document.getElementById('kpi-active').innerHTML   += `<small>/ ${d.kpis.fleet} fleet</small>`;
+  document.getElementById('kpi-ontrack').textContent = d.kpis.on_track;
+  document.getElementById('kpi-watch').textContent   = d.kpis.watch;
+  document.getElementById('kpi-delayed').textContent = d.kpis.delayed;
+  document.getElementById('kpi-avg').textContent     = d.kpis.avg_days;
+  document.getElementById('kpi-target').innerHTML    = d.one_way_target + ' <small>days</small>';
+
+  // Vessel table
+  document.querySelector('#vessel-tbl tbody').innerHTML = d.vessels.map((v, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td><b>${esc(v.mbc_name)}</b></td>
+      <td class="muted">${esc(v.doc_num)}</td>
+      <td>${esc(v.cargo)}</td>
+      <td class="num">${v.qty != null ? v.qty.toLocaleString() : ''}</td>
+      <td>${esc(v.status)}</td>
+      <td>${esc(v.last_milestone)}</td>
+      <td class="muted">${esc(v.milestone_date)}</td>
+      <td class="num">${v.days_in_stage ?? ''}</td>
+      <td class="num">${v.target ?? (v.active && v.days_in_stage != null ? 'N/A' : '')}</td>
+      <td class="num">${v.variance ?? ''}</td>
+      <td>${v.rag ? `<span class="rag ${ragCls(v.rag)}">${v.rag}</span>` : ''}</td>
+    </tr>`).join('');
+
+  // Breakdown table + pie
+  document.querySelector('#breakdown-tbl tbody').innerHTML = d.status_breakdown.map(b =>
+    `<tr><td>${esc(b.status)}</td><td class="num">${b.count}</td></tr>`).join('');
+  drawPie(d.status_breakdown);
+
+  // Milestone matrix
+  const keys = d.milestone_labels;
+  document.querySelector('#matrix-tbl thead').innerHTML =
+    '<tr><th>Sr</th><th>MBC Name</th><th>Cargo</th><th>Qty</th><th>MBC Status</th>' +
+    keys.map(k => `<th>${esc(k.label)}</th>`).join('') + '</tr>';
+  document.querySelector('#matrix-tbl tbody').innerHTML = d.vessels.map((v, i) =>
+    `<tr><td class="num">${i + 1}</td><td><b>${esc(v.mbc_name)}</b></td>` +
+    `<td>${esc(v.cargo)}</td><td class="num">${v.qty != null ? v.qty.toLocaleString() : ''}</td>` +
+    `<td>${esc(v.status)}</td>` +
+    keys.map(k => `<td class="muted">${esc(v.milestones[k.key])}</td>`).join('') + '</tr>').join('');
+
+  // Static target tables + bar chart
+  document.querySelector('#legs-tbl tbody').innerHTML = d.legs.map(l =>
+    `<tr${l.total ? ' class="total-row"' : ''}><td>${esc(l.leg)}</td><td class="num">${l.target.toFixed(1)}</td></tr>`).join('');
+  document.querySelector('#ref-tbl tbody').innerHTML = d.milestone_targets.map(m =>
+    `<tr><td>${esc(m.milestone)}</td><td class="num">${m.target.toFixed(1)}</td></tr>`).join('');
+  drawBar(d.legs);
+}
+
+/* ── Charts ── */
+const PIE_COLORS = ['#5B9BD5','#ED7D31','#A5A5A5','#FFC000','#4472C4','#70AD47','#264478','#9E480E','#997300','#43682B','#F4B183','#B4C7E7'];
+function drawPie(rows) {
+  const labels = rows.map(r => r.status), vals = rows.map(r => r.count);
+  if (pieChart) { pieChart.data.labels = labels; pieChart.data.datasets[0].data = vals; pieChart.update('none'); return; }
+  pieChart = new Chart(document.getElementById('pie'), {
+    type: 'pie',
+    data: { labels, datasets: [{ data: vals, backgroundColor: PIE_COLORS, borderColor: '#fff', borderWidth: 1.5 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { font: { family: 'Outfit', size: 11 }, boxWidth: 12 } } } }
+  });
+}
+function drawBar(legs) {
+  const labels = legs.map(l => l.leg), vals = legs.map(l => l.target);
+  const bg = legs.map(l => l.total ? '#1E3A5F' : '#5B9BD5');
+  if (barChart) { barChart.data.labels = labels; barChart.data.datasets[0].data = vals; barChart.update('none'); return; }
+  barChart = new Chart(document.getElementById('bar'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: vals, backgroundColor: bg }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { title: { display: true, text: 'Days', font: { family: 'Outfit' } } },
+                y: { ticks: { font: { family: 'Outfit', size: 10 } } } } }
+  });
+}
+
+/* ── Excel export (SheetJS) ── */
+function exportExcel() {
+  if (!D) return;
+  const wb = XLSX.utils.book_new();
+
+  const vs = [['Sr.No','MBC Name','Doc No','Cargo','Qty','Current Status','Last Milestone','Milestone Time','Days in Stage','Target for Stage','Variance (Days)','RAG Status']]
+    .concat(D.vessels.map((v, i) => [i + 1, v.mbc_name, v.doc_num, v.cargo, v.qty, v.status,
+      v.last_milestone, v.milestone_date, v.days_in_stage, v.target, v.variance, v.rag]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vs), 'Vessel Status');
+
+  const mx = [['Sr','MBC Name','Cargo','Qty','MBC Status'].concat(D.milestone_labels.map(k => k.label))]
+    .concat(D.vessels.map((v, i) => [i + 1, v.mbc_name, v.cargo, v.qty, v.status]
+      .concat(D.milestone_labels.map(k => v.milestones[k.key]))));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mx), 'MBC Status');
+
+  const bd = [['Status','Vessel Count']].concat(D.status_breakdown.map(b => [b.status, b.count]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bd), 'Fleet Breakdown');
+
+  const tg = [['Process Leg','Target (Days)']].concat(D.legs.map(l => [l.leg, l.target]))
+    .concat([[], ['Milestone','Target to Next (Days)']]).concat(D.milestone_targets.map(m => [m.milestone, m.target]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tg), 'Targets');
+
+  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  XLSX.writeFile(wb, `MBC_TAT_Dashboard_${ts}.xlsx`);
+}
+
+/* ── Refresh loop ── */
+function reload() { cd = REFRESH; loadData(); }
+setInterval(() => {
+  cd--;
+  if (cd <= 0) { cd = REFRESH; loadData(); }
+  const m = String(Math.floor(cd / 60)), s = String(cd % 60).padStart(2, '0');
+  document.getElementById('countdown').textContent = `${m}:${s}`;
+}, 1000);
+
+loadData();
+</script>
+</body>
+</html>

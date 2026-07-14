@@ -134,6 +134,24 @@
         <div class="card-arrow">Open Live &rarr;</div>
     </a>
 
+    <!-- MBC TAT Tracker -->
+    <a class="report-card" href="/module/RP01/mbc-tracking/" target="_blank" rel="noopener">
+        <div class="card-icon">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="36" height="36" rx="6" fill="#ECFDF5"/>
+                <path d="M7 24l4-2 4 2 4-2 4 2 4-2v4l-4 2-4-2-4 2-4-2-4 2v-4z" fill="#6EE7B7" fill-opacity=".5" stroke="#059669" stroke-width="1.4"/>
+                <path d="M12 20v-8h12l-2 4 2 4H12z" stroke="#059669" stroke-width="1.6" fill="#A7F3D0" fill-opacity=".5"/>
+                <circle cx="27" cy="10" r="4" stroke="#059669" stroke-width="1.4"/>
+                <path d="M27 8v2l1.5 1" stroke="#059669" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="card-title">MBC TAT Tracker</div>
+        <div class="card-desc">
+            Live turnaround tracking for the JSW Jaigad MBC cycle. Vessel-wise stage status, days-in-stage vs SOP targets, RAG alerts, fleet status mix, and milestone matrix. Auto-refreshes every 10 minutes; exports to Excel.
+        </div>
+        <div class="card-arrow">Open Live &rarr;</div>
+    </a>
+
     {% if session.get('is_admin') %}
     <!-- Historical Data (admin only) -->
     <a class="report-card" href="/module/RP01/historical-data/">
