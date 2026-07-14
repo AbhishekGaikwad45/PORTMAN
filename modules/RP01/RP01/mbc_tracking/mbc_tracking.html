@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -260,30 +260,158 @@ function drawBar(legs) {
   });
 }
 
-/* ── Excel export (SheetJS) ── */
-function exportExcel() {
+/* ── Excel export (ExcelJS, styled like the dashboard) ── */
+const XL = {
+  NAVY:'FF1E3A5F', WHITE:'FFFFFFFF', YELLOW:'FFFEF9C3', ZEBRA:'FFF8FAFC',
+  GREEN:'FF22A06B', AMBER:'FFC9971C', RED:'FFC0392B',
+  RAG: { 'On Track':'FF2ECC8F', 'Watch':'FFE3B341', 'Delayed':'FFF16A6A' },
+};
+const xlFill = c => ({ type:'pattern', pattern:'solid', fgColor:{argb:c} });
+const xlThin = { style:'thin', color:{argb:'FFCBD5E1'} };
+const xlBox  = { top:xlThin, left:xlThin, bottom:xlThin, right:xlThin };
+
+function xlSection(ws, row, text, span) {
+  ws.mergeCells(row, 1, row, span);
+  const c = ws.getCell(row, 1);
+  c.value = text;
+  c.font = { bold:true, size:11, color:{argb:XL.NAVY}, name:'Calibri' };
+}
+
+// Styled table: navy header, zebra body, thin borders. Returns next free row.
+function xlTable(ws, startRow, headers, rows, rowStyle) {
+  headers.forEach((h, i) => {
+    const c = ws.getCell(startRow, i + 1);
+    c.value = h;
+    c.fill = xlFill(XL.NAVY);
+    c.font = { color:{argb:XL.WHITE}, bold:true, size:10, name:'Calibri' };
+    c.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    c.border = xlBox;
+  });
+  rows.forEach((r, ri) => {
+    const row = ws.getRow(startRow + 1 + ri);
+    r.forEach((v, ci) => {
+      const c = row.getCell(ci + 1);
+      c.value = v;
+      c.border = xlBox;
+      c.font = { size:10, name:'Calibri' };
+      if (ri % 2) c.fill = xlFill(XL.ZEBRA);
+    });
+    if (rowStyle) rowStyle(row, ri);
+  });
+  return startRow + rows.length + 2;
+}
+
+async function exportExcel() {
   if (!D) return;
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
 
-  const vs = [['Sr.No','MBC Name','Doc No','Cargo','Qty','Current Status','Last Milestone','Milestone Time','Days in Stage','Target for Stage','Variance (Days)','RAG Status']]
-    .concat(D.vessels.map((v, i) => [i + 1, v.mbc_name, v.doc_num, v.cargo, v.qty, v.status,
-      v.last_milestone, v.milestone_date, v.days_in_stage, v.target, v.variance, v.rag]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vs), 'Vessel Status');
+  /* ── Sheet 1: Dashboard ── */
+  const ws = wb.addWorksheet('Dashboard', { views:[{ showGridLines:false }] });
+  ws.columns = [6,18,12,16,10,28,28,16,13,13,13,12].map(w => ({ width:w }));
 
-  const mx = [['Sr','MBC Name','Cargo','Qty','MBC Status'].concat(D.milestone_labels.map(k => k.label))]
-    .concat(D.vessels.map((v, i) => [i + 1, v.mbc_name, v.cargo, v.qty, v.status]
-      .concat(D.milestone_labels.map(k => v.milestones[k.key]))));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mx), 'MBC Status');
+  ws.mergeCells('A1:L1');
+  const title = ws.getCell('A1');
+  title.value = 'MBC TAT TRACKER — JSW JAIGAD CYCLE';
+  title.fill = xlFill(XL.NAVY);
+  title.font = { color:{argb:XL.WHITE}, bold:true, size:16, name:'Calibri' };
+  title.alignment = { vertical:'middle', horizontal:'center' };
+  ws.getRow(1).height = 30;
+  ws.mergeCells('A2:L2');
+  const sub = ws.getCell('A2');
+  sub.value = 'As of ' + D.as_of + '  ·  auto-generated from RP01 MBC TAT Tracker';
+  sub.font = { italic:true, size:9, color:{argb:'FF94A3B8'}, name:'Calibri' };
+  sub.alignment = { horizontal:'center' };
 
-  const bd = [['Status','Vessel Count']].concat(D.status_breakdown.map(b => [b.status, b.count]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(bd), 'Fleet Breakdown');
+  // KPI tiles (rows 4–5, two columns each)
+  const tiles = [
+    ['ACTIVE VESSELS', `${D.kpis.active} / ${D.kpis.fleet}`, XL.NAVY],
+    ['ON TRACK',       D.kpis.on_track,   XL.GREEN],
+    ['WATCH',          D.kpis.watch,      XL.AMBER],
+    ['DELAYED',        D.kpis.delayed,    XL.RED],
+    ['AVG DAYS IN CURRENT STAGE', D.kpis.avg_days, XL.NAVY],
+    ['ONE-WAY TARGET (DAYS)',     D.one_way_target, XL.NAVY],
+  ];
+  tiles.forEach((t, i) => {
+    const c1 = 1 + i * 2;
+    ws.mergeCells(4, c1, 4, c1 + 1);
+    ws.mergeCells(5, c1, 5, c1 + 1);
+    const h = ws.getCell(4, c1);
+    h.value = t[0];
+    h.fill = xlFill(t[2]);
+    h.font = { color:{argb:XL.WHITE}, bold:true, size:9, name:'Calibri' };
+    h.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+    h.border = xlBox;
+    const v = ws.getCell(5, c1);
+    v.value = t[1];
+    v.font = { bold:true, size:20, color:{argb:t[2]}, name:'Calibri' };
+    v.alignment = { horizontal:'center', vertical:'middle' };
+    v.border = xlBox;
+  });
+  ws.getRow(4).height = 26;
+  ws.getRow(5).height = 32;
 
-  const tg = [['Process Leg','Target (Days)']].concat(D.legs.map(l => [l.leg, l.target]))
-    .concat([[], ['Milestone','Target to Next (Days)']]).concat(D.milestone_targets.map(m => [m.milestone, m.target]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tg), 'Targets');
+  // Fleet breakdown table + live chart images
+  xlSection(ws, 7, 'FLEET STATUS BREAKDOWN', 2);
+  xlTable(ws, 8, ['Status', 'Vessels'], D.status_breakdown.map(b => [b.status, b.count]));
+  if (pieChart) ws.addImage(wb.addImage({ base64: pieChart.toBase64Image(), extension:'png' }),
+                            { tl:{ col:3, row:7 }, ext:{ width:430, height:290 } });
+  if (barChart) ws.addImage(wb.addImage({ base64: barChart.toBase64Image(), extension:'png' }),
+                            { tl:{ col:7.4, row:7 }, ext:{ width:470, height:290 } });
 
-  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
-  XLSX.writeFile(wb, `MBC_TAT_Dashboard_${ts}.xlsx`);
+  // Vessel-wise turnaround status (below the chart block)
+  const vTop = Math.max(8 + D.status_breakdown.length + 2, 24);
+  xlSection(ws, vTop, 'VESSEL-WISE TURNAROUND STATUS', 12);
+  xlTable(ws, vTop + 1,
+    ['Sr.No','MBC Name','Doc No','Cargo','Qty','Current Status','Last Milestone','Milestone Time','Days in Stage','Target for Stage','Variance (Days)','RAG Status'],
+    D.vessels.map((v, i) => [i + 1, v.mbc_name, v.doc_num, v.cargo, v.qty, v.status,
+      v.last_milestone, v.milestone_date, v.days_in_stage, v.target, v.variance, v.rag]),
+    (row, ri) => {
+      const v = D.vessels[ri];
+      row.getCell(2).font = { size:10, bold:true, name:'Calibri' };
+      if (v.variance != null && v.variance > 0)
+        row.getCell(11).font = { size:10, bold:true, color:{argb:XL.RED}, name:'Calibri' };
+      if (v.rag) {
+        const c = row.getCell(12);
+        c.fill = xlFill(XL.RAG[v.rag]);
+        c.font = { color:{argb:XL.WHITE}, bold:true, size:10, name:'Calibri' };
+        c.alignment = { horizontal:'center' };
+      }
+    });
+
+  /* ── Sheet 2: MBC Status milestone matrix ── */
+  const ms = wb.addWorksheet('MBC Status', { views:[{ state:'frozen', xSplit:2, ySplit:1, showGridLines:false }] });
+  ms.columns = [5,18,14,9,26].concat(D.milestone_labels.map(() => 15)).map(w => ({ width:w }));
+  xlTable(ms, 1,
+    ['Sr','MBC Name','Cargo','Qty','MBC Status'].concat(D.milestone_labels.map(k => k.label)),
+    D.vessels.map((v, i) => [i + 1, v.mbc_name, v.cargo, v.qty, v.status]
+      .concat(D.milestone_labels.map(k => v.milestones[k.key]))),
+    row => { row.getCell(2).font = { size:10, bold:true, name:'Calibri' }; });
+  ms.getRow(1).height = 32;
+
+  /* ── Sheet 3: SOP targets ── */
+  const ts = wb.addWorksheet('Targets', { views:[{ showGridLines:false }] });
+  ts.columns = [44, 16].map(w => ({ width:w }));
+  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP DAYS)', 2);
+  let next = xlTable(ts, 2, ['Process Leg', 'Target (Days)'],
+    D.legs.map(l => [l.leg, l.target]),
+    (row, ri) => {
+      if (D.legs[ri].total) row.eachCell(c => {
+        c.fill = xlFill(XL.YELLOW);
+        c.font = { size:10, bold:true, name:'Calibri' };
+      });
+    });
+  xlSection(ts, next, 'TARGET REFERENCE: DAYS ALLOWED FROM EACH MILESTONE TO THE NEXT', 2);
+  xlTable(ts, next + 1, ['Milestone', 'Target to Next (Days)'],
+    D.milestone_targets.map(m => [m.milestone, m.target]));
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `MBC_TAT_Dashboard_${stamp}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ── Refresh loop ── */

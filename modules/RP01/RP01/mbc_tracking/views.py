@@ -119,6 +119,7 @@ def mbc_tracking_data():
         LEFT JOIN LATERAL (
             SELECT * FROM mbc_discharge_port_lines WHERE mbc_id = t.id ORDER BY id DESC LIMIT 1
         ) dp ON TRUE
+        WHERE f.mbc_name ILIKE '%JSW%'
         ORDER BY f.mbc_name
     ''')
     rows = cur.fetchall()
