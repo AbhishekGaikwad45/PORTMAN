@@ -170,8 +170,8 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter='', ow
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
     if owner:
-        where_clauses.append("mm.mbc_owner_name = %s")
-        params.append(owner)
+        where_clauses.append("mm.mbc_owner_name = ANY(%s)")
+        params.append(list(owner) if isinstance(owner, (list, tuple)) else [owner])
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -417,8 +417,8 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter, owner=''):
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
     if owner:
-        where_clauses.append("mm.mbc_owner_name = %s")
-        params.append(owner)
+        where_clauses.append("mm.mbc_owner_name = ANY(%s)")
+        params.append(list(owner) if isinstance(owner, (list, tuple)) else [owner])
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -451,7 +451,8 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter, owner=''):
             dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
             dp.unloading_commenced, dp.unloading_completed,
             dp.discharge_stop_shifting, dp.discharge_start_shifting,
-            dp.vessel_cast_off, dp.cleaning_commenced, dp.cleaning_completed, dp.sailed_out_load_port
+            dp.vessel_cast_off, dp.cleaning_commenced, dp.cleaning_completed, dp.sailed_out_load_port,
+            dp.reached_load_port
         FROM mbc_header h
         LEFT JOIN mbc_master mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines lp ON lp.mbc_id = h.id
@@ -480,7 +481,7 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter, owner=''):
         up = r['unloading_completed']; ds = r['discharge_stop_shifting']
         dt = r['discharge_start_shifting']; cd = r['vessel_cast_off']
         cc = r['cleaning_commenced'];  cx = r['cleaning_completed']
-        so = r['sailed_out_load_port']
+        so = r['sailed_out_load_port']; rl = r['reached_load_port']
 
         result.append({
             'sr_no':                    sr,
@@ -517,7 +518,7 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter, owner=''):
             'breakdown_start':          '',            # intentionally blank — do not auto-fill
             'breakdown_end':            _fmt_dt(cx),
             'breakdown_time':           _dur(cc, cx),
-            'arrived_jaigad':           _fmt_dt(so),
+            'arrived_jaigad':           _fmt_dt(rl),
             'waiting_sail':             _dur(up, cd),
             'tat':                      _dur(al, so),
         })
@@ -537,8 +538,8 @@ def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter=''
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
     if owner:
-        where_clauses.append("mm.mbc_owner_name = %s")
-        params.append(owner)
+        where_clauses.append("mm.mbc_owner_name = ANY(%s)")
+        params.append(list(owner) if isinstance(owner, (list, tuple)) else [owner])
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -805,8 +806,8 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
     if owner:
-        where_clauses.append("mm.mbc_owner_name = %s")
-        params.append(owner)
+        where_clauses.append("mm.mbc_owner_name = ANY(%s)")
+        params.append(list(owner) if isinstance(owner, (list, tuple)) else [owner])
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -1144,7 +1145,7 @@ def mbc_master_data():
         selected_date,
         request.args.get('month', ''),
         request.args.get('fy', ''),
-        request.args.get('owner', '')
+        request.args.getlist('owner')
     )
 
     return jsonify(rows)
@@ -1190,7 +1191,7 @@ _TAT_ACTIVITIES = [
 def mbc_master_tat_data():
 
     selected_date = request.args.get('selected_date')
-    owner = request.args.get('owner', '')
+    owner = request.args.getlist('owner')
 
     if not selected_date:
         selected_date = date_type.today().strftime('%Y-%m-%d')
@@ -1269,7 +1270,7 @@ def mbc_master_dppl_tat_data():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy    = request.args.get('fy', '')
-    req_owner = request.args.get('owner', '')
+    req_owner = request.args.getlist('owner')
 
     rows = _fetch_dppl_tat_rows(selected_date, selected_date, req_month, req_fy, req_owner)
 
@@ -1348,7 +1349,7 @@ def mbc_master_download():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy = request.args.get('fy', '')
-    req_owner = request.args.get('owner', '')
+    req_owner = request.args.getlist('owner')
 
     if not selected_date:
         selected_date = date_type.today().strftime('%Y-%m-%d')
@@ -1551,7 +1552,7 @@ def mbc_master_mbc_wise_data():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy = request.args.get('fy', '')
-    req_owner = request.args.get('owner', '')
+    req_owner = request.args.getlist('owner')
 
     rows = _fetch_mbc_wise_rows(
         selected_date,

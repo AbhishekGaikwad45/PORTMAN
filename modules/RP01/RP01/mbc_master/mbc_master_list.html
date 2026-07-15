@@ -887,10 +887,9 @@
         </select>
     </div>
     <div class="filter-group">
-        <label for="filter-owner">Owner</label>
-        <select id="filter-owner" title="Filter by MBC Owner">
-            <option value="">All Owners</option>
-        </select>
+        <label for="filter-owner">Owner (Ctrl+click for multiple)</label>
+        <select id="filter-owner" multiple size="3" title="Filter by MBC Owner — Ctrl+click to select multiple; none selected = all"
+                style="min-width:150px;"></select>
     </div>
     <button type="button" class="filter-btn primary" onclick="applyFilters()">Apply</button>
     <button type="button" class="filter-btn reset" onclick="resetFilters()">Reset</button>
@@ -1132,7 +1131,7 @@
         const selectedDate = document.getElementById('filter-date').value;;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        const owner = document.getElementById('filter-owner').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
 
         const cutoffDate = '2026-05-01';
 
@@ -1161,7 +1160,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
-        if (owner) params.set('owner', owner);
+        owners.forEach(o => params.append('owner', o));
 
         document.getElementById('row-count').textContent = 'Loading…';
 
@@ -1192,7 +1191,7 @@
         document.getElementById('filter-date').value = '';
         document.getElementById('filter-month').value = '';
         document.getElementById('filter-fy').value = '';
-        document.getElementById('filter-owner').value = '';
+        Array.from(document.getElementById('filter-owner').options).forEach(o => o.selected = false);
         applyFilters();
     }
 
@@ -1218,7 +1217,7 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        const owner = document.getElementById('filter-owner').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
 
         const params = new URLSearchParams();
         if (selectedDate) {
@@ -1226,7 +1225,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
-        if (owner) params.set('owner', owner);
+        owners.forEach(o => params.append('owner', o));
 
         const wrapper = document.getElementById('tat-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading TAT data…</div>';
@@ -1316,13 +1315,13 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        const owner = document.getElementById('filter-owner').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
         if (selectedDate) {
             params.set('selected_date', selectedDate);
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
-        if (owner) params.set('owner', owner);
+        owners.forEach(o => params.append('owner', o));
 
         const wrapper = document.getElementById('dppltat-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading DPPL TAT data…</div>';
@@ -1405,13 +1404,13 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        const owner = document.getElementById('filter-owner').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
         if (selectedDate) {
             params.set('selected_date', selectedDate);
         };
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
-        if (owner) params.set('owner', owner);
+        owners.forEach(o => params.append('owner', o));
 
         const wrapper = document.getElementById('mbcwise-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading MBC Wise data…</div>';
@@ -1496,7 +1495,7 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
-        const owner = document.getElementById('filter-owner').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
 
         const params = new URLSearchParams();
 
@@ -1505,7 +1504,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
-        if (owner) params.set('owner', owner);
+        owners.forEach(o => params.append('owner', o));
 
         const btn = document.getElementById('dl-btn');
 
