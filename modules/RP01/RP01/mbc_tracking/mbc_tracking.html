@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MBC TAT Tracker — PORTBIRD DPPL</title>
+<title>MBC TAT Tracker — PORTBIRD DPPL</title>in FCAM01 when i edit it doesnt show the customer in dropdown
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -79,6 +79,8 @@ td { padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowr
 tbody tr:nth-child(even) { background: #F8FAFC; }
 td.num { text-align: right; font-family: 'DM Mono', monospace; }
 tr.total-row td { background: #FEF9C3; font-weight: 700; }
+tr.tat-row td { background: #BAE6FD; font-weight: 700; }
+.foot-note { padding: 6px 12px 10px; font-size: 11px; color: var(--text3); }
 .rag { display: inline-block; min-width: 66px; text-align: center; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; }
 .rag.ontrack { background: #2ECC8F; }
 .rag.watch   { background: #E3B341; }
@@ -149,18 +151,12 @@ tr.total-row td { background: #FEF9C3; font-weight: 700; }
     <div class="tbl-wrap"><table id="matrix-tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 
-  <div class="two-col">
-    <div class="card">
-      <div class="card-title">Leg-wise Target Benchmark (SOP Hours)</div>
-      <div class="tbl-wrap"><table id="legs-tbl">
-        <thead><tr><th>Process Leg</th><th>Target (Hrs)</th><th>Avg Actual (Hrs)</th></tr></thead><tbody></tbody>
-      </table></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Target Reference: Hours Allowed From Each Milestone to the Next</div>
-      <div class="tbl-wrap"><table id="ref-tbl">
-        <thead><tr><th>Milestone</th><th>Target to Next (Hrs)</th></tr></thead><tbody></tbody>
-      </table></div>
+  <div class="card">
+    <div class="card-title">Leg-wise Target Benchmark (SOP Hours)</div>
+    <div class="tbl-wrap"><table id="legs-tbl"><thead></thead><tbody></tbody></table></div>
+    <div class="foot-note">
+      *Unloading time includes the shifting time after partial discharge of MBC &amp; discharge kept on hold to give priority for other MBC.<br>
+      *Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.
     </div>
   </div>
 </div>
@@ -222,19 +218,30 @@ function render(d) {
     `<td>${esc(v.status)}</td>` +
     keys.map(k => `<td class="muted">${esc(v.milestones[k.key])}</td>`).join('') + '</tr>').join('');
 
-  // Static target tables + bar chart
-  document.querySelector('#legs-tbl tbody').innerHTML = d.legs.map(l => {
-    const over = l.actual != null && l.actual > l.target;
-    const act = l.actual != null
-      ? `<span style="color:${over ? '#DC2626' : '#059669'};font-weight:600">${l.actual.toFixed(1)}</span>`
-      : '<span class="muted">—</span>';
-    return `<tr${l.total ? ' class="total-row"' : ''}><td>${esc(l.leg)}</td>` +
-           `<td class="num">${l.target.toFixed(1)}</td>` +
-           `<td class="num" title="avg of ${l.trips} trips">${act}</td></tr>`;
-  }).join('');
-  document.querySelector('#ref-tbl tbody').innerHTML = d.milestone_targets.map(m =>
-    `<tr><td>${esc(m.milestone)}</td><td class="num">${m.target.toFixed(1)}</td></tr>`).join('');
+  // Leg-wise benchmark: Target vs Today / MTD / FY-YTD actuals, shown h:mm
+  const actCell = (val, target, plain) => val == null
+    ? '<td class="num"><span class="muted">—</span></td>'
+    : plain
+      ? `<td class="num">${fmtHM(val)}</td>`
+      : `<td class="num" style="color:${val > target ? '#DC2626' : '#059669'};font-weight:600">${fmtHM(val)}</td>`;
+  document.querySelector('#legs-tbl thead').innerHTML =
+    `<tr><th>Activity</th><th>Target (Hrs)</th><th>${esc(d.today_label)}</th><th>MTD</th><th>YTD (${esc(d.fy_label)})</th></tr>`;
+  document.querySelector('#legs-tbl tbody').innerHTML =
+    `<tr class="total-row"><td>Trips</td><td></td>` +
+    `<td class="num">${d.trip_counts.today}</td><td class="num">${d.trip_counts.mtd}</td><td class="num">${d.trip_counts.ytd}</td></tr>` +
+    d.legs.map(l => {
+      const cls = l.tat ? 'tat-row' : l.total ? 'total-row' : '';
+      return `<tr class="${cls}"><td>${esc(l.leg)}</td><td class="num">${fmtHM(l.target)}</td>` +
+             actCell(l.today, l.target, !!cls) + actCell(l.mtd, l.target, !!cls) + actCell(l.ytd, l.target, !!cls) +
+             `</tr>`;
+    }).join('');
   drawBar(d.legs);
+}
+
+// decimal hours → "h:mm"
+function fmtHM(h) {
+  const m = Math.round(h * 60);
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 }
 
 /* ── Charts ── */
@@ -252,7 +259,7 @@ function drawPie(rows) {
 function drawBar(legs) {
   const labels = legs.map(l => l.leg);
   const tgt = legs.map(l => l.target);
-  const act = legs.map(l => l.actual);
+  const act = legs.map(l => l.ytd);
   const bg = legs.map(l => l.total ? '#1E3A5F' : '#5B9BD5');
   if (barChart) {
     barChart.data.labels = labels;
@@ -265,8 +272,8 @@ function drawBar(legs) {
   barChart = new Chart(document.getElementById('bar'), {
     type: 'bar',
     data: { labels, datasets: [
-      { label: 'Target',     data: tgt, backgroundColor: bg },
-      { label: 'Avg Actual', data: act, backgroundColor: '#ED7D31' },
+      { label: 'Target',           data: tgt, backgroundColor: bg },
+      { label: 'Avg Actual (YTD)', data: act, backgroundColor: '#ED7D31' },
     ] },
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'top', labels: { font: { family: 'Outfit', size: 11 }, boxWidth: 12 } } },
@@ -401,25 +408,30 @@ async function exportExcel() {
     row => { row.getCell(2).font = { size:10, bold:true, name:'Calibri' }; });
   ms.getRow(1).height = 32;
 
-  /* ── Sheet 3: SOP targets ── */
+  /* ── Sheet 3: SOP targets vs Today / MTD / YTD actuals ── */
+  const hmm = h => h == null ? '' : fmtHM(h);
   const ts = wb.addWorksheet('Targets', { views:[{ showGridLines:false }] });
-  ts.columns = [44, 16, 16].map(w => ({ width:w }));
-  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP HOURS)', 3);
-  let next = xlTable(ts, 2, ['Process Leg', 'Target (Hrs)', 'Avg Actual (Hrs)'],
-    D.legs.map(l => [l.leg, l.target, l.actual]),
+  ts.columns = [58, 12, 12, 12, 14].map(w => ({ width:w }));
+  xlSection(ts, 1, 'LEG-WISE TARGET BENCHMARK (SOP HOURS)', 5);
+  const next = xlTable(ts, 2,
+    ['Activity', 'Target (Hrs)', D.today_label, 'MTD', `YTD (${D.fy_label})`],
+    [['Trips', '', D.trip_counts.today, D.trip_counts.mtd, D.trip_counts.ytd]]
+      .concat(D.legs.map(l => [l.leg, hmm(l.target), hmm(l.today), hmm(l.mtd), hmm(l.ytd)])),
     (row, ri) => {
-      const l = D.legs[ri];
-      if (l.total) row.eachCell(c => {
-        c.fill = xlFill(XL.YELLOW);
-        c.font = { size:10, bold:true, name:'Calibri' };
+      const bold = c => { c.font = { size:10, bold:true, name:'Calibri' }; };
+      if (ri === 0) { row.eachCell(c => { c.fill = xlFill(XL.YELLOW); bold(c); }); return; }
+      const l = D.legs[ri - 1];
+      if (l.tat)        row.eachCell(c => { c.fill = xlFill('FFBAE6FD'); bold(c); });
+      else if (l.total) row.eachCell(c => { c.fill = xlFill(XL.YELLOW);  bold(c); });
+      else [['today', 3], ['mtd', 4], ['ytd', 5]].forEach(([w, ci]) => {
+        if (l[w] != null)
+          row.getCell(ci).font = { size:10, bold:true, name:'Calibri',
+            color:{ argb: l[w] > l.target ? XL.RED : XL.GREEN } };
       });
-      if (l.actual != null)
-        row.getCell(3).font = { size:10, bold:true, name:'Calibri',
-          color:{ argb: l.actual > l.target ? XL.RED : XL.GREEN } };
     });
-  xlSection(ts, next, 'TARGET REFERENCE: HOURS ALLOWED FROM EACH MILESTONE TO THE NEXT', 2);
-  xlTable(ts, next + 1, ['Milestone', 'Target to Next (Hrs)'],
-    D.milestone_targets.map(m => [m.milestone, m.target]));
+  ts.getCell(next, 1).value = '*Unloading time includes the shifting time after partial discharge of MBC & discharge kept on hold to give priority for other MBC.';
+  ts.getCell(next + 1, 1).value = '*Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.';
+  [next, next + 1].forEach(r => ts.getCell(r, 1).font = { italic:true, size:9, name:'Calibri' });
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

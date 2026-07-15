@@ -158,10 +158,10 @@ def _fy_label_str(d):
     return f'FY {str(y - 1)[2:]}-{str(y)[2:]}'
 
 
-def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter=''):
+def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter='', owner=''):
     """
     Fetch raw timestamp rows for TAT computation (Import only).
-    Applies the same date/month/fy filters as _fetch_rows.
+    Applies the same date/month/fy/owner filters as _fetch_rows.
     Returns plain dicts (connection-independent).
     """
     conn = get_db()
@@ -169,6 +169,9 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter=''):
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
+    if owner:
+        where_clauses.append("mm.mbc_owner_name = %s")
+        params.append(owner)
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -205,6 +208,7 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter=''):
             dp.unloading_commenced, dp.unloading_completed,
             dp.vessel_cast_off,     dp.sailed_out_load_port
         FROM mbc_header h
+        LEFT JOIN mbc_master               mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines      lp ON lp.mbc_id = h.id
         LEFT JOIN mbc_discharge_port_lines dp ON dp.mbc_id = h.id
         WHERE {' AND '.join(where_clauses)}
@@ -406,12 +410,15 @@ def _write_tat_sheet(
 
 
 # ── shared data builder ────────────────────────────────────────────────────────
-def _fetch_rows(from_date, to_date, month_filter, fy_filter):
+def _fetch_rows(from_date, to_date, month_filter, fy_filter, owner=''):
     conn = get_db()
     cur  = get_cursor(conn)
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
+    if owner:
+        where_clauses.append("mm.mbc_owner_name = %s")
+        params.append(owner)
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -446,6 +453,7 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter):
             dp.discharge_stop_shifting, dp.discharge_start_shifting,
             dp.vessel_cast_off, dp.cleaning_commenced, dp.cleaning_completed, dp.sailed_out_load_port
         FROM mbc_header h
+        LEFT JOIN mbc_master mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines lp ON lp.mbc_id = h.id
         LEFT JOIN mbc_discharge_port_lines dp ON dp.mbc_id = h.id
         WHERE {' AND '.join(where_clauses)}
@@ -518,7 +526,7 @@ def _fetch_rows(from_date, to_date, month_filter, fy_filter):
 
 
 # ── DPPL TAT helpers ───────────────────────────────────────────────────────────
-def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter=''):
+def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter='', owner=''):
     """
     Fetch per-trip data for the DPPL TAT pivot sheet.
     Returns plain dicts with decimal-hour and day-fraction values ready for Excel.
@@ -528,6 +536,9 @@ def _fetch_dppl_tat_rows(from_date='', to_date='', month_filter='', fy_filter=''
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
+    if owner:
+        where_clauses.append("mm.mbc_owner_name = %s")
+        params.append(owner)
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -781,7 +792,7 @@ def _write_dppl_tat_sheet(ws, rows, period_label):
 
 
 # ── MBC Wise helpers ────────────────────────────────────────────────────────────
-def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''):
+def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter='', owner=''):
     """
     Fetch raw trips, group by mbc_name, return one dict per vessel with:
     SUM of qty and AVG of each TAT segment in day-fractions ([h]:mm).
@@ -793,6 +804,9 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
 
     where_clauses = ["h.operation_type = 'Import'"]
     params = []
+    if owner:
+        where_clauses.append("mm.mbc_owner_name = %s")
+        params.append(owner)
     from datetime import datetime, timedelta
 
     if from_date == to_date and from_date:
@@ -827,6 +841,7 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
             dp.unloading_commenced, dp.unloading_completed,
             dp.vessel_cast_off,     dp.sailed_out_load_port
         FROM mbc_header h
+        LEFT JOIN mbc_master               mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines      lp ON lp.mbc_id = h.id
         LEFT JOIN mbc_discharge_port_lines dp ON dp.mbc_id = h.id
         WHERE {' AND '.join(where_clauses)}
@@ -1128,10 +1143,26 @@ def mbc_master_data():
         selected_date,
         selected_date,
         request.args.get('month', ''),
-        request.args.get('fy', '')
+        request.args.get('fy', ''),
+        request.args.get('owner', '')
     )
 
     return jsonify(rows)
+
+
+@bp.route('/api/module/RP01/mbc-master/owners')
+@login_required
+def mbc_master_owners():
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT DISTINCT mbc_owner_name FROM mbc_master
+        WHERE mbc_owner_name IS NOT NULL AND mbc_owner_name != ''
+        ORDER BY mbc_owner_name
+    """)
+    owners = [r['mbc_owner_name'] for r in cur.fetchall()]
+    conn.close()
+    return jsonify(owners)
 
 _TAT_ACTIVITIES = [
     ('Jaigad Arrival - Jaigad Loading Commenced (Preberthing delay)', 'preberthing', '1:00', 'data'),
@@ -1159,6 +1190,7 @@ _TAT_ACTIVITIES = [
 def mbc_master_tat_data():
 
     selected_date = request.args.get('selected_date')
+    owner = request.args.get('owner', '')
 
     if not selected_date:
         selected_date = date_type.today().strftime('%Y-%m-%d')
@@ -1170,7 +1202,8 @@ def mbc_master_tat_data():
     # =========================
     daily_raw = _fetch_raw_trips(
         selected_date,
-        selected_date
+        selected_date,
+        owner=owner
     )
 
     daily_count = len(daily_raw)
@@ -1183,7 +1216,8 @@ def mbc_master_tat_data():
 
     mtd_raw = _fetch_raw_trips(
         mtd_from,
-        selected_date
+        selected_date,
+        owner=owner
     )
 
     mtd_count = len(mtd_raw)
@@ -1196,7 +1230,8 @@ def mbc_master_tat_data():
 
     ytd_raw = _fetch_raw_trips(
         fy_start,
-        selected_date
+        selected_date,
+        owner=owner
     )
 
     ytd_count = len(ytd_raw)
@@ -1234,8 +1269,9 @@ def mbc_master_dppl_tat_data():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy    = request.args.get('fy', '')
+    req_owner = request.args.get('owner', '')
 
-    rows = _fetch_dppl_tat_rows(selected_date, selected_date, req_month, req_fy)
+    rows = _fetch_dppl_tat_rows(selected_date, selected_date, req_month, req_fy, req_owner)
 
     def _hhmm(val_hrs):
         """Decimal hours → 'H:MM' display string."""
@@ -1312,6 +1348,7 @@ def mbc_master_download():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy = request.args.get('fy', '')
+    req_owner = request.args.get('owner', '')
 
     if not selected_date:
         selected_date = date_type.today().strftime('%Y-%m-%d')
@@ -1326,7 +1363,8 @@ def mbc_master_download():
     selected_date,
     selected_date,
     req_month,
-    req_fy
+    req_fy,
+    req_owner
    )
 
     # ── Reference date for MTD / YTD ──────────────────────────────────
@@ -1335,7 +1373,8 @@ def mbc_master_download():
     # ── Sheet 2 period data: same filter as Sheet 1 ────────────────────
     daily_raw = _fetch_raw_trips(
         selected_date,
-        selected_date
+        selected_date,
+        owner=req_owner
     )
 
     daily_count = len(daily_raw)
@@ -1346,14 +1385,14 @@ def mbc_master_download():
 
     # ── Sheet 2 MTD data ───────────────────────────────────────────────
     mtd_from_str = ref_dt.replace(day=1).strftime('%Y-%m-%d')
-    mtd_raw      = _fetch_raw_trips(mtd_from_str, ref_date_str)
+    mtd_raw      = _fetch_raw_trips(mtd_from_str, ref_date_str, owner=req_owner)
     mtd_count    = len(mtd_raw)
     mtd_m        = _compute_tat_metrics(mtd_raw)
     mtd_label    = ref_dt.strftime('%b-%y')
 
     # ── Sheet 2 YTD data ───────────────────────────────────────────────
     fy_start_str, _ = _fy_date_range(ref_dt)
-    ytd_raw         = _fetch_raw_trips(fy_start_str, ref_date_str)
+    ytd_raw         = _fetch_raw_trips(fy_start_str, ref_date_str, owner=req_owner)
     ytd_count       = len(ytd_raw)
     ytd_m           = _compute_tat_metrics(ytd_raw)
     ytd_label       = _fy_label_str(ref_dt)
@@ -1368,7 +1407,8 @@ def mbc_master_download():
     selected_date,
     selected_date,
     req_month,
-    req_fy
+    req_fy,
+    req_owner
     )
     _write_mbc_wise_sheet(ws0, mbc_wise_rows, period_label)
 
@@ -1482,7 +1522,7 @@ def mbc_master_download():
 
     # ══ Sheet 3: DPPL TAT ══════════════════════════════════════════════
     ws3 = wb.create_sheet('DPPL TAT')
-    dppl_rows = _fetch_dppl_tat_rows(selected_date, selected_date)
+    dppl_rows = _fetch_dppl_tat_rows(selected_date, selected_date, owner=req_owner)
     _write_dppl_tat_sheet(ws3, dppl_rows, period_label)
 
     # ── Stream response ────────────────────────────────────────────────
@@ -1511,12 +1551,14 @@ def mbc_master_mbc_wise_data():
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
     req_fy = request.args.get('fy', '')
+    req_owner = request.args.get('owner', '')
 
     rows = _fetch_mbc_wise_rows(
         selected_date,
         selected_date,
         req_month,
-        req_fy
+        req_fy,
+        req_owner
     )
     def _day_to_hhmm(val_day):
         if val_day is None:

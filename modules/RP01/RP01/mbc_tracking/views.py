@@ -23,9 +23,9 @@ def login_required(f):
 MILESTONES = [
     ('arrived_jaigad',    'lp', 'arrived_load_port',        'Arrived & Anchored at Jaigad',     'Waiting at Jaigad',                  1),
     ('loading_commenced', 'lp', 'loading_commenced',        'Loading commenced',                'Under loading at Jaigad anchorage',  6),
-    ('loading_completed', 'lp', 'loading_completed',        'Loading completed',                'Loaded — awaiting castoff',          0),
+    ('loading_completed', 'lp', 'loading_completed',        'Loading completed',                'Loaded — awaiting castoff',          1),
     ('castoff_jaigad',    'lp', 'cast_off_load_port',       'Castoff from Jaigad',              'In transit to Gull',                 12),
-    ('arrived_gull',      'dp', 'arrival_gull_island',      'Arrived at Gull',                  'Loaded waiting at Gull',             10),
+    ('arrived_gull',      'dp', 'arrival_gull_island',      'Arrived at Gull',                  'Loaded waiting at Gull',             9),
     ('dept_gull',         'dp', 'departure_gull_island',    'Dept. from Gull',                  'In transit to Dharamtar',            4),
     ('arrived_dharamtar', 'dp', 'vessel_arrival_port',      'Arrived at Dharamtar',             'Waiting at Dharamtar',               4),
     ('disch_commenced',   'dp', 'unloading_commenced',      'Discharge Commenced',              'Under disch at Dharamtar',           6),
@@ -38,22 +38,22 @@ MILESTONES = [
 ]
 
 # Leg-wise SOP benchmark exactly as given (hours); total=True rows are the
-# yellow subtotal rows in the SOP sheet.
+# yellow subtotal rows in the SOP sheet, tat=True the blue TAT row.
 LEGS = [
-    {'leg': 'Jaigad Arrival - Loading commence',        'target': 1,  'total': False},
-    {'leg': 'Loading Commence - Loading Completion',    'target': 6,  'total': False},
-    {'leg': 'Loading Complete to Cast off',             'target': 0,  'total': False},
-    {'leg': 'Total Time Taken at Jaigad',               'target': 7,  'total': True},
-    {'leg': 'Jaigad Departure to Gull Arrival',         'target': 12, 'total': False},
-    {'leg': 'Gull arrival - Gull Departure',            'target': 10, 'total': False},
-    {'leg': 'Gull Departure - Dharamtar Arrival',       'target': 4,  'total': False},
-    {'leg': 'Jaigad Departure - Dharamtar Arrival',     'target': 26, 'total': True},
-    {'leg': 'Dharamtar Arrival to Disch Commence',      'target': 4,  'total': False},
-    {'leg': 'Disch Commence to Disch Completed',        'target': 6,  'total': False},
-    {'leg': 'Disch Completed to Cast off',              'target': 1,  'total': False},
-    {'leg': 'Total Time Taken at Dharamtar',            'target': 11, 'total': True},
-    {'leg': 'Dharamtar Departure  to Jaigad Arrival',   'target': 16, 'total': True},
-    {'leg': 'Total TAT',                                'target': 60, 'total': True},
+    {'leg': 'Jaigad Arrival - Jaigad Loading Commenced (Preberthing delay)',        'target': 1,  'total': False},
+    {'leg': 'Loading Commence - Loading Completion (Loading time)',                 'target': 6,  'total': False},
+    {'leg': 'Loading Completed - Cast Off from Jaigad (Waiting after loading)',     'target': 1,  'total': False},
+    {'leg': 'Total time taken at Jaigad',                                           'target': 8,  'total': True},
+    {'leg': 'Jaigad Departure to Gull Arrival (Loaded Transit time)',               'target': 12, 'total': False},
+    {'leg': 'Gull Arrival - Gull Departure (Waiting at Gull)',                      'target': 9,  'total': False},
+    {'leg': 'Gull Departure - Dharamtar Arrival',                                   'target': 4,  'total': False},
+    {'leg': 'Jaigad Departure - Dharamtar Arrival (Jaigad to Dharamtar)',           'target': 25, 'total': True},
+    {'leg': 'Dharamtar Arrival to Disch Commenced (Preberthing delay)',             'target': 4,  'total': False},
+    {'leg': 'Disch Commenced to Disch Completed (Unloading Time)',                  'target': 6,  'total': False},
+    {'leg': 'Disch Completed to Cast Off from Dharamtar (Waiting after Unloading)', 'target': 1,  'total': False},
+    {'leg': 'Total time taken at Dharamtar',                                        'target': 11, 'total': True},
+    {'leg': 'Dharamtar Departure to Jaigad Arrival',                                'target': 16, 'total': True},
+    {'leg': 'TAT',                                                                  'target': 60, 'total': True, 'tat': True},
 ]
 
 # (from_col, to_col) per leg for computing actuals — index-aligned with LEGS
@@ -73,10 +73,6 @@ LEG_COLS = [
     ('sailed_out_load_port',  'reached_load_port'),
     ('arrived_load_port',     'reached_load_port'),
 ]
-
-ONE_WAY_TARGET = 44   # hours: Jaigad (7) + transit (26) + Dharamtar (11)
-TOTAL_TAT_TARGET = 60  # hours
-
 
 def _parse_ts(v):
     """Parse the TEXT timestamps stored by MBC01 (datetime-local values)."""
@@ -174,19 +170,35 @@ def mbc_tracking_data():
             if cur_t.get('reached_load_port') is None:
                 cur_t['reached_load_port'] = nxt.get('arrived_load_port')
 
-    sums = [0.0] * len(LEG_COLS)
-    counts = [0] * len(LEG_COLS)
+    # Actual averages per leg over three windows: today, month-to-date,
+    # financial-year-to-date (Apr–Mar). A leg is bucketed by its start time.
+    now = datetime.now()
+    fy_year = now.year if now.month >= 4 else now.year - 1
+    windows = {
+        'today': datetime(now.year, now.month, now.day),
+        'mtd':   datetime(now.year, now.month, 1),
+        'ytd':   datetime(fy_year, 4, 1),
+    }
+    sums   = {w: [0.0] * len(LEG_COLS) for w in windows}
+    counts = {w: [0] * len(LEG_COLS) for w in windows}
+    trip_counts = {w: 0 for w in windows}
     for t in trips:
+        arr = _parse_ts(t.get('arrived_load_port'))
+        for w, start in windows.items():
+            if arr and arr >= start:
+                trip_counts[w] += 1
         for i, (col_a, col_b) in enumerate(LEG_COLS):
             ta, tb = _parse_ts(t.get(col_a)), _parse_ts(t.get(col_b))
             if ta and tb:
                 dh = (tb - ta).total_seconds() / 3600.0
                 # ponytail: drop negative and >30-day diffs — bad data entry
                 if 0 <= dh <= 720:
-                    sums[i] += dh
-                    counts[i] += 1
-    legs = [dict(l, actual=round(sums[i] / counts[i], 1) if counts[i] else None,
-                 trips=counts[i])
+                    for w, start in windows.items():
+                        if ta >= start:
+                            sums[w][i] += dh
+                            counts[w][i] += 1
+    legs = [dict(l, **{w: round(sums[w][i] / counts[w][i], 2) if counts[w][i] else None
+                       for w in windows})
             for i, l in enumerate(LEGS)]
 
     now = datetime.now()
@@ -272,13 +284,10 @@ def mbc_tracking_data():
         'vessels': vessels,
         'status_breakdown': [{'status': s, 'count': c} for s, c in breakdown.items()],
         'legs': legs,
-        'milestone_targets': [
-            {'milestone': label, 'target': target}
-            for (_k, _l, _c, label, _s, target) in MILESTONES if target is not None
-        ],
+        'trip_counts': trip_counts,
+        'today_label': now.strftime('%d-%m-%Y'),
+        'fy_label': f'FY {fy_year % 100}-{(fy_year + 1) % 100}',
         'milestone_labels': [
             {'key': k, 'label': label} for (k, _l, _c, label, _s, _t) in MILESTONES
         ],
-        'one_way_target': ONE_WAY_TARGET,
-        'total_tat_target': TOTAL_TAT_TARGET,
     })

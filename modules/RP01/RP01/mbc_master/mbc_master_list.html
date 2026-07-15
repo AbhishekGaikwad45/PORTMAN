@@ -886,6 +886,12 @@
             <option value="">All FY</option>
         </select>
     </div>
+    <div class="filter-group">
+        <label for="filter-owner">Owner</label>
+        <select id="filter-owner" title="Filter by MBC Owner">
+            <option value="">All Owners</option>
+        </select>
+    </div>
     <button type="button" class="filter-btn primary" onclick="applyFilters()">Apply</button>
     <button type="button" class="filter-btn reset" onclick="resetFilters()">Reset</button>
     <button type="button" class="filter-btn download" onclick="downloadExcel()" id="dl-btn">&#8595; Download TAT
@@ -1110,11 +1116,23 @@
     }
 
     /* ── filters ─────────────────────────────────────────── */
+    function loadOwners() {
+        fetch('/api/module/RP01/mbc-master/owners')
+            .then(r => r.json())
+            .then(owners => {
+                const sel = document.getElementById('filter-owner');
+                owners.forEach(o => sel.add(new Option(o, o)));
+            })
+            .catch(err => console.error('owners load failed', err));
+    }
+    loadOwners();
+
     function applyFilters(isPageLoad = false) {
 
         const selectedDate = document.getElementById('filter-date').value;;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
+        const owner = document.getElementById('filter-owner').value;
 
         const cutoffDate = '2026-05-01';
 
@@ -1143,6 +1161,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
+        if (owner) params.set('owner', owner);
 
         document.getElementById('row-count').textContent = 'Loading…';
 
@@ -1173,6 +1192,7 @@
         document.getElementById('filter-date').value = '';
         document.getElementById('filter-month').value = '';
         document.getElementById('filter-fy').value = '';
+        document.getElementById('filter-owner').value = '';
         applyFilters();
     }
 
@@ -1198,6 +1218,7 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
+        const owner = document.getElementById('filter-owner').value;
 
         const params = new URLSearchParams();
         if (selectedDate) {
@@ -1205,6 +1226,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
+        if (owner) params.set('owner', owner);
 
         const wrapper = document.getElementById('tat-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading TAT data…</div>';
@@ -1294,11 +1316,13 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
+        const owner = document.getElementById('filter-owner').value;
         if (selectedDate) {
             params.set('selected_date', selectedDate);
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
+        if (owner) params.set('owner', owner);
 
         const wrapper = document.getElementById('dppltat-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading DPPL TAT data…</div>';
@@ -1381,11 +1405,13 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
+        const owner = document.getElementById('filter-owner').value;
         if (selectedDate) {
             params.set('selected_date', selectedDate);
         };
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
+        if (owner) params.set('owner', owner);
 
         const wrapper = document.getElementById('mbcwise-wrapper');
         wrapper.innerHTML = '<div class="tat-placeholder">Loading MBC Wise data…</div>';
@@ -1470,6 +1496,7 @@
         const selectedDate = document.getElementById('filter-date').value;
         const month = document.getElementById('filter-month').value;
         const fy = document.getElementById('filter-fy').value;
+        const owner = document.getElementById('filter-owner').value;
 
         const params = new URLSearchParams();
 
@@ -1478,6 +1505,7 @@
         }
         if (month) params.set('month', month);
         if (fy) params.set('fy', fy);
+        if (owner) params.set('owner', owner);
 
         const btn = document.getElementById('dl-btn');
 
