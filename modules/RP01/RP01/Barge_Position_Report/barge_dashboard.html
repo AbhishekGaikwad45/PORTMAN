@@ -1354,21 +1354,21 @@
                     <td>A</td>
                     <td id="aDischarge">0</td>
                     <td><input type="number" id="aPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="aDiff">0</td>
                 </tr>
                 <tr>
                     <td>B</td>
                     <td id="bDischarge">0</td>
                     <td><input type="number" id="bPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="bDiff">0</td>
                 </tr>
                 <tr>
                     <td>C</td>
                     <td id="cDischarge">0</td>
                     <td><input type="number" id="cPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="cDiff">0</td>
                 </tr>
                 <tr class="total-row">
@@ -1411,10 +1411,41 @@
             <div style="display:flex;align-items:center;gap:10px;">
                 <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;"
                     onclick="downloadModalExcel()">↓ Download Excel</button>
+                <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;background:#0f766e;"
+                    onclick="openLogsRangeDownloadPopup()">📅 Download by Date Range</button>
                 <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
             </div>
         </div>
         <div id="logsModalBody" class="logs-modal-body"></div>
+    </div>
+</div>
+
+<!-- Movement Logs — Date Range Download Popup -->
+<div id="logsRangeModal" class="logs-modal" style="z-index:100000;">
+    <div class="logs-modal-content" style="width:420px;height:auto;">
+        <div class="logs-modal-header">
+            <span>Download Logs — Date Range</span>
+            <button class="remove-row-btn" onclick="closeLogsRangeDownloadPopup()">✕</button>
+        </div>
+        <div class="logs-modal-body" style="padding:20px;">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="filter-group">
+                    <label>FROM DATE</label>
+                    <input type="date" id="logsRangeFromDate"
+                        style="width:100%;height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;box-sizing:border-box;">
+                </div>
+                <div class="filter-group">
+                    <label>TO DATE</label>
+                    <input type="date" id="logsRangeToDate"
+                        style="width:100%;height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;box-sizing:border-box;">
+                </div>
+                <div id="logsRangeError" style="color:#dc2626;font-size:12px;display:none;"></div>
+                <button type="button" class="filter-btn primary" style="width:100%;height:36px;"
+                    onclick="downloadMovementLogsRangeExcel()">
+                    ↓ Download Excel for Range
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1525,59 +1556,64 @@
     //  MAIN PREVIEW
     // ══════════════════════════════════════════════════════════════════════════════
     async function applyDateRangeFilter() {
-    const range = getShiftDateRange();
-    if (!range) { alert("Please select a date."); return; }
+        const range = getShiftDateRange();
+        if (!range) { alert("Please select a date."); return; }
 
-    document.getElementById("previewLoader").style.display = "flex";
+        document.getElementById("previewLoader").style.display = "flex";
 
-    _movementLogs = [];
-    document.getElementById('logConsole').innerHTML = '';
-    document.getElementById('logCount').textContent = '0';
+        // Clear stale save-status badges from a previous shift/date view
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
 
-    try {
-        document.getElementById("reportContent").style.display = "block";
-        document.getElementById("saveReportBtn").disabled = false;
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
 
-        const reportDate = document.getElementById('report-date').value;
-        const shift = document.getElementById('report-shift').value;
-
-        // Run the board/summary loaders — if ANY of these fail, log it but
-        // don't let it block the saved-report fetch below.
-        const results = await Promise.allSettled([
-            loadBerthOccupancy(range.fromISO, range.toISO),
-            loadMotherVesselData(range.fromISO, range.toISO),
-            loadTideData(range.fromISO, range.toISO),
-            loadShiftWiseDischarge(),
-            loadShiftSummary(),
-        ]);
-        results.forEach((r, i) => {
-            if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
-        });
-
-        // Saved-report fetch is isolated so a failure elsewhere never
-        // prevents your saved data from being applied.
-        let savedData = null;
         try {
-            savedData = await loadSavedReport(reportDate, shift);
-            console.log('Saved report lookup:', reportDate, shift, savedData);
-        } catch (e) {
-            console.error('loadSavedReport failed:', e);
-        }
+            document.getElementById("reportContent").style.display = "block";
+            document.getElementById("saveReportBtn").disabled = false;
 
-        if (savedData && savedData.found) {
-            applySavedOverlay(savedData);
-        } else {
-            console.warn('No saved report found for', reportDate, shift);
-        }
+            const reportDate = document.getElementById('report-date').value;
+            const shift = document.getElementById('report-shift').value;
 
-    } catch (err) {
-        console.error('Preview failed:', err);
-        alert('Something went wrong loading the preview. Check console for details.');
-    } finally {
-        document.getElementById("previewLoader").style.display = "none";
+            const results = await Promise.allSettled([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary(),
+            ]);
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+            });
+
+            let savedData = null;
+            try {
+                savedData = await loadSavedReport(reportDate, shift);
+                console.log('Saved report lookup:', reportDate, shift, savedData);
+            } catch (e) {
+                console.error('loadSavedReport failed:', e);
+            }
+
+            const hasOverlayData = savedData && (
+                savedData.found ||
+                (savedData.berth_layout && savedData.berth_layout.length > 0) ||
+                (savedData.notes && savedData.notes.length > 0)
+            );
+
+            if (hasOverlayData) {
+                applySavedOverlay(savedData);
+            } else {
+                console.warn('No saved report found for', reportDate, shift);
+            }
+
+        } catch (err) {
+            console.error('Preview failed:', err);
+            alert('Something went wrong loading the preview. Check console for details.');
+        } finally {
+            document.getElementById("previewLoader").style.display = "none";
+        }
     }
-}
-
     // ══════════════════════════════════════════════════════════════════════════════
     //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
     // ══════════════════════════════════════════════════════════════════════════════
@@ -1837,7 +1873,9 @@
 
         // Mark as clean (no unsaved changes yet)
         _unsaved = false;
-        setSaveStatus('saved', '✓ Loaded from saved report');
+        setSaveStatus('saved', savedData.found
+            ? '✓ Loaded from saved report'
+            : '◐ Carried over from previous shift');
     }
 
     function escHtml(str) {
@@ -2218,6 +2256,81 @@
     }
 
     function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+
+    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOVEMENT LOGS — DATE RANGE DOWNLOAD
+    // ══════════════════════════════════════════════════════════════════════════════
+    function openLogsRangeDownloadPopup() {
+        const reportDate = document.getElementById('report-date').value;
+        document.getElementById('logsRangeFromDate').value = reportDate;
+        document.getElementById('logsRangeToDate').value = reportDate;
+        document.getElementById('logsRangeError').style.display = 'none';
+        document.getElementById('logsRangeModal').style.display = 'block';
+    }
+
+    function closeLogsRangeDownloadPopup() {
+        document.getElementById('logsRangeModal').style.display = 'none';
+    }
+
+    async function downloadMovementLogsRangeExcel() {
+        const fromDate = document.getElementById('logsRangeFromDate').value;
+        const toDate = document.getElementById('logsRangeToDate').value;
+        const errBox = document.getElementById('logsRangeError');
+        errBox.style.display = 'none';
+
+        if (!fromDate || !toDate) {
+            errBox.textContent = 'Please select both From Date and To Date.';
+            errBox.style.display = 'block';
+            return;
+        }
+        if (fromDate > toDate) {
+            errBox.textContent = 'From Date cannot be after To Date.';
+            errBox.style.display = 'block';
+            return;
+        }
+
+        document.getElementById("excelLoader").style.display = "flex";
+
+        try {
+            const params = new URLSearchParams({ from_date: fromDate, to_date: toDate });
+            const response = await fetch(`/api/module/RP01/download-movement-logs-range-excel?${params}`);
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = `Movement_Logs_${fromDate}_to_${toDate}.xlsx`;
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            closeLogsRangeDownloadPopup();
+
+        } catch (err) {
+            console.error('Range download failed:', err);
+            errBox.textContent = 'Download failed. Please try again.';
+            errBox.style.display = 'block';
+        } finally {
+            document.getElementById("excelLoader").style.display = "none";
+        }
+    }
+
+    window.addEventListener('click', e => {
+        const rm = document.getElementById('logsRangeModal');
+        if (e.target === rm) rm.style.display = 'none';
+    });
 
     window.addEventListener('click', e => {
         const m = document.getElementById('logsModal');
@@ -2653,13 +2766,20 @@
     // ══════════════════════════════════════════════════════════════════════════════
     //  INIT
     // ══════════════════════════════════════════════════════════════════════════════
+    function getCurrentShiftCode() {
+        const hour = new Date().getHours();
+        if (hour >= 6 && hour < 14) return 'A';
+        if (hour >= 14 && hour < 22) return 'B';
+        return 'C'; // 22:00–06:00
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
         loadShiftDetails();
 
         const dateInput = document.getElementById('report-date');
         const shiftInput = document.getElementById('report-shift');
         dateInput.value = new Date().toISOString().slice(0, 10);
-        shiftInput.value = 'ALL';
+        shiftInput.value = getCurrentShiftCode();
 
         // Warn before leaving with unsaved changes
         window.addEventListener('beforeunload', e => {
@@ -2673,50 +2793,50 @@
         bindDropzones();
     });
     async function downloadModalExcel() {
-    if (!_modalExcelMode) return;
-    const reportDate = document.getElementById('report-date').value;
-    const shift = document.getElementById('report-shift').value;
+        if (!_modalExcelMode) return;
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
 
-    try {
-        let response;
-        if (_modalExcelMode === 'logs') {
-            response = await fetch('/api/module/RP01/download-movement-logs-excel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    movement_logs: _modalExcelData,
-                    report_date: reportDate,
-                    shift: shift
-                }),
-            });
-        } else {
-            const params = new URLSearchParams({ date: reportDate, shift });
-            response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+        try {
+            let response;
+            if (_modalExcelMode === 'logs') {
+                response = await fetch('/api/module/RP01/download-movement-logs-excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        movement_logs: _modalExcelData,
+                        report_date: reportDate,
+                        shift: shift
+                    }),
+                });
+            } else {
+                const params = new URLSearchParams({ date: reportDate, shift });
+                response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+            }
+
+            if (!response.ok) throw new Error('Download failed');
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = 'export.xlsx';
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error(err);
+            alert('Excel download failed.');
         }
-
-        if (!response.ok) throw new Error('Download failed');
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-
-        const disposition = response.headers.get('Content-Disposition');
-        let filename = 'export.xlsx';
-        if (disposition) {
-            const match = disposition.match(/filename="?([^"]+)"?/);
-            if (match) filename = match[1];
-        }
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-    } catch (err) {
-        console.error(err);
-        alert('Excel download failed.');
     }
-}
 </script>
 {% endraw %}
 
