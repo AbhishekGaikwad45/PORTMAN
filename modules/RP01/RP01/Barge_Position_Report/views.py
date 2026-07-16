@@ -8,6 +8,7 @@ from flask import send_file
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment 
 from openpyxl.utils import get_column_letter
+import json as _json
 
 def login_required(f):
     @wraps(f)
@@ -1123,126 +1124,334 @@ def _shift_wise_discharge_inner():
 @bp.route('/api/module/RP01/shift-report/save', methods=['POST'])
 @login_required
 def api_shift_report_save():
+    """
+    Save shift report data to barge_position_report table.
+    
+    Expected JSON:
+    {
+        "report_date": "2026-07-16",
+        "shift": "A",
+        "shift_incharge": "Name",
+        "bpo": "Name",
+        "crane_operator": "Name",
+        "berth_layout": [...],  # Combined with waiting_area
+        "notes": [...],
+        "wt_r19": {...},
+        "mbc_eta": {...},
+        "eta_to_dharamtar": {...},
+        "on_the_way_gull": {...},
+        "shift_plan": {...},
+        "movement_logs": [...]
+    }
+    
+    Database Operation:
+        INSERT INTO barge_position_report (...)
+        ON CONFLICT (report_date, shift)
+        DO UPDATE SET ...
+    """
+    
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-
-    import json as _json
+        return jsonify({'error': 'No data provided'}), 400
 
     conn = get_db()
-    cur  = get_cursor(conn)
+    cur = get_cursor(conn)
 
     try:
-        # Separate berth_layout (berths only) and waiting_area from the combined list
-        all_layout    = data.get('berth_layout', [])
-        berth_layout  = [item for item in all_layout if item.get('berth') != 'WAITING']
-        waiting_area  = [item for item in all_layout if item.get('berth') == 'WAITING']
-
+        # Prepare data
+        report_date = data.get('report_date')
+        shift = data.get('shift')
+        shift_incharge = data.get('shift_incharge', '')
+        bpo = data.get('bpo', '')
+        crane_operator = data.get('crane_operator', '')
+        
+        # Separate berth_layout and waiting_area
+        all_layout = data.get('berth_layout', [])
+        berth_layout = [
+            item for item in all_layout 
+            if item.get('berth') != 'WAITING'
+        ]
+        waiting_area = [
+            item for item in all_layout 
+            if item.get('berth') == 'WAITING'
+        ]
+        
+        # Convert to JSON for storage
+        berth_layout_json = _json.dumps(berth_layout)
+        waiting_area_json = _json.dumps(waiting_area)
+        wt_r19_json = _json.dumps(data.get('wt_r19', {}))
+        mbc_eta_json = _json.dumps(data.get('mbc_eta', {}))
+        eta_to_dharamtar_json = _json.dumps(data.get('eta_to_dharamtar', {}))
+        on_the_way_gull_json = _json.dumps(data.get('on_the_way_gull', {}))
+        shift_plan_json = _json.dumps(data.get('shift_plan', {}))
+        notes_json = _json.dumps(data.get('notes', []))
+        movement_logs_json = _json.dumps(data.get('movement_logs', []))
+        
+        # ====================================================================
+        # UPSERT: Insert or update based on (report_date, shift)
+        # ====================================================================
+        
         cur.execute("""
             INSERT INTO barge_position_report
                 (report_date, shift, shift_incharge, bpo, crane_operator,
                  berth_layout, waiting_area, wt_r19, mbc_eta,
                  eta_to_dharamtar, on_the_way_gull, shift_plan,
-                 notes, movement_logs, updated_at)
-            VALUES (%s, %s, %s, %s, %s,
-                    %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                    %s::jsonb, %s::jsonb, %s::jsonb,
-                    %s::jsonb, %s::jsonb, NOW())
+                 notes, movement_logs, created_at, updated_at)
+            VALUES 
+                (%s, %s, %s, %s, %s,
+                 %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
+                 %s::jsonb, %s::jsonb, %s::jsonb,
+                 %s::jsonb, %s::jsonb, NOW(), NOW())
             ON CONFLICT (report_date, shift)
             DO UPDATE SET
-                shift_incharge  = EXCLUDED.shift_incharge,
-                bpo             = EXCLUDED.bpo,
-                crane_operator  = EXCLUDED.crane_operator,
-                berth_layout    = EXCLUDED.berth_layout,
-                waiting_area    = EXCLUDED.waiting_area,
-                wt_r19          = EXCLUDED.wt_r19,
-                mbc_eta         = EXCLUDED.mbc_eta,
-                eta_to_dharamtar= EXCLUDED.eta_to_dharamtar,
-                on_the_way_gull = EXCLUDED.on_the_way_gull,
-                shift_plan      = EXCLUDED.shift_plan,
-                notes           = EXCLUDED.notes,
-                movement_logs   = EXCLUDED.movement_logs,
-                updated_at      = NOW()
+                shift_incharge   = EXCLUDED.shift_incharge,
+                bpo              = EXCLUDED.bpo,
+                crane_operator   = EXCLUDED.crane_operator,
+                berth_layout     = EXCLUDED.berth_layout,
+                waiting_area     = EXCLUDED.waiting_area,
+                wt_r19           = EXCLUDED.wt_r19,
+                mbc_eta          = EXCLUDED.mbc_eta,
+                eta_to_dharamtar = EXCLUDED.eta_to_dharamtar,
+                on_the_way_gull  = EXCLUDED.on_the_way_gull,
+                shift_plan       = EXCLUDED.shift_plan,
+                notes            = EXCLUDED.notes,
+                movement_logs    = EXCLUDED.movement_logs,
+                updated_at       = NOW()
         """, (
-            data.get('report_date'),
-            data.get('shift'),
-            data.get('shift_incharge', ''),
-            data.get('bpo', ''),
-            data.get('crane_operator', ''),
-            _json.dumps(berth_layout),
-            _json.dumps(waiting_area),
-            _json.dumps(data.get('wt_r19', {})),
-            _json.dumps(data.get('mbc_eta', {})),
-            _json.dumps(data.get('eta_to_dharamtar', {})),
-            _json.dumps(data.get('on_the_way_gull', {})),
-            _json.dumps(data.get('shift_plan', {})),
-            _json.dumps(data.get('notes', [])),
-            _json.dumps(data.get('movement_logs', [])),
+            report_date, shift, shift_incharge, bpo, crane_operator,
+            berth_layout_json, waiting_area_json,
+            wt_r19_json, mbc_eta_json, eta_to_dharamtar_json,
+            on_the_way_gull_json, shift_plan_json,
+            notes_json, movement_logs_json,
         ))
+        
         conn.commit()
+        return jsonify({'ok': True})
 
     except Exception as e:
         conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    
+    finally:
         cur.close()
         conn.close()
-        return jsonify({'error': str(e)}), 500
-
-    cur.close()
-    conn.close()
-    return jsonify({'ok': True})
-
 
 @bp.route('/api/module/RP01/shift-report/load')
 @login_required
 def api_shift_report_load():
+    """
+    Load saved report data with two-level persistence logic.
+
+    Level 1 (SHIFT-SPECIFIC): berth_layout, movement_logs, shift personnel
+    Level 2 (DATE-SPECIFIC): notes, wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull
+
+    Query Parameters:
+        date (required): Report date YYYY-MM-DD
+        shift (optional): A, B, C, or ALL
+
+    Returns:
+        {
+            "found": true/false,     # True if THIS shift+date was explicitly saved
+            "carried": true/false,   # True if berth_layout/meta was carried from another shift
+            "berth_layout": [...],
+            "notes": [...],
+            "wt_r19": {...},
+            ...
+        }
+    """
+
     report_date = request.args.get('date')
-    shift       = request.args.get('shift', 'ALL')
+    shift = request.args.get('shift', 'ALL')
+
     if not report_date:
         return jsonify({'found': False})
 
     conn = get_db()
-    cur  = get_cursor(conn)
+    cur = get_cursor(conn)
 
     try:
+        # ====================================================================
+        # STEP 1: Try to find THIS shift+date combination
+        # ====================================================================
         cur.execute("""
             SELECT * FROM barge_position_report
             WHERE report_date = %s AND shift = %s
+            LIMIT 1
         """, (report_date, shift))
+
         row = cur.fetchone()
+
+        if row:
+            # ================================================================
+            # FOUND: THIS shift was explicitly saved
+            # ================================================================
+            row = dict(row)
+            berth_layout = row.get('berth_layout') or []
+            waiting_area = row.get('waiting_area') or []
+            combined = berth_layout + waiting_area
+
+            result = {
+                'found': True,
+                'carried': False,
+                'shift_incharge': row.get('shift_incharge', ''),
+                'bpo': row.get('bpo', ''),
+                'crane_operator': row.get('crane_operator', ''),
+                'berth_layout': combined,
+                'notes': row.get('notes') or [],
+                'wt_r19': row.get('wt_r19') or {},
+                'mbc_eta': row.get('mbc_eta') or {},
+                'eta_to_dharamtar': row.get('eta_to_dharamtar') or {},
+                'on_the_way_gull': row.get('on_the_way_gull') or {},
+                'shift_plan': row.get('shift_plan') or {},
+                'movement_logs': row.get('movement_logs') or [],
+                'updated_at': str(row.get('updated_at', '')),
+            }
+            return jsonify(result)
+
+        # ====================================================================
+        # STEP 2: THIS shift NOT found - carry forward from recent rows.
+        #
+        # berth_layout/meta come from the single most recent row.
+        # But wt_r19 / mbc_eta / eta_to_dharamtar / on_the_way_gull / notes
+        # are MERGED across recent rows (oldest → newest, non-blank wins),
+        # so a later shift saving with a blank field never wipes out a
+        # real value entered in an earlier shift or an earlier day.
+        # ====================================================================
+        cur.execute("""
+            SELECT
+                report_date,
+                shift,
+                berth_layout,
+                waiting_area,
+                shift_incharge,
+                bpo,
+                crane_operator,
+                notes,
+                wt_r19,
+                mbc_eta,
+                eta_to_dharamtar,
+                on_the_way_gull,
+                updated_at
+            FROM barge_position_report
+            WHERE report_date <= %s
+            ORDER BY report_date DESC, updated_at DESC
+            LIMIT 20
+        """, (report_date,))
+
+        rows = [dict(r) for r in cur.fetchall()]
+
+        if rows:
+            latest = rows[0]
+            berth_layout = latest.get('berth_layout') or []
+            waiting_area = latest.get('waiting_area') or []
+            combined = berth_layout + waiting_area
+
+            # ── Merge date-specific dict fields across recent rows ─────────
+            # Walk oldest → newest so a genuinely later real edit still
+            # wins over an earlier one, but a BLANK value never overwrites
+            # a real one from an earlier row.
+            merged_wt_r19 = {}
+            merged_mbc_eta = {}
+            merged_eta_dharamtar = {}
+            merged_gull = {}
+            merged_notes = []
+
+            for r in reversed(rows):  # oldest first
+                for k, v in (r.get('wt_r19') or {}).items():
+                    if v:
+                        merged_wt_r19[k] = v
+                for k, v in (r.get('mbc_eta') or {}).items():
+                    if v:
+                        merged_mbc_eta[k] = v
+                for k, v in (r.get('eta_to_dharamtar') or {}).items():
+                    if v:
+                        merged_eta_dharamtar[k] = v
+                for k, v in (r.get('on_the_way_gull') or {}).items():
+                    if v:
+                        merged_gull[k] = v
+                for n in (r.get('notes') or []):
+                    if n and n not in merged_notes:
+                        merged_notes.append(n)
+
+            # ── Filter carried berth_layout down to items still actually
+            # active right now (same-cursor, no nested connection) ─────────
+            active_keys = set()
+            try:
+                cur.execute("""
+                    SELECT TRIM(UPPER(barge_name)) AS key
+                    FROM ldud_barge_lines
+                    WHERE COALESCE(TRIM(barge_name),'') <> ''
+                      AND (cast_off_port IS NULL OR TRIM(cast_off_port) = '')
+                      AND (completed_discharge_berth IS NULL OR TRIM(completed_discharge_berth) = '')
+                """)
+                for r in cur.fetchall():
+                    r = dict(r)
+                    if r.get('key'):
+                        active_keys.add(r['key'])
+
+                cur.execute("""
+                    SELECT TRIM(UPPER(h.mbc_name)) AS key
+                    FROM mbc_header h
+                    JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+                    WHERE p.vessel_arrival_port IS NOT NULL
+                      AND TRIM(COALESCE(p.vessel_arrival_port,'')) <> ''
+                      AND (p.unloading_completed IS NULL OR TRIM(p.unloading_completed) = '')
+                      AND (p.vessel_cast_off IS NULL OR TRIM(p.vessel_cast_off) = '')
+                """)
+                for r in cur.fetchall():
+                    r = dict(r)
+                    if r.get('key'):
+                        active_keys.add(r['key'])
+
+                still_active = [
+                    item for item in combined
+                    if (item.get('name') or '').strip().upper() in active_keys
+                ]
+            except Exception as active_err:
+                print('Active-barge lookup failed, falling back to unfiltered carry:', active_err)
+                still_active = combined
+
+            result = {
+                'found': False,
+                'carried': True,
+                'shift_incharge': latest.get('shift_incharge', ''),
+                'bpo': latest.get('bpo', ''),
+                'crane_operator': latest.get('crane_operator', ''),
+                'berth_layout': still_active,
+                'notes': merged_notes,
+                'wt_r19': merged_wt_r19,
+                'mbc_eta': merged_mbc_eta,
+                'eta_to_dharamtar': merged_eta_dharamtar,
+                'on_the_way_gull': merged_gull,
+                'shift_plan': {},
+                'movement_logs': [],
+                'updated_at': str(latest.get('updated_at', '')),
+            }
+            return jsonify(result)
+
+        # ====================================================================
+        # STEP 3: No saved data found on this date at all
+        # ====================================================================
+        return jsonify({
+            'found': False,
+            'carried': False,
+            'berth_layout': [],
+            'notes': [],
+            'wt_r19': {},
+            'mbc_eta': {},
+            'eta_to_dharamtar': {},
+            'on_the_way_gull': {},
+            'shift_plan': {},
+            'movement_logs': [],
+            'updated_at': None,
+        })
+
     except Exception as e:
+        return jsonify({'found': False, 'error': str(e)}), 500
+
+    finally:
         cur.close()
         conn.close()
-        return jsonify({'found': False, 'error': str(e)})
-
-    cur.close()
-    conn.close()
-
-    if not row:
-        return jsonify({'found': False})
-
-    row = dict(row)
-
-    # Merge berth_layout and waiting_area back into one list
-    # (frontend sends/receives them combined)
-    berth_layout = row.get('berth_layout') or []
-    waiting_area = row.get('waiting_area') or []
-    combined     = berth_layout + waiting_area
-
-    return jsonify({
-        'found':           True,
-        'shift_incharge':  row.get('shift_incharge', ''),
-        'bpo':             row.get('bpo', ''),
-        'crane_operator':  row.get('crane_operator', ''),
-        'berth_layout':    combined,
-        'wt_r19':          row.get('wt_r19')          or {},
-        'mbc_eta':         row.get('mbc_eta')         or {},
-        'eta_to_dharamtar':row.get('eta_to_dharamtar')or {},
-        'on_the_way_gull': row.get('on_the_way_gull') or {},
-        'shift_plan':      row.get('shift_plan')      or {},
-        'notes':           row.get('notes')           or [],
-        'movement_logs':   row.get('movement_logs')   or [],
-        'updated_at':      str(row.get('updated_at', '')),
-    })
     
 @bp.route('/api/module/RP01/download-barge-position-excel')
 @login_required
@@ -1304,10 +1513,24 @@ def download_barge_position_excel():
 
     for v in mother_vessels:
         name = v.get('vessel_name') or ''
-        v['wt_r19']            = wt_r19_map.get(name, v.get('wt_r19', ''))
-        v['mbc_eta']           = mbc_eta_map.get(name, v.get('mbc_eta', ''))
-        v['eta_to_dharamtar']  = eta_dharamtar_map.get(name, v.get('at_gull_loaded', ''))
-        v['on_the_way_gull']   = on_the_way_gull_map.get(name, '')
+
+        backend_mbc_eta   = v.get('mbc_eta', '')
+        backend_eta_dhrmt = v.get('eta_to_dharamtar', '')
+
+        # WT @ R19 and ON THE WAY TO GULL have no live backend source —
+        # always use the saved/carried user-entered value.
+        v['wt_r19']          = wt_r19_map.get(name, '')
+        v['on_the_way_gull']  = on_the_way_gull_map.get(name, '')
+
+        # MBC ETA and ETA TO DHARAMTAR DO have a live backend value.
+        # Prefer that if it exists; only fall back to the saved/user value
+        # when the backend has nothing for this vessel right now.
+        v['mbc_eta'] = backend_mbc_eta if backend_mbc_eta else mbc_eta_map.get(name, '')
+
+        v['eta_to_dharamtar'] = (
+            backend_eta_dhrmt if backend_eta_dhrmt
+            else eta_dharamtar_map.get(name, v.get('at_gull_loaded', ''))
+        )
 
     # If a report was saved for this date/shift, its berth layout wins
     use_saved_layout = bool(berth_layout_saved or waiting_area_saved)
@@ -2149,3 +2372,105 @@ def download_completed_excel():
         as_attachment=True,
         download_name=f"Completed_Barges_MBC_{report_date}_{shift}_{stamp}.xlsx"
     )        
+    
+@bp.route('/api/module/RP01/download-movement-logs-range-excel')
+@login_required
+def download_movement_logs_range_excel():
+    from_date = request.args.get('from_date', '')
+    to_date = request.args.get('to_date', '')
+
+    if not from_date or not to_date:
+        return jsonify({'error': 'from_date and to_date are required'}), 400
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    all_logs = []
+    try:
+        cur.execute("""
+            SELECT report_date, shift, movement_logs
+            FROM barge_position_report
+            WHERE report_date BETWEEN %s AND %s
+              AND movement_logs IS NOT NULL
+            ORDER BY report_date ASC, shift ASC
+        """, (from_date, to_date))
+
+        for row in cur.fetchall():
+            row = dict(row)
+            logs = row.get('movement_logs') or []
+            for log in logs:
+                all_logs.append(log)
+    finally:
+        cur.close()
+        conn.close()
+
+    # Sort chronologically by reportDate + time where available
+    def sort_key(log):
+        return (log.get('reportDate', ''), log.get('time', ''))
+    all_logs.sort(key=sort_key)
+
+    # ── Build workbook (same style as the single-shift logs export) ────────
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Movement Logs"
+    ws.sheet_view.showGridLines = False
+
+    thin = Side(style='thin', color='D9E2EC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_a = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+    headers = ["Name", "From", "To", "Date", "Time", "Shift", "Shift Incharge"]
+
+    ws.merge_cells('A1:G1')
+    c = ws['A1']
+    c.value = f"MOVEMENT LOGS   ({from_date} to {to_date})   Total: {len(all_logs)}"
+    c.font = Font(bold=True, size=16, color="2563EB")
+    c.alignment = center
+    ws.row_dimensions[1].height = 26
+
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=i, value=h)
+        cell.font = Font(bold=True, size=10, color="6B7280")
+        cell.fill = PatternFill("solid", fgColor="F8FAFC")
+        cell.alignment = center
+        cell.border = border
+
+    r = 3
+    if not all_logs:
+        ws.merge_cells(f'A{r}:G{r}')
+        cell = ws.cell(row=r, column=1, value="No movement logs found for this date range.")
+        cell.font = Font(size=10, color="94A3B8")
+        cell.alignment = center
+        r += 1
+    else:
+        for log in all_logs:
+            incharge = (log.get('shiftIncharge') or '').strip() or '—'
+            vals = [
+                log.get('name', ''), log.get('from', ''), log.get('to', ''),
+                log.get('reportDate', ''), log.get('time', ''),
+                log.get('shift', ''), incharge
+            ]
+            for i, v in enumerate(vals, start=1):
+                cell = ws.cell(row=r, column=i, value=v)
+                cell.border = border
+                cell.alignment = left_a if i in (1, 2, 3, 7) else center
+                cell.font = Font(bold=(i == 1), size=10, color="0F172A")
+            r += 1
+
+    widths = {'A': 18, 'B': 16, 'C': 16, 'D': 14, 'E': 14, 'F': 10, 'G': 30}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A3"
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f"Movement_Logs_{from_date}_to_{to_date}_{stamp}.xlsx"
+    )   
