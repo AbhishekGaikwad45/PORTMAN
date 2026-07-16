@@ -1595,11 +1595,13 @@
                 console.error('loadSavedReport failed:', e);
             }
 
-            const hasOverlayData = savedData && (
-                savedData.found ||
-                (savedData.berth_layout && savedData.berth_layout.length > 0) ||
-                (savedData.notes && savedData.notes.length > 0)
-            );
+            // ── Authoritative check: `found` (this shift was explicitly saved)
+            // or `carried` (backend resolved a valid forward-only carry-forward
+            // snapshot) are BOTH authoritative answers from the backend and
+            // must always overwrite whatever loadBerthOccupancy() painted from
+            // the live/current DB state — even if berth_layout ends up empty
+            // (that just means nothing was manually placed for this shift yet).
+            const hasOverlayData = savedData && (savedData.found || savedData.carried);
 
             if (hasOverlayData) {
                 applySavedOverlay(savedData);
@@ -1614,6 +1616,7 @@
             document.getElementById("previewLoader").style.display = "none";
         }
     }
+
     // ══════════════════════════════════════════════════════════════════════════════
     //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
     // ══════════════════════════════════════════════════════════════════════════════
@@ -1751,6 +1754,71 @@
     }
 
     // ══════════════════════════════════════════════════════════════════════════════
+    //  MAIN PREVIEW
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function applyDateRangeFilter() {
+        const range = getShiftDateRange();
+        if (!range) { alert("Please select a date."); return; }
+
+        document.getElementById("previewLoader").style.display = "flex";
+
+        // Clear stale save-status badges from a previous shift/date view
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
+
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
+
+        try {
+            document.getElementById("reportContent").style.display = "block";
+            document.getElementById("saveReportBtn").disabled = false;
+
+            const reportDate = document.getElementById('report-date').value;
+            const shift = document.getElementById('report-shift').value;
+
+            const results = await Promise.allSettled([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary(),
+            ]);
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+            });
+
+            let savedData = null;
+            try {
+                savedData = await loadSavedReport(reportDate, shift);
+                console.log('Saved report lookup:', reportDate, shift, savedData);
+            } catch (e) {
+                console.error('loadSavedReport failed:', e);
+            }
+
+            // ── Authoritative check: `found` (this shift was explicitly saved)
+            // or `carried` (backend resolved a valid forward-only carry-forward
+            // snapshot) are BOTH authoritative answers from the backend and
+            // must always overwrite whatever loadBerthOccupancy() painted from
+            // the live/current DB state — even if berth_layout ends up empty
+            // (that just means nothing was manually placed for this shift yet).
+            const hasOverlayData = savedData && (savedData.found || savedData.carried);
+
+            if (hasOverlayData) {
+                applySavedOverlay(savedData);
+            } else {
+                console.warn('No saved report found for', reportDate, shift);
+            }
+
+        } catch (err) {
+            console.error('Preview failed:', err);
+            alert('Something went wrong loading the preview. Check console for details.');
+        } finally {
+            document.getElementById("previewLoader").style.display = "none";
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
     //  APPLY SAVED OVERLAY
     // ══════════════════════════════════════════════════════════════════════════════
     function applySavedOverlay(savedData) {
@@ -1761,15 +1829,19 @@
         if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
 
         // ── Berth layout ────────────────────────────────────────────────────────
-        if (savedData.berth_layout && savedData.berth_layout.length > 0) {
-            // Clear current board
+        // Repaint whenever this is an authoritative snapshot (found OR carried),
+        // even if berth_layout is empty. An empty snapshot legitimately means
+        // "nothing was manually placed for this shift" and must NOT leave the
+        // live/current-DB render from loadBerthOccupancy() sitting on screen
+        // instead — that was the source of the berth-mismatch bug.
+        if (savedData.found || savedData.carried) {
             document.querySelectorAll('.matrix-dropzone').forEach(z => {
                 z.classList.add('empty-slot');
                 z.innerHTML = '—';
             });
             document.getElementById('waitingAreaZone').innerHTML = '';
 
-            savedData.berth_layout.forEach(item => {
+            (savedData.berth_layout || []).forEach(item => {
                 if (item.berth === 'WAITING') {
                     // Restore to waiting area
                     const pill = buildWaitingPill(item);
@@ -1803,7 +1875,7 @@
                 if (val !== undefined) td.textContent = val;
             });
         }
-        //on the way to dharamtar
+        // on the way to dharamtar
         if (savedData.eta_to_dharamtar) {
             document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
                 const val = savedData.eta_to_dharamtar[td.dataset.vessel];
@@ -1828,9 +1900,9 @@
                 const row = document.createElement('div');
                 row.className = 'note-entry-row';
                 row.innerHTML = `
-                <span class="note-index">${i + 1}</span>
-                <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
-                <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+            <span class="note-index">${i + 1}</span>
+            <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
+            <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
                 list.appendChild(row);
             });
         }
@@ -1845,10 +1917,10 @@
                 const item = document.createElement('div');
                 item.className = 'log-item';
                 item.innerHTML = `
-                    <strong>${log.name}</strong> — Moved<br>
-                    <span>${log.from} → ${log.to}</span><br>
-                    <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
-                    <span>Shift Incharge: ${log.shiftIncharge}</span>`;
+                <strong>${log.name}</strong> — Moved<br>
+                <span>${log.from} → ${log.to}</span><br>
+                <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
+                <span>Shift Incharge: ${log.shiftIncharge}</span>`;
                 logConsole.prepend(item);
             });
             document.getElementById('logCount').textContent = _movementLogs.length;

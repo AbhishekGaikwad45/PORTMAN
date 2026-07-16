@@ -1240,24 +1240,28 @@ def api_shift_report_save():
 @login_required
 def api_shift_report_load():
     """
-    Load saved report data with two-level persistence logic.
+    Load saved report data with two INDEPENDENT persistence tracks:
 
-    Level 1 (SHIFT-SPECIFIC): berth_layout, movement_logs, shift personnel
-    Level 2 (DATE-SPECIFIC): notes, wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull
+    TRACK 1 — BERTH SECTION (shift-specific):
+        berth_layout, waiting_area, shift_incharge, bpo, crane_operator,
+        movement_logs.
+        This track's own-vs-carried decision is based ONLY on whether
+        THIS shift's berth_layout/waiting_area actually has content.
+        Other fields (notes, etc.) being present for this shift must
+        NEVER block berth carry-forward — that was the bug: a shift row
+        with only a stale note or personnel name saved was blocking the
+        correct BERTH 1 carry-forward from a previous shift's real save.
 
-    Query Parameters:
-        date (required): Report date YYYY-MM-DD
-        shift (optional): A, B, C, or ALL
+    TRACK 2 — DATE-SPECIFIC FIELDS:
+        notes, wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull.
+        These are merged oldest -> newest across all eligible rows up to
+        and including the requested shift; a blank value never overwrites
+        a real one from an earlier row.
 
-    Returns:
-        {
-            "found": true/false,     # True if THIS shift+date was explicitly saved
-            "carried": true/false,   # True if berth_layout/meta was carried from another shift
-            "berth_layout": [...],
-            "notes": [...],
-            "wt_r19": {...},
-            ...
-        }
+    Carry-forward for the berth section is STRICTLY FORWARD ONLY:
+    A -> B -> C -> next day A -> ...
+    A later shift/date can never leak its berth data backward into an
+    earlier shift/date.
     """
 
     report_date = request.args.get('date')
@@ -1269,182 +1273,232 @@ def api_shift_report_load():
     conn = get_db()
     cur = get_cursor(conn)
 
+    def shift_index(s):
+        return {'A': 0, 'B': 1, 'C': 2}.get((s or '').upper(), 3)
+
+    def has_berth_content(row):
+        """True only if THIS row's berth section itself has real content.
+        This is intentionally independent of notes/personnel/logs."""
+        return bool(row.get('berth_layout') or []) or bool(row.get('waiting_area') or [])
+
     try:
-        # ====================================================================
-        # STEP 1: Try to find THIS shift+date combination
-        # ====================================================================
+        requested_date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
+    except Exception:
+        return jsonify({'found': False, 'error': 'invalid date'}), 400
+
+    requested_idx = shift_index(shift)
+    requested_key = (requested_date_obj, requested_idx)
+
+    def row_key(r):
+        rd = r["report_date"]
+
+        if isinstance(rd, datetime):
+            rd = rd.date()
+        elif isinstance(rd, str):
+            rd = datetime.strptime(rd[:10], "%Y-%m-%d").date()
+
+        return (rd, shift_index(r.get("shift")))
+
+    try:
+        # ── Exact-match row for THIS shift+date ──────────────────────────
         cur.execute("""
             SELECT * FROM barge_position_report
             WHERE report_date = %s AND shift = %s
             LIMIT 1
         """, (report_date, shift))
+        exact_row = cur.fetchone()
+        exact_row = dict(exact_row) if exact_row else None
 
-        row = cur.fetchone()
-
-        if row:
-            # ================================================================
-            # FOUND: THIS shift was explicitly saved
-            # ================================================================
-            row = dict(row)
-            berth_layout = row.get('berth_layout') or []
-            waiting_area = row.get('waiting_area') or []
-            combined = berth_layout + waiting_area
-
-            result = {
-                'found': True,
-                'carried': False,
-                'shift_incharge': row.get('shift_incharge', ''),
-                'bpo': row.get('bpo', ''),
-                'crane_operator': row.get('crane_operator', ''),
-                'berth_layout': combined,
-                'notes': row.get('notes') or [],
-                'wt_r19': row.get('wt_r19') or {},
-                'mbc_eta': row.get('mbc_eta') or {},
-                'eta_to_dharamtar': row.get('eta_to_dharamtar') or {},
-                'on_the_way_gull': row.get('on_the_way_gull') or {},
-                'shift_plan': row.get('shift_plan') or {},
-                'movement_logs': row.get('movement_logs') or [],
-                'updated_at': str(row.get('updated_at', '')),
-            }
-            return jsonify(result)
-
-        # ====================================================================
-        # STEP 2: THIS shift NOT found - carry forward from recent rows.
-        #
-        # berth_layout/meta come from the single most recent row.
-        # But wt_r19 / mbc_eta / eta_to_dharamtar / on_the_way_gull / notes
-        # are MERGED across recent rows (oldest → newest, non-blank wins),
-        # so a later shift saving with a blank field never wipes out a
-        # real value entered in an earlier shift or an earlier day.
-        # ====================================================================
+        # ── All rows up to and including the requested date ──────────────
         cur.execute("""
             SELECT
-                report_date,
-                shift,
-                berth_layout,
-                waiting_area,
-                shift_incharge,
-                bpo,
-                crane_operator,
-                notes,
-                wt_r19,
-                mbc_eta,
-                eta_to_dharamtar,
-                on_the_way_gull,
-                updated_at
+                report_date, shift, berth_layout, waiting_area,
+                shift_incharge, bpo, crane_operator, notes,
+                wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull,
+                movement_logs, shift_plan, updated_at
             FROM barge_position_report
             WHERE report_date <= %s
-            ORDER BY report_date DESC, updated_at DESC
-            LIMIT 20
+            ORDER BY
+            report_date DESC,
+            CASE shift
+                WHEN 'C' THEN 3
+                WHEN 'B' THEN 2
+                WHEN 'A' THEN 1
+                ELSE 0
+            END DESC
         """, (report_date,))
+        all_rows = [dict(r) for r in cur.fetchall()]
 
-        rows = [dict(r) for r in cur.fetchall()]
+        # ══════════════════════════════════════════════════════════════
+        # TRACK 1 — BERTH SECTION
+        # Rule:
+        # 1. If this shift is saved -> use it.
+        # 2. Otherwise -> use ONLY the latest previous saved shift.
+        # 3. Ignore ALL rows.
+        # ══════════════════════════════════════════════════════════════
 
-        if rows:
-            latest = rows[0]
-            berth_layout = latest.get('berth_layout') or []
-            waiting_area = latest.get('waiting_area') or []
-            combined = berth_layout + waiting_area
+        berth_source = "none"
 
-            # ── Merge date-specific dict fields across recent rows ─────────
-            # Walk oldest → newest so a genuinely later real edit still
-            # wins over an earlier one, but a BLANK value never overwrites
-            # a real one from an earlier row.
-            merged_wt_r19 = {}
-            merged_mbc_eta = {}
-            merged_eta_dharamtar = {}
-            merged_gull = {}
-            merged_notes = []
+        berth_layout_out = []
+        shift_incharge_out = ""
+        bpo_out = ""
+        crane_operator_out = ""
+        movement_logs_out = []
+        berth_updated_at = None
 
-            for r in reversed(rows):  # oldest first
-                for k, v in (r.get('wt_r19') or {}).items():
-                    if v:
-                        merged_wt_r19[k] = v
-                for k, v in (r.get('mbc_eta') or {}).items():
-                    if v:
-                        merged_mbc_eta[k] = v
-                for k, v in (r.get('eta_to_dharamtar') or {}).items():
-                    if v:
-                        merged_eta_dharamtar[k] = v
-                for k, v in (r.get('on_the_way_gull') or {}).items():
-                    if v:
-                        merged_gull[k] = v
-                for n in (r.get('notes') or []):
-                    if n and n not in merged_notes:
-                        merged_notes.append(n)
 
-            # ── Filter carried berth_layout down to items still actually
-            # active right now (same-cursor, no nested connection) ─────────
+        # ---------- Exact shift already saved ----------
+        if (
+            exact_row
+            and exact_row.get("shift") != "ALL"
+            and has_berth_content(exact_row)
+        ):
+
+            latest = exact_row
+            berth_source = "own"
+
+        else:
+
+            latest = None
+
+            valid_rows = []
+
+            for row in all_rows:
+
+                # Ignore ALL shift completely
+                if (row.get("shift") or "").upper() == "ALL":
+                    continue
+
+                # Skip rows without berth data
+                if not has_berth_content(row):
+                    continue
+
+                # Skip future rows
+                if row_key(row) >= requested_key:
+                    continue
+
+                valid_rows.append(row)
+
+            valid_rows.sort(key=row_key, reverse=True)
+
+            if valid_rows:
+                latest = valid_rows[0]
+                berth_source = "carried"
+
+
+        # ---------- Apply selected/latest snapshot ----------
+        if latest:
+
+            combined = (
+                (latest.get("berth_layout") or []) +
+                (latest.get("waiting_area") or [])
+            )
+
+            shift_incharge_out = latest.get("shift_incharge", "")
+            bpo_out = latest.get("bpo", "")
+            crane_operator_out = latest.get("crane_operator", "")
+            berth_updated_at = latest.get("updated_at")
+
+            # Movement logs only for exact shift
+            if berth_source == "own":
+                movement_logs_out = latest.get("movement_logs") or []
+            else:
+                movement_logs_out = []
+
             active_keys = set()
-            try:
-                cur.execute("""
-                    SELECT TRIM(UPPER(barge_name)) AS key
-                    FROM ldud_barge_lines
-                    WHERE COALESCE(TRIM(barge_name),'') <> ''
-                      AND (cast_off_port IS NULL OR TRIM(cast_off_port) = '')
-                      AND (completed_discharge_berth IS NULL OR TRIM(completed_discharge_berth) = '')
-                """)
-                for r in cur.fetchall():
-                    r = dict(r)
-                    if r.get('key'):
-                        active_keys.add(r['key'])
 
-                cur.execute("""
-                    SELECT TRIM(UPPER(h.mbc_name)) AS key
-                    FROM mbc_header h
-                    JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
-                    WHERE p.vessel_arrival_port IS NOT NULL
-                      AND TRIM(COALESCE(p.vessel_arrival_port,'')) <> ''
-                      AND (p.unloading_completed IS NULL OR TRIM(p.unloading_completed) = '')
-                      AND (p.vessel_cast_off IS NULL OR TRIM(p.vessel_cast_off) = '')
-                """)
-                for r in cur.fetchall():
-                    r = dict(r)
-                    if r.get('key'):
-                        active_keys.add(r['key'])
+            cur.execute("""
+                SELECT TRIM(UPPER(barge_name)) AS key
+                FROM ldud_barge_lines
+                WHERE COALESCE(TRIM(barge_name),'') <> ''
+                AND (cast_off_port IS NULL OR TRIM(cast_off_port)='')
+                AND (completed_discharge_berth IS NULL OR TRIM(completed_discharge_berth)='')
+            """)
 
-                still_active = [
-                    item for item in combined
-                    if (item.get('name') or '').strip().upper() in active_keys
-                ]
-            except Exception as active_err:
-                print('Active-barge lookup failed, falling back to unfiltered carry:', active_err)
-                still_active = combined
+            for r in cur.fetchall():
+                r = dict(r)
+                if r.get("key"):
+                    active_keys.add(r["key"])
 
-            result = {
-                'found': False,
-                'carried': True,
-                'shift_incharge': latest.get('shift_incharge', ''),
-                'bpo': latest.get('bpo', ''),
-                'crane_operator': latest.get('crane_operator', ''),
-                'berth_layout': still_active,
-                'notes': merged_notes,
-                'wt_r19': merged_wt_r19,
-                'mbc_eta': merged_mbc_eta,
-                'eta_to_dharamtar': merged_eta_dharamtar,
-                'on_the_way_gull': merged_gull,
-                'shift_plan': {},
-                'movement_logs': [],
-                'updated_at': str(latest.get('updated_at', '')),
-            }
-            return jsonify(result)
+            cur.execute("""
+                SELECT TRIM(UPPER(h.mbc_name)) AS key
+                FROM mbc_header h
+                JOIN mbc_discharge_port_lines p
+                ON p.mbc_id = h.id
+                WHERE p.vessel_arrival_port IS NOT NULL
+                AND TRIM(COALESCE(p.vessel_arrival_port,'')) <> ''
+                AND (p.unloading_completed IS NULL OR TRIM(p.unloading_completed)='')
+                AND (p.vessel_cast_off IS NULL OR TRIM(p.vessel_cast_off)='')
+            """)
 
-        # ====================================================================
-        # STEP 3: No saved data found on this date at all
-        # ====================================================================
-        return jsonify({
-            'found': False,
-            'carried': False,
-            'berth_layout': [],
-            'notes': [],
-            'wt_r19': {},
-            'mbc_eta': {},
-            'eta_to_dharamtar': {},
-            'on_the_way_gull': {},
-            'shift_plan': {},
-            'movement_logs': [],
-            'updated_at': None,
-        })
+            for r in cur.fetchall():
+                r = dict(r)
+                if r.get("key"):
+                    active_keys.add(r["key"])
+
+            berth_layout_out = [
+                item
+                for item in combined
+                if (item.get("name") or "").strip().upper() in active_keys
+            ]
+
+        else:
+            berth_source = "none"
+
+        # ══════════════════════════════════════════════════════════════
+        # TRACK 2 — DATE-SPECIFIC META FIELDS (independent merge)
+        # ══════════════════════════════════════════════════════════════
+        meta_candidates = [r for r in all_rows if row_key(r) <= requested_key]
+        meta_candidates.sort(key=row_key)  # oldest -> newest
+
+        merged_wt_r19 = {}
+        merged_mbc_eta = {}
+        merged_eta_dharamtar = {}
+        merged_gull = {}
+        merged_notes = []
+        latest_meta_updated_at = None
+
+        for r in meta_candidates:
+            for k, v in (r.get('wt_r19') or {}).items():
+                if v:
+                    merged_wt_r19[k] = v
+            for k, v in (r.get('mbc_eta') or {}).items():
+                if v:
+                    merged_mbc_eta[k] = v
+            for k, v in (r.get('eta_to_dharamtar') or {}).items():
+                if v:
+                    merged_eta_dharamtar[k] = v
+            for k, v in (r.get('on_the_way_gull') or {}).items():
+                if v:
+                    merged_gull[k] = v
+            for n in (r.get('notes') or []):
+                if n and n not in merged_notes:
+                    merged_notes.append(n)
+            if r.get('updated_at'):
+                latest_meta_updated_at = r.get('updated_at')
+
+        found = (berth_source == 'own')
+        carried = (berth_source == 'carried')
+        updated_at = berth_updated_at or latest_meta_updated_at
+
+        result = {
+            'found': found,
+            'carried': carried,
+            'berth_source': berth_source,   # 'own' | 'carried' | 'none' — for debugging/UI if needed
+            'shift_incharge': shift_incharge_out,
+            'bpo': bpo_out,
+            'crane_operator': crane_operator_out,
+            'berth_layout': berth_layout_out,
+            'notes': merged_notes,
+            'wt_r19': merged_wt_r19,
+            'mbc_eta': merged_mbc_eta,
+            'eta_to_dharamtar': merged_eta_dharamtar,
+            'on_the_way_gull': merged_gull,
+            'shift_plan': (exact_row.get('shift_plan') or {}) if exact_row else {},
+            'movement_logs': movement_logs_out,
+            'updated_at': str(updated_at or ''),
+        }
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({'found': False, 'error': str(e)}), 500
