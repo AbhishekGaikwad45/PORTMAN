@@ -1828,60 +1828,28 @@
         if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
         if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
 
-        // ── Berth layout ────────────────────────────────────────────────────────
-        // Repaint whenever this is an authoritative snapshot (found OR carried),
-        // even if berth_layout is empty. An empty snapshot legitimately means
-        // "nothing was manually placed for this shift" and must NOT leave the
-        // live/current-DB render from loadBerthOccupancy() sitting on screen
-        // instead — that was the source of the berth-mismatch bug.
-        if (savedData.found || savedData.carried) {
-    document.querySelectorAll('.matrix-dropzone').forEach(z => {
-        z.classList.add('empty-slot');
-        z.innerHTML = '—';
-    });
-    document.getElementById('waitingAreaZone').innerHTML = '';
-
-    // 1. Paint berth placements from the saved snapshot (authoritative for berths only)
-    const placedNames = new Set();
-    (savedData.berth_layout || []).forEach(item => {
-        if (item.berth === 'WAITING') return;
-        placedNames.add((item.name || '').toUpperCase());
-        const zone = document.querySelector(
-            `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
-        );
-        if (!zone) return;
-        zone.classList.remove('empty-slot');
-        zone.innerHTML = buildBerthCard(item, item.balance);
-    });
-
-    // 2. Add saved waiting items (explicitly saved as WAITING)
-    const waitingAdded = new Set();
-    (savedData.berth_layout || []).forEach(item => {
-        if (item.berth !== 'WAITING') return;
-        const key = (item.name || '').toUpperCase();
-        if (placedNames.has(key)) return;
-        waitingAdded.add(key);
-        document.getElementById('waitingAreaZone').appendChild(buildWaitingPill(item));
-    });
-
-    // 3. Merge in LIVE barges/MBCs not covered by the saved snapshot at all
-    //    (new arrivals since last save) — anything not berthed and not Completed
-    (_currentItems || []).forEach(item => {
-        const key = (item.name || item.barge_name || '').toUpperCase();
-        if (item.status === 'Completed') return;
-        if (item.status === 'Discharging') return;   // that belongs on a berth
-        if (placedNames.has(key) || waitingAdded.has(key)) return;
-
-        waitingAdded.add(key);
-        document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
-            ...item,
-            balance: item.balance_qty ?? item.balance,
-            total: item.total_qty ?? item.total ?? item.qty,
-        }));
-    });
-
-    updateInterfaceMetrics();
-}
+        // ── Berth layout + Waiting Area ─────────────────────────────────────────
+        // TWO DIFFERENT CASES:
+        //
+        // 1. savedData.found === true
+        //    → THIS shift was explicitly saved by the user.
+        //    → Show the FROZEN snapshot exactly as saved (berths AND waiting area).
+        //
+        // 2. savedData.carried === true (found === false)
+        //    → THIS shift has NOT been saved yet (it's the live/current shift).
+        //    → Berth placements carry forward from the last saved shift (barges
+        //      physically stay in their berths until moved).
+        //    → BUT the Waiting Area must reflect LIVE data right now (_currentItems),
+        //      NOT the stale waiting list from the previous saved shift — a barge
+        //      that just became "Waiting" in the DB must show up immediately.
+        if (savedData.found) {
+            paintFullSnapshot(savedData.berth_layout || []);
+        } else if (savedData.carried) {
+            const berthOnly = (savedData.berth_layout || []).filter(i => i.berth !== 'WAITING');
+            paintBerthsOnly(berthOnly);
+            rebuildWaitingAreaFromLive(berthOnly);
+        }
+        // else: no saved/carried snapshot at all → leave whatever loadBerthOccupancy() already painted live.
 
         // ── WT @ R19 ────────────────────────────────────────────────────────────
         if (savedData.wt_r19) {
@@ -1923,9 +1891,9 @@
                 const row = document.createElement('div');
                 row.className = 'note-entry-row';
                 row.innerHTML = `
-            <span class="note-index">${i + 1}</span>
-            <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
-            <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+        <span class="note-index">${i + 1}</span>
+        <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
+        <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
                 list.appendChild(row);
             });
         }
@@ -1940,10 +1908,10 @@
                 const item = document.createElement('div');
                 item.className = 'log-item';
                 item.innerHTML = `
-                <strong>${log.name}</strong> — Moved<br>
-                <span>${log.from} → ${log.to}</span><br>
-                <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
-                <span>Shift Incharge: ${log.shiftIncharge}</span>`;
+            <strong>${log.name}</strong> — Moved<br>
+            <span>${log.from} → ${log.to}</span><br>
+            <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
+            <span>Shift Incharge: ${log.shiftIncharge}</span>`;
                 logConsole.prepend(item);
             });
             document.getElementById('logCount').textContent = _movementLogs.length;
@@ -1971,6 +1939,74 @@
         setSaveStatus('saved', savedData.found
             ? '✓ Loaded from saved report'
             : '◐ Carried over from previous shift');
+    }
+
+    // ── Case 1 helper: paint the FULL frozen snapshot (berths + waiting area) ──
+    function paintFullSnapshot(layout) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+        document.getElementById('waitingAreaZone').innerHTML = '';
+
+        layout.forEach(item => {
+            if (item.berth === 'WAITING') {
+                document.getElementById('waitingAreaZone').appendChild(buildWaitingPill(item));
+            } else {
+                const zone = document.querySelector(
+                    `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+                );
+                if (!zone) return;
+                zone.classList.remove('empty-slot');
+                zone.innerHTML = buildBerthCard(item, item.balance);
+            }
+        });
+
+        updateInterfaceMetrics();
+    }
+
+    // ── Case 2 helper (part A): paint ONLY berth placements from carried-forward data ──
+    function paintBerthsOnly(berthItems) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+
+        berthItems.forEach(item => {
+            const zone = document.querySelector(
+                `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+            );
+            if (!zone) return;
+            zone.classList.remove('empty-slot');
+            zone.innerHTML = buildBerthCard(item, item.balance);
+        });
+    }
+
+    // ── Case 2 helper (part B): rebuild Waiting Area from LIVE data (_currentItems) ──
+    // Anything currently in "Waiting" or "Under Discharge" status that is NOT
+    // already placed on a berth (per the carried-forward berth layout) gets shown here.
+    function rebuildWaitingAreaFromLive(placedBerthItems) {
+        const placedNames = new Set(
+            placedBerthItems.map(i => (i.name || '').toUpperCase())
+        );
+
+        document.getElementById('waitingAreaZone').innerHTML = '';
+
+        (_currentItems || []).forEach(item => {
+            if (item.status === 'Completed') return;
+            if (item.status === 'Discharging') return;   // that belongs on a berth, not here
+
+            const key = (item.name || item.barge_name || '').toUpperCase();
+            if (placedNames.has(key)) return;
+
+            document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
+                ...item,
+                balance: item.balance_qty ?? item.balance,
+                total: item.total_qty ?? item.total ?? item.qty,
+            }));
+        });
+
+        updateInterfaceMetrics();
     }
 
     function escHtml(str) {
