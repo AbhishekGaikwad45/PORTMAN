@@ -44,9 +44,10 @@ def barge_report_index():
 def barge_report_vessels():
     """Return ldud records for a given operation type (import / export),
     optionally filtered to vessels having at least one barge line whose
-    discharge completed on a specific date."""
+    discharge completed within a date range."""
     op_type = request.args.get('op_type', 'import').strip()
-    disc_date = request.args.get('disc_date', '').strip()
+    disc_date_from = request.args.get('disc_date_from', '').strip()
+    disc_date_to = request.args.get('disc_date_to', '').strip()
 
     conn = get_db()
     cur = get_cursor(conn)
@@ -59,17 +60,24 @@ def barge_report_vessels():
         """
         params = [op_type]
 
-        if disc_date:
-            query += """
+        if disc_date_from or disc_date_to:
+            range_conditions = []
+            if disc_date_from:
+                range_conditions.append("LEFT(bl.completed_discharge_berth, 10) >= %s")
+                params.append(disc_date_from)
+            if disc_date_to:
+                range_conditions.append("LEFT(bl.completed_discharge_berth, 10) <= %s")
+                params.append(disc_date_to)
+
+            query += f"""
                 AND EXISTS (
                     SELECT 1 FROM ldud_barge_lines bl
                     WHERE bl.ldud_id = h.id
                       AND bl.completed_discharge_berth IS NOT NULL
                       AND bl.completed_discharge_berth <> ''
-                      AND LEFT(bl.completed_discharge_berth, 10) = %s
+                      AND {' AND '.join(range_conditions)}
                 )
             """
-            params.append(disc_date)
 
         query += " ORDER BY h.id DESC"
 

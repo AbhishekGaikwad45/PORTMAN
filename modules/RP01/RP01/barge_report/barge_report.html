@@ -266,8 +266,13 @@
 
     <!-- Discharge Completed Date -->
     <div class="filter-group">
-        <label>Discharge Completed Date</label>
-        <input type="date" id="disc-date-filter" onchange="loadVessels()">
+        <label>From</label>
+        <input type="date" id="disc-date-from-filter" onchange="loadVessels()">
+    </div>
+
+    <div class="filter-group">
+        <label>To</label>
+        <input type="date" id="disc-date-to-filter" onchange="loadVessels()">
     </div>
 
     <!-- Vessel multi-select -->
@@ -305,17 +310,22 @@
     /* ── Vessel list ─────────────────────────────────────────────────────── */
     function loadVessels() {
         const opType = document.getElementById('op-type-sel').value;
-        const discDate = document.getElementById('disc-date-filter').value;
+        const discDateFrom = document.getElementById('disc-date-from-filter').value;
+        const discDateTo = document.getElementById('disc-date-to-filter').value;
         const sel = document.getElementById('vessel-sel');
         sel.innerHTML = '<option disabled>Loading…</option>';
         document.getElementById('vessel-count-badge').textContent = '';
 
         let url = `/api/module/RP01/barge-report/vessels?op_type=${encodeURIComponent(opType)}`;
-        if (discDate) {
-            url += `&disc_date=${encodeURIComponent(discDate)}`;
+        if (discDateFrom) {
+            url += `&disc_date_from=${encodeURIComponent(discDateFrom)}`;
+        }
+        if (discDateTo) {
+            url += `&disc_date_to=${encodeURIComponent(discDateTo)}`;
         }
 
         fetch(url)
+
             .then(r => r.json())
             .then(data => {
                 if (data.error) { sel.innerHTML = '<option disabled>Error loading vessels</option>'; return; }
@@ -352,27 +362,27 @@
             })
             .catch(err => setStatus('Network error: ' + err, true));
     }
-    
-    /* ── Duration helper ─────────────────────────────────────────────────── */
-function parseDT(str) {
-    if (!str) return null;
-    // normalize "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM" to a Date
-    const norm = str.replace(' ', 'T');
-    const d = new Date(norm);
-    return isNaN(d.getTime()) ? null : d;
-}
 
-function formatDuration(startStr, endStr) {
-    const start = parseDT(startStr);
-    const end = parseDT(endStr);
-    if (!start || !end) return '';
-    let diffMs = end - start;
-    if (diffMs < 0) return '';
-    const totalMin = Math.round(diffMs / 60000);
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
+    /* ── Duration helper ─────────────────────────────────────────────────── */
+    function parseDT(str) {
+        if (!str) return null;
+        // normalize "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM" to a Date
+        const norm = str.replace(' ', 'T');
+        const d = new Date(norm);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function formatDuration(startStr, endStr) {
+        const start = parseDT(startStr);
+        const end = parseDT(endStr);
+        if (!start || !end) return '';
+        let diffMs = end - start;
+        if (diffMs < 0) return '';
+        const totalMin = Math.round(diffMs / 60000);
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
 
     /* ── Table render ────────────────────────────────────────────────────── */
     function renderTable(rows) {
