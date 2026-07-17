@@ -42,18 +42,38 @@ def barge_report_index():
 @bp.route('/api/module/RP01/barge-report/vessels')
 @login_required
 def barge_report_vessels():
-    """Return ldud records for a given operation type (import / export)."""
+    """Return ldud records for a given operation type (import / export),
+    optionally filtered to vessels having at least one barge line whose
+    discharge completed on a specific date."""
     op_type = request.args.get('op_type', 'import').strip()
+    disc_date = request.args.get('disc_date', '').strip()
+
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        cur.execute("""
+        query = """
             SELECT h.id, h.doc_num, h.vessel_name, h.operation_type,
                    h.nor_tendered, h.doc_status
             FROM ldud_header h
             WHERE LOWER(h.operation_type) = LOWER(%s)
-            ORDER BY h.id DESC
-        """, (op_type,))
+        """
+        params = [op_type]
+
+        if disc_date:
+            query += """
+                AND EXISTS (
+                    SELECT 1 FROM ldud_barge_lines bl
+                    WHERE bl.ldud_id = h.id
+                      AND bl.completed_discharge_berth IS NOT NULL
+                      AND bl.completed_discharge_berth <> ''
+                      AND LEFT(bl.completed_discharge_berth, 10) = %s
+                )
+            """
+            params.append(disc_date)
+
+        query += " ORDER BY h.id DESC"
+
+        cur.execute(query, tuple(params))
         rows = cur.fetchall()
         result = []
         for r in rows:
