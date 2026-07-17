@@ -1835,30 +1835,53 @@
         // live/current-DB render from loadBerthOccupancy() sitting on screen
         // instead — that was the source of the berth-mismatch bug.
         if (savedData.found || savedData.carried) {
-            document.querySelectorAll('.matrix-dropzone').forEach(z => {
-                z.classList.add('empty-slot');
-                z.innerHTML = '—';
-            });
-            document.getElementById('waitingAreaZone').innerHTML = '';
+    document.querySelectorAll('.matrix-dropzone').forEach(z => {
+        z.classList.add('empty-slot');
+        z.innerHTML = '—';
+    });
+    document.getElementById('waitingAreaZone').innerHTML = '';
 
-            (savedData.berth_layout || []).forEach(item => {
-                if (item.berth === 'WAITING') {
-                    // Restore to waiting area
-                    const pill = buildWaitingPill(item);
-                    document.getElementById('waitingAreaZone').appendChild(pill);
-                } else {
-                    // Restore to berth cell
-                    const zone = document.querySelector(
-                        `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
-                    );
-                    if (!zone) return;
-                    zone.classList.remove('empty-slot');
-                    zone.innerHTML = buildBerthCard(item, item.balance);
-                }
-            });
+    // 1. Paint berth placements from the saved snapshot (authoritative for berths only)
+    const placedNames = new Set();
+    (savedData.berth_layout || []).forEach(item => {
+        if (item.berth === 'WAITING') return;
+        placedNames.add((item.name || '').toUpperCase());
+        const zone = document.querySelector(
+            `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+        );
+        if (!zone) return;
+        zone.classList.remove('empty-slot');
+        zone.innerHTML = buildBerthCard(item, item.balance);
+    });
 
-            updateInterfaceMetrics();
-        }
+    // 2. Add saved waiting items (explicitly saved as WAITING)
+    const waitingAdded = new Set();
+    (savedData.berth_layout || []).forEach(item => {
+        if (item.berth !== 'WAITING') return;
+        const key = (item.name || '').toUpperCase();
+        if (placedNames.has(key)) return;
+        waitingAdded.add(key);
+        document.getElementById('waitingAreaZone').appendChild(buildWaitingPill(item));
+    });
+
+    // 3. Merge in LIVE barges/MBCs not covered by the saved snapshot at all
+    //    (new arrivals since last save) — anything not berthed and not Completed
+    (_currentItems || []).forEach(item => {
+        const key = (item.name || item.barge_name || '').toUpperCase();
+        if (item.status === 'Completed') return;
+        if (item.status === 'Discharging') return;   // that belongs on a berth
+        if (placedNames.has(key) || waitingAdded.has(key)) return;
+
+        waitingAdded.add(key);
+        document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
+            ...item,
+            balance: item.balance_qty ?? item.balance,
+            total: item.total_qty ?? item.total ?? item.qty,
+        }));
+    });
+
+    updateInterfaceMetrics();
+}
 
         // ── WT @ R19 ────────────────────────────────────────────────────────────
         if (savedData.wt_r19) {
