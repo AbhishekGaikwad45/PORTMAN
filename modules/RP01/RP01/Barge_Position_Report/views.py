@@ -1511,17 +1511,12 @@ def api_shift_report_load():
             print(
                 b["name"],
                 b["type"],
-               
+                
             )
         return jsonify(result)
 
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({
-            "found": False,
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }), 500
+        return jsonify({'found': False, 'error': str(e)}), 500
 
     finally:
         cur.close()
