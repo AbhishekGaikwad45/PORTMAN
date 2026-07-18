@@ -377,7 +377,7 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         ):
             status = "Waiting"
 
-        # Under Discharge — discharge started, not completed, balance > 0
+        # Under Discharge — discharge started, not completed
         elif (
             row.get("commence_discharge_berth")
             and str(row.get("commence_discharge_berth")).strip()
@@ -385,12 +385,8 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
                 row.get("completed_discharge_berth") is None
                 or str(row.get("completed_discharge_berth")).strip() == ""
             )
-            and float(row.get("balance_qty", 0) or 0) > 0
         ):
             status = "Under Discharge"
-
-        else:
-            continue
 
         # ← NO date filter, NO shift filter for barges
 
@@ -494,9 +490,6 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         bl_qty = float(row["bl_qty"] or 0)
         actual_qty = float(row["actual_qty"] or 0)
         balance_qty = max(bl_qty - actual_qty, 0)
-        # Hide fully discharged MBC
-        if balance_qty <= 0:
-            continue
 
         barges.append({
             "id": row["id"],
