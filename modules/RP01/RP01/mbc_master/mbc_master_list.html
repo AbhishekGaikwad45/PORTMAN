@@ -856,6 +856,63 @@
         font-size: 11px;
         color: #6b7280;
     }
+
+    /* MBC TPH — frozen columns */
+    .mbctph-frozen {
+        position: sticky;
+        z-index: 2;
+        background: #fff;
+        box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08);
+    }
+
+    .mw-table thead .mbctph-frozen {
+        z-index: 3;
+    }
+
+    .dark-theme .mbctph-frozen {
+        background: #1e1e2e;
+    }
+
+    /* Tint frozen data cells so they don't look plain white against colored neighbors */
+    .mw-table .mw-row .hcol-grey-cell {
+        background: #F2F2F2;
+    }
+
+    .mw-table .mw-row .hcol-lyellow-cell {
+        background: #FFFDE7;
+    }
+
+    .mw-table .mw-row .hcol-green-cell {
+        background: #EAF5E4;
+    }
+
+    .mw-table .mw-row .hcol-blue-cell {
+        background: #E8EDF9;
+    }
+
+    .mw-table .mw-row .hcol-lblue-cell {
+        background: #E9F2FA;
+    }
+
+    .dark-theme .mw-table .mw-row .hcol-grey-cell {
+        background: #2a2a30;
+    }
+
+    .dark-theme .mw-table .mw-row .hcol-lyellow-cell {
+        background: #2a2a10;
+    }
+
+    .dark-theme .mw-table .mw-row .hcol-green-cell {
+        background: #1a2a1a;
+    }
+
+    .dark-theme .mw-table .mw-row .hcol-blue-cell {
+        background: #1a2238;
+    }
+
+    .dark-theme .mw-table .mw-row .hcol-lblue-cell {
+        background: #1a2838;
+    }
 </style>
 {% endblock %}
 
@@ -888,8 +945,9 @@
     </div>
     <div class="filter-group">
         <label for="filter-owner">Owner (Ctrl+click for multiple)</label>
-        <select id="filter-owner" multiple size="3" title="Filter by MBC Owner — Ctrl+click to select multiple; none selected = all"
-                style="min-width:150px;"></select>
+        <select id="filter-owner" multiple size="3"
+            title="Filter by MBC Owner — Ctrl+click to select multiple; none selected = all"
+            style="min-width:150px;"></select>
     </div>
     <button type="button" class="filter-btn primary" onclick="applyFilters()">Apply</button>
     <button type="button" class="filter-btn reset" onclick="resetFilters()">Reset</button>
@@ -903,6 +961,7 @@
     <button type="button" class="sheet-tab" id="tab-tat" onclick="switchTab('tat')">TAT</button>
     <button type="button" class="sheet-tab" id="tab-dppltat" onclick="switchTab('dppltat')">DPPL TAT</button>
     <button type="button" class="sheet-tab" id="tab-mbcwise" onclick="switchTab('mbcwise')">MBC Wise</button>
+    <button type="button" class="sheet-tab" id="tab-mbctph" onclick="switchTab('mbctph')">MBC TPH</button>
 </div>
 
 <!-- Panel: Master Data -->
@@ -942,6 +1001,12 @@
 <div class="tab-panel" id="panel-mbcwise" hidden>
     <div id="mbcwise-wrapper">
         <div class="tat-placeholder">Select the MBC Wise tab to load the data.</div>
+    </div>
+</div>
+<!-- Panel: MBC TPH -->
+<div class="tab-panel" id="panel-mbctph" hidden>
+    <div id="mbctph-wrapper">
+        <div class="tat-placeholder">Select the MBC TPH tab to load the data.</div>
     </div>
 </div>
 
@@ -1180,6 +1245,7 @@
                 if (currentTab === 'tat') loadTatSummary();
                 if (currentTab === 'dppltat') loadDpplTat();
                 if (currentTab === 'mbcwise') loadMbcWise();
+                if (currentTab === 'mbctph') loadMbcTph()
             })
             .catch(err => {
                 console.error(err);
@@ -1204,13 +1270,16 @@
         document.getElementById('panel-tat').hidden = (tab !== 'tat');
         document.getElementById('panel-dppltat').hidden = (tab !== 'dppltat');
         document.getElementById('panel-mbcwise').hidden = (tab !== 'mbcwise');
+        document.getElementById('panel-mbctph').hidden = (tab !== 'mbctph');
         document.getElementById('tab-master').classList.toggle('active', tab === 'master');
         document.getElementById('tab-tat').classList.toggle('active', tab === 'tat');
         document.getElementById('tab-dppltat').classList.toggle('active', tab === 'dppltat');
         document.getElementById('tab-mbcwise').classList.toggle('active', tab === 'mbcwise');
+        document.getElementById('tab-mbctph').classList.toggle('active', tab === 'mbctph');
         if (tab === 'tat') loadTatSummary();
         if (tab === 'dppltat') loadDpplTat();
         if (tab === 'mbcwise') loadMbcWise();
+        if (tab === 'mbctph') loadMbcTph();
     }
 
     function loadTatSummary() {
@@ -1238,6 +1307,8 @@
                 wrapper.innerHTML = '<div class="tat-placeholder" style="color:#c0392b;">Error loading TAT data.</div>';
             });
     }
+
+
 
     function buildTatTable(d) {
 
@@ -1296,12 +1367,23 @@
         }
 
         html += `
-    <tr class="row-footnote">
-        <td colspan="5">
-            *Unloading time includes the shifting time after partial discharge of MBC & discharge kept on hold to give priority for other MBC.<br>
+<tr class="row-footnote">
+    <td colspan="5">
+
+        <div id="footnote1"
+             contenteditable="true"
+             style="font-size:10px;font-style:italic;color:#444;line-height:1.5;outline:none;">
+            *Unloading time includes the shifting time after partial discharge of MBC & discharge kept on hold to give priority for other MBC.
+        </div>
+
+        <div id="footnote2"
+             contenteditable="true"
+             style="font-size:10px;font-style:italic;color:#444;line-height:1.5;outline:none;">
             *Preberthing time includes the MBC waiting at Berth 10 for the unloading turn.
-        </td>
-    </tr>
+        </div>
+
+    </td>
+</tr>
 
     </tbody>
     </table>`;
@@ -1489,6 +1571,98 @@
         return html;
     }
 
+    function loadMbcTph() {
+        const params = new URLSearchParams();
+        const selectedDate = document.getElementById('filter-date').value;
+        const month = document.getElementById('filter-month').value;
+        const fy = document.getElementById('filter-fy').value;
+        const owners = Array.from(document.getElementById('filter-owner').selectedOptions).map(o => o.value);
+        if (selectedDate) params.set('selected_date', selectedDate);
+        if (month) params.set('month', month);
+        if (fy) params.set('fy', fy);
+        owners.forEach(o => params.append('owner', o));
+
+        const wrapper = document.getElementById('mbctph-wrapper');
+        wrapper.innerHTML = '<div class="tat-placeholder">Loading MBC TPH data…</div>';
+
+        fetch('/api/module/RP01/mbc-master/mbc-tph-data?' + params.toString())
+            .then(r => r.json())
+            .then(data => { wrapper.innerHTML = buildMbcTphTable(data.columns, data.rows); })
+            .catch(err => {
+                console.error(err);
+                wrapper.innerHTML = '<div class="tat-placeholder" style="color:#c0392b;">Error loading MBC TPH data.</div>';
+            });
+    }
+
+    function buildMbcTphTable(columns, rows) {
+        function v(val) {
+            if (val === null || val === undefined || val === '') return '<span style="color:#bbb">—</span>';
+            return val;
+        }
+
+        // Compute left offsets for frozen columns, in column order
+        let leftAcc = 0;
+        const leftOffsets = columns.map(col => {
+            if (!col.frozen) return null;
+            const off = leftAcc;
+            leftAcc += (col.width || 120);
+            return off;
+        });
+
+        let html = `
+    <div style="font-size:11px;color:var(--text-secondary);padding:4px 2px 8px;font-style:italic;">
+        Same data as Master Data &mdash; plus Loading / Discharge / Overall TPH (Tons Per Hour)
+    </div>
+    <div style="overflow-x:auto; position:relative;">
+    <table class="mw-table" style="min-width:2400px;">
+      <thead>
+        <tr class="mw-hdr">`;
+
+        columns.forEach((col, i) => {
+            const classes = [col.color || ''].filter(Boolean);
+            let style = '';
+            if (col.frozen) {
+                classes.push('mbctph-frozen');
+                style = `left:${leftOffsets[i]}px; width:${col.width}px; min-width:${col.width}px;`;
+            }
+            html += `<th class="${classes.join(' ')}" style="${style}">${col.label}</th>`;
+        });
+
+        html += `</tr>
+      </thead>
+      <tbody>`;
+
+        for (const r of rows) {
+            html += `<tr class="mw-row">`;
+            columns.forEach((col, i) => {
+                const classes = [];
+                if (col.field === 'mbc_name') classes.push('col-name');
+                else if (col.field === 'qty_in') classes.push('col-qty');
+                else classes.push('col-dur');
+                if (col.color) classes.push(col.color + '-cell');
+
+                let style = '';
+                if (col.frozen) {
+                    classes.push('mbctph-frozen');
+                    style = `left:${leftOffsets[i]}px; width:${col.width}px; min-width:${col.width}px;`;
+                }
+                html += `<td class="${classes.join(' ')}" style="${style}">${v(r[col.field])}</td>`;
+            });
+            html += `</tr>`;
+        }
+
+        html += `
+      </tbody>
+    </table>
+    </div>`;
+
+        return html;
+    }
+    const footnote1 =
+        document.getElementById("footnote1")?.innerText || "";
+
+    const footnote2 =
+        document.getElementById("footnote2")?.innerText || "";
     /* ── download ────────────────────────────────────────── */
     function downloadExcel() {
 
@@ -1517,12 +1691,25 @@
         msg.textContent = 'Fetching data...';
         loader.classList.add('show');
 
-        const url =
-            '/api/module/RP01/mbc-master/download?' +
-            params.toString();
+        const footnote1 = document.getElementById("footnote1").innerText;
+        const footnote2 = document.getElementById("footnote2").innerText;
 
-        fetch(url)
-
+        fetch('/api/module/RP01/mbc-master/download', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                selected_date: params.get('selected_date'),
+                from_date: params.get('from_date'),
+                to_date: params.get('to_date'),
+                month: params.get('month'),
+                fy: params.get('fy'),
+                owner: params.getAll('owner'),
+                footnote1: footnote1,
+                footnote2: footnote2
+            })
+        })
             .then(res => {
 
                 if (!res.ok) {
