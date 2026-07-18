@@ -206,7 +206,7 @@ def _fetch_raw_trips(from_date='', to_date='', month_filter='', fy_filter='', ow
             lp.cast_off_load_port,
             dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
             dp.unloading_commenced, dp.unloading_completed,
-            dp.vessel_cast_off,     dp.sailed_out_load_port
+            dp.vessel_cast_off,     dp.sailed_out_load_port , dp.reached_load_port
         FROM mbc_header h
         LEFT JOIN mbc_master               mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines      lp ON lp.mbc_id = h.id
@@ -265,6 +265,7 @@ def _compute_tat_metrics(rows):
         up = r.get('unloading_completed')
         cd = r.get('vessel_cast_off')
         so = r.get('sailed_out_load_port')
+        rl = r.get('reached_load_port')
 
         buckets['preberthing'].append(_diff_mins(al, lc))
         buckets['loading'].append(_diff_mins(lc, lp))
@@ -278,7 +279,7 @@ def _compute_tat_metrics(rows):
         buckets['unloading'].append(_diff_mins(uc, up))
         buckets['wait_after_unload'].append(_diff_mins(up, cd))
         buckets['total_dharamtar'].append(_diff_mins(ad, cd))
-        buckets['dhar_to_jaigad'].append(_diff_mins(cd, so))
+        buckets['dhar_to_jaigad'].append(_diff_mins(cd, rl))
         buckets['tat'].append(_diff_mins(al, so))
 
     return {k: _avg_dur(v) for k, v in buckets.items()}
@@ -769,6 +770,8 @@ def _write_dppl_tat_sheet(ws, rows, period_label):
         _w(r, 10, tat, size=12, brd=True, fmt=FMT_TIME)
         if tat is not None:
             tat_vals.append(tat)
+     
+      
 
     # ── Grand Total row ────────────────────────────────────────────────
     gt = 7 + len(rows)
@@ -840,7 +843,7 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
             lp.cast_off_load_port,
             dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
             dp.unloading_commenced, dp.unloading_completed,
-            dp.vessel_cast_off,     dp.sailed_out_load_port
+            dp.vessel_cast_off,     dp.sailed_out_load_port, dp.reached_load_port
         FROM mbc_header h
         LEFT JOIN mbc_master               mm ON mm.mbc_name = h.mbc_name
         LEFT JOIN mbc_load_port_lines      lp ON lp.mbc_id = h.id
@@ -884,6 +887,7 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
         up = r.get('unloading_completed')
         cd = r.get('vessel_cast_off')
         so = r.get('sailed_out_load_port')
+        rl = r.get('reached_load_port')
         qty = float(r['bl_quantity']) if r.get('bl_quantity') is not None else 0.0
 
         g = groups[name]
@@ -900,7 +904,7 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
         g['unloading'].append(_diff_mins(uc, up))
         g['wait_after_unload'].append(_diff_mins(up, cd))
         g['total_dharamtar'].append(_diff_mins(ad, cd))
-        g['dhar_to_jaigad'].append(_diff_mins(cd, so))
+        g['dhar_to_jaigad'].append(_diff_mins(cd, rl))
         g['tat'].append(_diff_mins(al, so))
 
     def _avg_day(vals):
@@ -917,6 +921,162 @@ def _fetch_mbc_wise_rows(from_date='', to_date='', month_filter='', fy_filter=''
 
     return result
 
+# ── MBC TPH helpers ────────────────────────────────────────────────────────────
+def _fetch_mbc_tph_rows(from_date='', to_date='', month_filter='', fy_filter='', owner=''):
+    """
+    Per-trip rows — IDENTICAL data/logic to _fetch_rows (Master Data),
+    with 3 additional TPH (Tons Per Hour) columns appended per trip:
+      loading_tph    = qty_in / loading duration (hrs)
+      discharge_tph  = qty_in / unloading duration (hrs)
+      overall_tph    = qty_in / TAT duration (hrs)
+    """
+    conn = get_db()
+    cur  = get_cursor(conn)
+
+    where_clauses = ["h.operation_type = 'Import'"]
+    params = []
+    if owner:
+        where_clauses.append("mm.mbc_owner_name = ANY(%s)")
+        params.append(list(owner) if isinstance(owner, (list, tuple)) else [owner])
+    from datetime import datetime, timedelta
+
+    if from_date == to_date and from_date:
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").replace(hour=6, minute=0, second=0)
+        end_dt = start_dt + timedelta(days=1)
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp >= %s")
+        params.append(start_dt)
+        where_clauses.append("NULLIF(dp.unloading_completed, '')::timestamp < %s")
+        params.append(end_dt)
+    else:
+        if from_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) >= %s")
+            params.append(from_date)
+        if to_date:
+            where_clauses.append("DATE(NULLIF(dp.unloading_completed, '')::timestamp) <= %s")
+            params.append(to_date)
+
+    cur.execute(f"""
+        SELECT
+            h.id, h.doc_date, h.mbc_name, h.cargo_name, h.bl_quantity, h.quantity_uom,
+            lp.arrived_load_port, lp.loading_commenced, lp.loading_completed, lp.cast_off_load_port,
+            dp.arrival_gull_island, dp.departure_gull_island, dp.vessel_arrival_port,
+            dp.unloading_commenced, dp.unloading_completed,
+            dp.discharge_stop_shifting, dp.discharge_start_shifting,
+            dp.vessel_cast_off, dp.cleaning_commenced, dp.cleaning_completed, dp.sailed_out_load_port,
+            dp.reached_load_port
+        FROM mbc_header h
+        LEFT JOIN mbc_master mm ON mm.mbc_name = h.mbc_name
+        LEFT JOIN mbc_load_port_lines lp ON lp.mbc_id = h.id
+        LEFT JOIN mbc_discharge_port_lines dp ON dp.mbc_id = h.id
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY h.doc_date ASC, h.id ASC
+    """, params)
+
+    rows = cur.fetchall()
+    conn.close()
+
+    def _tph(qty, mins):
+        """qty (MT) / duration (hrs). None if qty/duration invalid."""
+        if qty is None or mins is None or mins <= 0:
+            return None
+        hours = mins / 60.0
+        try:
+            return round(float(qty) / hours, 2) if hours > 0 else None
+        except (TypeError, ZeroDivisionError):
+            return None
+
+    result = []
+    sr = 1
+    for r in rows:
+        month = _month_label(r['unloading_completed'])
+        fy = _fy(r['unloading_completed'])
+        if month_filter and month != month_filter:
+            continue
+        if fy_filter and fy != fy_filter:
+            continue
+
+        al = r['arrived_load_port'];   lc = r['loading_commenced']
+        lp = r['loading_completed'];   co = r['cast_off_load_port']
+        ag = r['arrival_gull_island']; dg = r['departure_gull_island']
+        ad = r['vessel_arrival_port']; uc = r['unloading_commenced']
+        up = r['unloading_completed']; ds = r['discharge_stop_shifting']
+        dt = r['discharge_start_shifting']; cd = r['vessel_cast_off']
+        cc = r['cleaning_commenced'];  cx = r['cleaning_completed']
+        so = r['sailed_out_load_port']; rl = r['reached_load_port']
+
+        qty = r['bl_quantity']
+
+        # ── Delay / Net TPH / Gross TPH ──────────────────────────
+        def _mins_to_hhmm(mins):
+            if mins is None:
+                return ''
+            total_minutes = int(round(mins))
+            h, m = divmod(total_minutes, 60)
+            return f'{h}:{m:02d}'
+
+        delay_components = [
+            _diff_mins(al, lc),   # waiting at Jaigad before loading
+            _diff_mins(lp, co),   # waiting for castoff after loading
+            _diff_mins(ag, dg),   # waiting at Gull island
+            _diff_mins(ad, uc),   # waiting at DPPL before discharge
+            _diff_mins(ds, dt),   # partial discharge stop
+            _diff_mins(up, cd),   # waiting to sail after discharge
+            _diff_mins(cc, cx),   # breakdown time
+        ]
+        delay_present   = [v for v in delay_components if v is not None]
+        delay_total_min = sum(delay_present) if delay_present else None
+
+        loading_mins   = _diff_mins(lc, lp)
+        unloading_mins = _diff_mins(uc, up)
+        working_list   = [v for v in (loading_mins, unloading_mins) if v is not None]
+        working_mins   = sum(working_list) if working_list else None
+
+        result.append({
+            'sr_no':                    sr,
+            'mbc_date':                 _fmt_date(r['doc_date']),
+            'mbc_name':                 r['mbc_name'] or '',
+            'month':                    month,
+            'fy_year':                  fy,
+            'date':                     _fmt_date(al),
+            'arrived_anchored':         _fmt_dt(al),
+            'waiting_perb':             _dur(al, lc),
+            'loading_commenced':        _fmt_dt(lc),
+            'loading_completed':        _fmt_dt(lp),
+            'loading_dur':              _dur(lc, lp),
+            'castoff':                  _fmt_dt(co),
+            'waiting_castoff':          _dur(lp, co),
+            'cargo':                    r['cargo_name'] or '',
+            'qty_in':                   qty if qty is not None else '',
+            'at_jaigad':                _dur(al, co),
+            'transit_jaigad_dharamtar': _dur(co, ad),
+            'jaigad_to_gull':           _dur(co, ag),
+            'arrived_gull':             _fmt_dt(ag),
+            'dept_gull':                _fmt_dt(dg),
+            'gull_waiting':             _dur(ag, dg),
+            'arrived_dharamtar':        _fmt_dt(ad),
+            'transit_gull_dppl':        _dur(dg, ad),
+            'waiting_dppl':             _dur(ad, uc),
+            'discharge_commenced':      _fmt_dt(uc),
+            'discharge_completed':      _fmt_dt(up),
+            'unloading_dur':            _dur(uc, up),
+            'partly_disch_stop':        _fmt_dt(ds),
+            'partly_disch_start':       _fmt_dt(dt),
+            'disch_stop_time':          _dur(ds, dt),
+            'sailed_dharamtar':         _fmt_dt(cd),
+            'breakdown_start':          '',
+            'breakdown_end':            _fmt_dt(cx),
+            'breakdown_time':           _dur(cc, cx),
+            'arrived_jaigad':           _fmt_dt(rl),
+            'waiting_sail':             _dur(up, cd),
+            'tat':                      _dur(al, so),
+
+            # ── Delay / Net / Gross additions ──────────────
+            'delay':     _mins_to_hhmm(delay_total_min),
+            'net_tph':   _tph(qty, working_mins),
+            'gross_tph': _tph(qty, _diff_mins(al, so)),
+        })
+        sr += 1
+    return result
 
 def _write_mbc_wise_sheet(ws, rows, period_label):
     """
@@ -1081,7 +1241,15 @@ def _write_mbc_wise_sheet(ws, rows, period_label):
         # Q: TAT
         _w(r, 17, trip['tat'],              color=NAVY, size=12, bg=LTBGREY, border=bdr, fmt=FMT_TIME)
         # R: blank
-        _w(r, 18, '', color=NAVY, size=11, aln=lft, border=bdr)
+        _w(
+            r,
+            18,
+            remarks_map.get(trip["mbc_name"], ""),
+            color=NAVY,
+            size=11,
+            aln=lft,
+            border=bdr
+        )
 
         # Accumulate for grand total
         for k in SEG_KEYS:
@@ -1339,12 +1507,14 @@ def mbc_master_dppl_tat_data():
     return jsonify({'rows': out, 'totals': totals})
 
 
-@bp.route('/api/module/RP01/mbc-master/download')
+@bp.route('/api/module/RP01/mbc-master/download', methods=['POST'])
 @login_required
 def mbc_master_download():
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    
+    
 
     selected_date = request.args.get('selected_date', '')
     req_month = request.args.get('month', '')
@@ -1411,6 +1581,9 @@ def mbc_master_download():
     req_fy,
     req_owner
     )
+    remarks_data = request.get_json(silent=True)
+    if remarks_data is None:
+      remarks_data = []
     _write_mbc_wise_sheet(ws0, mbc_wise_rows, period_label)
 
     # ══ Sheet 2: Master Data ═══════════════════════════════════════════
@@ -1590,3 +1763,72 @@ def mbc_master_mbc_wise_data():
         out.append(entry)
 
     return jsonify(out)
+@bp.route('/api/module/RP01/mbc-master/mbc-tph-data')
+@login_required
+def mbc_master_mbc_tph_data():
+
+    selected_date = request.args.get('selected_date', '')
+    req_month = request.args.get('month', '')
+    req_fy = request.args.get('fy', '')
+    req_owner = request.args.getlist('owner')
+
+    rows = _fetch_mbc_tph_rows(
+        selected_date,
+        selected_date,
+        req_month,
+        req_fy,
+        req_owner
+    )
+
+    # Same per-column header colours used for the Excel "Master Data" sheet,
+    # translated to the hcol-* CSS classes already defined on this page.
+    # (position-based, 1-indexed, matches _HDR_FILLS in the download route)
+    _HEX_TO_CLASS = {
+        'A5A5A5': 'hcol-grey',
+        'FFFFCC': 'hcol-lyellow',
+        '70AD47': 'hcol-green',
+        '4472C4': 'hcol-blue',
+        '5B9BD5': 'hcol-lblue',
+    }
+    _COL_HEX_BY_POSITION = {
+        1: 'A5A5A5', 2: 'FFFFCC', 3: 'A5A5A5',
+        # 4 (Month) = no fill
+        5: 'FFFFCC', 6: 'FFFFCC', 7: 'FFFFCC', 8: 'FFFFCC',
+        9: 'FFFFCC', 10: 'FFFFCC', 11: 'FFFFCC', 12: 'FFFFCC',
+        13: 'FFFFCC', 14: 'FFFFCC', 15: 'FFFFCC', 16: 'FFFFCC',
+        17: '70AD47', 18: '70AD47', 19: '70AD47', 20: '70AD47',
+        21: '70AD47', 22: '70AD47', 23: '70AD47', 24: '70AD47',
+        25: '70AD47', 26: '70AD47', 27: '70AD47', 28: '70AD47',
+        29: '4472C4', 30: '4472C4', 31: '4472C4',
+        32: '70AD47',
+        33: '4472C4', 34: '4472C4', 35: '4472C4',
+        36: '70AD47',
+        37: '5B9BD5',
+    }
+    _FROZEN_FIELDS = {'sr_no', 'mbc_date', 'mbc_name'}
+    _FROZEN_WIDTH  = {'sr_no': 55, 'mbc_date': 100, 'mbc_name': 150}
+
+    columns = []
+    for pos, (label, key, is_calc) in enumerate(COLUMNS, start=1):
+        hex_c = _COL_HEX_BY_POSITION.get(pos)
+        columns.append({
+            'label':    label,
+            'field':    key,
+            'is_calc':  is_calc,
+            'color':    _HEX_TO_CLASS.get(hex_c),   # None = no fill
+            'frozen':   key in _FROZEN_FIELDS,
+            'width':    _FROZEN_WIDTH.get(key),
+        })
+
+    # Delay / Net TPH / Gross TPH — light-blue highlight, not frozen
+    for label, key in [
+        ('Delay', 'delay'),
+        ('Net TPH', 'net_tph'),
+        ('Gross TPH', 'gross_tph'),
+    ]:
+        columns.append({
+            'label': label, 'field': key, 'is_calc': True,
+            'color': 'hcol-lblue', 'frozen': False, 'width': None,
+        })
+
+    return jsonify({'columns': columns, 'rows': rows})
