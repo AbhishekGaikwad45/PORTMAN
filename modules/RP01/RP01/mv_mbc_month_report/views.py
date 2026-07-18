@@ -390,7 +390,7 @@ def _fetch_mv_monthly_data(
             'Mother Vessel' AS company,
             COALESCE(vc_total.bl_quantity, 0) AS bl_qty,
             COALESCE(disc_total.disc_qty, 0)  AS discharged_qty,
-            disc_total.last_activity            AS last_activity
+            v.created_date                      AS created_date
         FROM vcn_header v
         LEFT JOIN vcn_cargo_declaration vcd
             ON vcd.vcn_id = v.id
@@ -406,8 +406,7 @@ def _fetch_mv_monthly_data(
         ) vc_total ON vc_total.vcn_id = v.id
         LEFT JOIN (
             SELECT source_id,
-                   SUM(quantity)   AS disc_qty,
-                   MAX(entry_date) AS last_activity
+                   SUM(quantity) AS disc_qty
             FROM lueu_lines
             WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
             GROUP BY source_id
@@ -427,7 +426,7 @@ def _fetch_mv_monthly_data(
             END AS company,
             COALESCE(mc_total.quantity, 0) AS bl_qty,
             COALESCE(disc_total.disc_qty, 0) AS discharged_qty,
-            disc_total.last_activity          AS last_activity
+            m.created_date                     AS created_date
         FROM mbc_header m
         LEFT JOIN mbc_master mm
             ON UPPER(TRIM(m.mbc_name)) = UPPER(TRIM(mm.mbc_name))
@@ -440,8 +439,7 @@ def _fetch_mv_monthly_data(
         ) mc_total ON mc_total.mbc_id = m.id
         LEFT JOIN (
             SELECT source_id,
-                   SUM(quantity)   AS disc_qty,
-                   MAX(entry_date) AS last_activity
+                   SUM(quantity) AS disc_qty
             FROM lueu_lines
             WHERE is_deleted IS NOT TRUE AND source_type = 'MBC'
             GROUP BY source_id
@@ -470,22 +468,23 @@ def _fetch_mv_monthly_data(
         if bl_qty <= 0 or outstanding <= 0:
             continue
 
-# NEW: drop vessels/MBCs whose last activity is before the
-        # report cutoff (2026-05-01) — old, inactive ones no longer
-        # clutter the report with dashes forever.
-        last_activity = cr.get('last_activity')
+        # Drop vessels/MBCs that were CREATED before the report cutoff
+        # (2026-05-01) — old vessels/MBCs entered into the system before
+        # this date never carry forward, no matter how much BL is
+        # outstanding. created_date is stored as TEXT (YYYY-MM-DD).
+        created_date_raw = cr.get('created_date')
 
-        if last_activity is None:
+        if not created_date_raw:
             continue
 
-        # normalize: driver may return a date/datetime object OR a string
-        if isinstance(last_activity, datetime):
-            last_activity = last_activity.date()
-        elif isinstance(last_activity, str):
-            last_activity = datetime.strptime(last_activity[:10], '%Y-%m-%d').date()
-        # else: already a date object, leave as-is
+        try:
+            created_date_obj = datetime.strptime(
+                str(created_date_raw).strip()[:10], '%Y-%m-%d'
+            ).date()
+        except Exception:
+            continue   # unparseable -> skip rather than risk wrong inclusion
 
-        if last_activity < REPORT_CUTOFF_DATE:
+        if created_date_obj < REPORT_CUTOFF_DATE:
             continue
 
         cn = (cr['cargo_name'] or '').strip()
