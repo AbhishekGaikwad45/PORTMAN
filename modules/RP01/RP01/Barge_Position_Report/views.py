@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment 
 from openpyxl.utils import get_column_letter
 import json as _json
-
+import traceback
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -353,10 +353,12 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
     for row in cur.fetchall():
         row       = dict(row)
 
-        
-        cutoff_date = date(2026, 5, 1)
+        cutoff_dt = datetime(2026, 5, 1)
 
-        if selected_dt and selected_dt < cutoff_date:
+        arrival_dt = _parse_dt(row.get("along_side_berth"))
+
+        # Skip barges that first arrived before 1 May 2026
+        if arrival_dt and arrival_dt < cutoff_dt:
             continue
 
         # Skip completed
@@ -388,7 +390,11 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         ):
             status = "Under Discharge"
 
-        # ← NO date filter, NO shift filter for barges
+        # ── FIX: neither condition matched (e.g. barge hasn't reached
+        #    berth yet, or both fields blank/whitespace) — skip it
+        #    instead of crashing with UnboundLocalError.
+        else:
+            continue
 
         completed_date = _fmt_dt(row.get("cast_off_port")) if row.get("cast_off_port") else None
         berth = (row.get("commence_discharge_berth") or row.get("along_side_berth") or "")
@@ -423,7 +429,7 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
                 p.unloading_completed,
                 p.vessel_cast_off AS mbc_cast_off,
                 ROW_NUMBER() OVER (
-                    PARTITION BY h.mbc_name
+                    PARTITION BY h.id
                     ORDER BY p.id DESC
                 ) rn
             FROM mbc_header h
@@ -439,57 +445,62 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
                 source_id,
                 SUM(COALESCE(quantity,0)) AS actual_qty
             FROM lueu_lines
-            WHERE source_type = 'MBC'
+            WHERE source_type='MBC'
             AND is_deleted IS NOT TRUE
             GROUP BY source_id
-        ) l ON l.source_id = m.id
+        ) l
+        ON l.source_id = m.id
         WHERE m.rn = 1
         AND m.arrival_port IS NOT NULL
         AND TRIM(COALESCE(m.arrival_port,'')) <> ''
         AND (
                 m.unloading_completed IS NULL
                 OR TRIM(COALESCE(m.unloading_completed,'')) = ''
-            )
+        )
         AND (
                 m.mbc_cast_off IS NULL
                 OR TRIM(COALESCE(m.mbc_cast_off,'')) = ''
-            )
+        )
         ORDER BY m.mbc_name
     """)
+
     for row in cur.fetchall():
-        row = dict(row)
+        cutoff_dt = datetime(2026, 5, 1)
 
-        cutoff_date = date(2026, 5, 1)
+        arrival_dt = _parse_dt(row.get("along_side_berth"))
 
-        if selected_dt and selected_dt < cutoff_date:
+        # Skip barges arrived before 1 May 2026
+        if arrival_dt and arrival_dt < cutoff_dt:
             continue
 
-        berth = (row.get("berth") or "").strip()
+        cutoff_dt = datetime(2026, 5, 1)
 
-        # Waiting
-        if (
-            row.get("arrival_port")
-            and str(row.get("arrival_port")).strip()
-            and (
-                row.get("unloading_commenced") is None
-                or str(row.get("unloading_commenced")).strip() == ""
-            )
-        ):
-            status = "Waiting"
+        arrival_dt = _parse_dt(row.get("arrival_port"))
 
-        # Discharging
-        elif (
-            row.get("unloading_commenced")
-            and str(row.get("unloading_commenced")).strip()
-        ):
-            status = "Discharging"
-
-        else:
+        # Skip MBCs that arrived before 1 May 2026
+        if arrival_dt and arrival_dt < cutoff_dt:
             continue
 
         bl_qty = float(row["bl_qty"] or 0)
         actual_qty = float(row["actual_qty"] or 0)
         balance_qty = max(bl_qty - actual_qty, 0)
+
+        # ---------------------------------------------------------
+        # IMPORTANT:
+        # Always send active MBCs to WAITING.
+        # Saved berth_layout will decide whether they appear on a berth.
+        # ---------------------------------------------------------
+
+        status = "Waiting"
+        berth = ""
+
+        print(
+            row["mbc_name"],
+            "arrival =", row.get("arrival_port"),
+            "db berth =", row.get("berth"),
+            "started =", row.get("unloading_commenced"),
+            "status =", status
+        )
 
         barges.append({
             "id": row["id"],
@@ -502,10 +513,10 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "discharge_qty": bl_qty,
             "total_qty": bl_qty,
             "balance_qty": balance_qty,
-            "berth": "",
+            "berth": berth,
             "status": status,
-            "unloading_commenced":      str(row.get("unloading_commenced") or "").strip(),
-            "commence_discharge_berth": "",   # MBCs use unloading_commenced
+            "unloading_commenced": str(row.get("unloading_commenced") or "").strip(),
+            "commence_discharge_berth": "",
         })
 
         if status == "Discharging" and berth:
@@ -1081,7 +1092,13 @@ def _shift_wise_discharge_inner():
     mbc_discharge = []
 
     for row in cur.fetchall():
-        row = dict(row)
+        cutoff_dt = datetime(2026, 5, 1)
+
+        arrival_dt = _parse_dt(row.get("arrival_port"))
+
+        # Skip MBCs arrived before 1 May 2026
+        if arrival_dt and arrival_dt < cutoff_dt:
+            continue
 
         delays = delay_map.get(
             (row['id'], 'MBC'),
@@ -1415,7 +1432,18 @@ def api_shift_report_load():
             if b.get('status') in ('Waiting', 'Under Discharge')
         ]
 
-        berth_layout_out = berth_layout_out + waiting_area_out
+        saved_names = {
+            (item.get("name") or "").strip().upper()
+            for item in berth_layout_out
+        }
+
+        waiting_area_out = [
+            item
+            for item in waiting_area_out
+            if (item.get("name") or "").strip().upper() not in saved_names
+        ]
+
+        berth_layout_out.extend(waiting_area_out)
 
         # ══════════════════════════════════════════════════════════════
         # TRACK 2 — DATE-SPECIFIC META FIELDS (unchanged)
@@ -1470,6 +1498,21 @@ def api_shift_report_load():
             'movement_logs': movement_logs_out,
             'updated_at': str(updated_at or ''),
         }
+        print("LIVE BARGES:", len(live_barges))
+        for b in live_barges:
+            print(
+                b["name"],
+                b["type"],
+                b["status"]
+            )
+
+        print("WAITING AREA:", len(waiting_area_out))
+        for b in waiting_area_out:
+            print(
+                b["name"],
+                b["type"],
+                
+            )
         return jsonify(result)
 
     except Exception as e:
