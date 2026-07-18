@@ -1240,28 +1240,20 @@ def api_shift_report_save():
 @login_required
 def api_shift_report_load():
     """
-    Load saved report data with two INDEPENDENT persistence tracks:
+    TRACK 1 — BERTH SECTION (shift-specific, save/carry-forward):
+        Only actual berth assignments (berth_layout). Waiting area is
+        intentionally EXCLUDED from this track now — it must never be
+        read from saved or carried-forward DB rows.
 
-    TRACK 1 — BERTH SECTION (shift-specific):
-        berth_layout, waiting_area, shift_incharge, bpo, crane_operator,
-        movement_logs.
-        This track's own-vs-carried decision is based ONLY on whether
-        THIS shift's berth_layout/waiting_area actually has content.
-        Other fields (notes, etc.) being present for this shift must
-        NEVER block berth carry-forward — that was the bug: a shift row
-        with only a stale note or personnel name saved was blocking the
-        correct BERTH 1 carry-forward from a previous shift's real save.
+    WAITING AREA:
+        Always computed LIVE from _fetch_all_barges() at request time.
+        Never taken from `own` saved row, never carried forward from a
+        previous shift/date. What's live in the backend right now is
+        what gets shown — that's it.
 
-    TRACK 2 — DATE-SPECIFIC FIELDS:
-        notes, wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull.
-        These are merged oldest -> newest across all eligible rows up to
-        and including the requested shift; a blank value never overwrites
-        a real one from an earlier row.
-
-    Carry-forward for the berth section is STRICTLY FORWARD ONLY:
-    A -> B -> C -> next day A -> ...
-    A later shift/date can never leak its berth data backward into an
-    earlier shift/date.
+    TRACK 2 — DATE-SPECIFIC FIELDS (unchanged):
+        notes, wt_r19, mbc_eta, eta_to_dharamtar, on_the_way_gull —
+        merged oldest -> newest across eligible rows.
     """
 
     report_date = request.args.get('date')
@@ -1277,9 +1269,11 @@ def api_shift_report_load():
         return {'A': 0, 'B': 1, 'C': 2}.get((s or '').upper(), 3)
 
     def has_berth_content(row):
-        """True only if THIS row's berth section itself has real content.
-        This is intentionally independent of notes/personnel/logs."""
-        return bool(row.get('berth_layout') or []) or bool(row.get('waiting_area') or [])
+        """True only if THIS row has real BERTH assignments.
+        Waiting area no longer counts here — a row saved with only
+        waiting-area entries and no actual berths must NOT be treated
+        as having berth content."""
+        return bool(row.get('berth_layout') or [])
 
     try:
         requested_date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
@@ -1291,12 +1285,10 @@ def api_shift_report_load():
 
     def row_key(r):
         rd = r["report_date"]
-
         if isinstance(rd, datetime):
             rd = rd.date()
         elif isinstance(rd, str):
             rd = datetime.strptime(rd[:10], "%Y-%m-%d").date()
-
         return (rd, shift_index(r.get("shift")))
 
     try:
@@ -1330,15 +1322,9 @@ def api_shift_report_load():
         all_rows = [dict(r) for r in cur.fetchall()]
 
         # ══════════════════════════════════════════════════════════════
-        # TRACK 1 — BERTH SECTION
-        # Rule:
-        # 1. If this shift is saved -> use it.
-        # 2. Otherwise -> use ONLY the latest previous saved shift.
-        # 3. Ignore ALL rows.
+        # TRACK 1 — BERTH SECTION ONLY (waiting area excluded)
         # ══════════════════════════════════════════════════════════════
-
         berth_source = "none"
-
         berth_layout_out = []
         shift_incharge_out = ""
         bpo_out = ""
@@ -1346,60 +1332,37 @@ def api_shift_report_load():
         movement_logs_out = []
         berth_updated_at = None
 
-
-        # ---------- Exact shift already saved ----------
         if (
             exact_row
             and exact_row.get("shift") != "ALL"
             and has_berth_content(exact_row)
         ):
-
             latest = exact_row
             berth_source = "own"
-
         else:
-
             latest = None
-
             valid_rows = []
-
             for row in all_rows:
-
-                # Ignore ALL shift completely
                 if (row.get("shift") or "").upper() == "ALL":
                     continue
-
-                # Skip rows without berth data
                 if not has_berth_content(row):
                     continue
-
-                # Skip future rows
                 if row_key(row) >= requested_key:
                     continue
-
                 valid_rows.append(row)
-
             valid_rows.sort(key=row_key, reverse=True)
-
             if valid_rows:
                 latest = valid_rows[0]
                 berth_source = "carried"
 
-
-        # ---------- Apply selected/latest snapshot ----------
         if latest:
-
-            combined = (
-                (latest.get("berth_layout") or []) +
-                (latest.get("waiting_area") or [])
-            )
+            combined = latest.get("berth_layout") or []  # berths only, no waiting
 
             shift_incharge_out = latest.get("shift_incharge", "")
             bpo_out = latest.get("bpo", "")
             crane_operator_out = latest.get("crane_operator", "")
             berth_updated_at = latest.get("updated_at")
 
-            # Movement logs only for exact shift
             if berth_source == "own":
                 movement_logs_out = latest.get("movement_logs") or []
             else:
@@ -1414,7 +1377,6 @@ def api_shift_report_load():
                 AND (cast_off_port IS NULL OR TRIM(cast_off_port)='')
                 AND (completed_discharge_berth IS NULL OR TRIM(completed_discharge_berth)='')
             """)
-
             for r in cur.fetchall():
                 r = dict(r)
                 if r.get("key"):
@@ -1430,7 +1392,6 @@ def api_shift_report_load():
                 AND (p.unloading_completed IS NULL OR TRIM(p.unloading_completed)='')
                 AND (p.vessel_cast_off IS NULL OR TRIM(p.vessel_cast_off)='')
             """)
-
             for r in cur.fetchall():
                 r = dict(r)
                 if r.get("key"):
@@ -1441,12 +1402,30 @@ def api_shift_report_load():
                 for item in combined
                 if (item.get("name") or "").strip().upper() in active_keys
             ]
-
         else:
             berth_source = "none"
 
         # ══════════════════════════════════════════════════════════════
-        # TRACK 2 — DATE-SPECIFIC META FIELDS (independent merge)
+        # WAITING AREA — ALWAYS LIVE, NEVER SAVED / NEVER CARRIED
+        # ══════════════════════════════════════════════════════════════
+        live_barges, _ = _fetch_all_barges()
+        waiting_area_out = [
+            {
+                'berth': 'WAITING',
+                'type': b.get('type', 'BARGE'),
+                'name': b.get('name', ''),
+                'cargo': b.get('cargo', ''),
+                'total': b.get('total_qty', b.get('qty', 0)),
+                'balance': b.get('balance_qty', 0),
+            }
+            for b in live_barges
+            if b.get('status') in ('Waiting', 'Under Discharge')
+        ]
+
+        berth_layout_out = berth_layout_out + waiting_area_out
+
+        # ══════════════════════════════════════════════════════════════
+        # TRACK 2 — DATE-SPECIFIC META FIELDS (unchanged)
         # ══════════════════════════════════════════════════════════════
         meta_candidates = [r for r in all_rows if row_key(r) <= requested_key]
         meta_candidates.sort(key=row_key)  # oldest -> newest
@@ -1484,7 +1463,7 @@ def api_shift_report_load():
         result = {
             'found': found,
             'carried': carried,
-            'berth_source': berth_source,   # 'own' | 'carried' | 'none' — for debugging/UI if needed
+            'berth_source': berth_source,
             'shift_incharge': shift_incharge_out,
             'bpo': bpo_out,
             'crane_operator': crane_operator_out,

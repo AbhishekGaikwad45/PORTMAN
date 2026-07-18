@@ -1828,28 +1828,18 @@
         if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
         if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
 
-        // ── Berth layout + Waiting Area ─────────────────────────────────────────
-        // TWO DIFFERENT CASES:
-        //
-        // 1. savedData.found === true
-        //    → THIS shift was explicitly saved by the user.
-        //    → Show the FROZEN snapshot exactly as saved (berths AND waiting area).
-        //
-        // 2. savedData.carried === true (found === false)
-        //    → THIS shift has NOT been saved yet (it's the live/current shift).
-        //    → Berth placements carry forward from the last saved shift (barges
-        //      physically stay in their berths until moved).
-        //    → BUT the Waiting Area must reflect LIVE data right now (_currentItems),
-        //      NOT the stale waiting list from the previous saved shift — a barge
-        //      that just became "Waiting" in the DB must show up immediately.
-        if (savedData.found) {
+        
+        // Backend now guarantees the waiting-area portion of berth_layout is
+        // ALWAYS live (fetched fresh from _fetch_all_barges() at request time),
+        // never taken from a saved or carried-forward DB row. So both the
+        // `found` and `carried` cases can be painted the same way — no
+        // separate live-rebuild step is needed for waiting area anymore.
+        if (savedData.found || savedData.carried) {
             paintFullSnapshot(savedData.berth_layout || []);
-        } else if (savedData.carried) {
-            const berthOnly = (savedData.berth_layout || []).filter(i => i.berth !== 'WAITING');
-            paintBerthsOnly(berthOnly);
-            rebuildWaitingAreaFromLive(berthOnly);
         }
         // else: no saved/carried snapshot at all → leave whatever loadBerthOccupancy() already painted live.
+        
+        
 
         // ── WT @ R19 ────────────────────────────────────────────────────────────
         if (savedData.wt_r19) {
