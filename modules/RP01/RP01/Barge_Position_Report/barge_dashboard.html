@@ -1825,7 +1825,7 @@
         if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
         if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
 
-        
+
         // Backend now guarantees the waiting-area portion of berth_layout is
         // ALWAYS live (fetched fresh from _fetch_all_barges() at request time),
         // never taken from a saved or carried-forward DB row. So both the
@@ -1835,8 +1835,8 @@
             paintFullSnapshot(savedData.berth_layout || []);
         }
         // else: no saved/carried snapshot at all → leave whatever loadBerthOccupancy() already painted live.
-        
-        
+
+
 
         // ── WT @ R19 ────────────────────────────────────────────────────────────
         if (savedData.wt_r19) {
@@ -1938,14 +1938,38 @@
 
         layout.forEach(item => {
             if (item.berth === 'WAITING') {
-                document.getElementById('waitingAreaZone').appendChild(buildWaitingPill(item));
+                const live = (_currentItems || []).find(x =>
+                    String(x.id) === String(item.id) &&
+                    String(x.type) === String(item.type)
+                );
+
+                if (live && Number(live.balance_qty) <= 0) {
+                    return;
+                }
+
+                document.getElementById('waitingAreaZone').appendChild(
+                    buildWaitingPill(live || item)
+                );
             } else {
                 const zone = document.querySelector(
                     `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
                 );
                 if (!zone) return;
                 zone.classList.remove('empty-slot');
-                zone.innerHTML = buildBerthCard(item, item.balance);
+                const live = (_currentItems || []).find(x =>
+                    String(x.id) === String(item.id) &&
+                    String(x.type) === String(item.type)
+                );
+
+                // If completed, don't display it
+                if (live && Number(live.balance_qty) <= 0) {
+                    return;
+                }
+
+                zone.innerHTML = buildBerthCard(
+                    live || item,
+                    live ? live.balance_qty : item.balance
+                );
             }
         });
 
