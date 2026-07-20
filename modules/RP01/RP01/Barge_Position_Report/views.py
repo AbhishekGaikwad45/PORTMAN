@@ -352,7 +352,8 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
     """)
     for row in cur.fetchall():
         row       = dict(row)
-
+        balance_qty = max(float(row.get("balance_qty") or 0), 0)
+        
         cutoff_dt = datetime(2026, 5, 1)
 
         arrival_dt = _parse_dt(row.get("along_side_berth"))
@@ -364,6 +365,8 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         # Skip completed
         if row.get("cast_off_port") and str(row.get("cast_off_port")).strip():
             continue
+        if balance_qty <= 0:
+           continue
 
         if row.get("completed_discharge_berth") and str(row.get("completed_discharge_berth")).strip():
             continue
@@ -409,7 +412,7 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "qty":            row["discharge_qty"],
             "discharge_qty":  float(row["discharge_qty"]),
             "total_qty":      float(row["discharge_qty"]),
-            "balance_qty": float(row.get("balance_qty", 0) or 0),
+            "balance_qty": balance_qty,
             "berth":          berth,
             "status":         status,
             "commence_discharge_berth": str(row.get("commence_discharge_berth") or "").strip(),
@@ -466,6 +469,7 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
 
     for row in cur.fetchall():
         cutoff_dt = datetime(2026, 5, 1)
+        
 
         arrival_dt = _parse_dt(row.get("along_side_berth"))
 
@@ -474,8 +478,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             continue
 
         cutoff_dt = datetime(2026, 5, 1)
+        
 
-        arrival_dt = _parse_dt(row.get("arrival_port"))
+        
 
         # Skip MBCs that arrived before 1 May 2026
         if arrival_dt and arrival_dt < cutoff_dt:
@@ -484,6 +489,9 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         bl_qty = float(row["bl_qty"] or 0)
         actual_qty = float(row["actual_qty"] or 0)
         balance_qty = max(bl_qty - actual_qty, 0)
+        # Automatically hide completed MBC
+        if balance_qty <= 0:
+            continue
 
         # ---------------------------------------------------------
         # IMPORTANT:
@@ -501,7 +509,12 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "started =", row.get("unloading_commenced"),
             "status =", status
         )
+        
 
+        # Automatically hide completed barges
+        if balance_qty <= 0:
+            continue
+                
         barges.append({
             "id": row["id"],
             "type": "MBC",
