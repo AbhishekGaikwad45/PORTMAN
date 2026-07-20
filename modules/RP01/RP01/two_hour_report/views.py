@@ -200,7 +200,6 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             berth_name,
             barge_name,
             cargo_name,
-            delay_name,
             source_type,
             source_id,
             COALESCE(SUM(quantity), 0) AS disch_qty
@@ -220,7 +219,6 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             berth_name,
             barge_name,
             cargo_name,
-            delay_name,
             source_type,
             source_id
         ORDER BY
@@ -234,9 +232,63 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
         cargo
     ])
 
+    
+
     rows = [dict(r) for r in cur.fetchall()]
 
     for r in rows:
+
+        # Get all delays for this barge/cargo within the selected 2-hour window
+        cur.execute("""
+            SELECT delay_name
+            FROM lueu_lines
+            WHERE entry_date = %s
+            AND from_time >= %s
+            AND from_time < %s
+            AND source_type = %s
+            AND source_id = %s
+            AND COALESCE(barge_name,'') = COALESCE(%s,'')
+            AND COALESCE(cargo_name,'') = COALESCE(%s,'')
+            AND (is_deleted IS NOT TRUE)
+            AND delay_name IS NOT NULL
+            AND delay_name <> ''
+            ORDER BY from_time
+        """, [
+            entry_date,
+            from_time,
+            to_time,
+            r['source_type'],
+            r['source_id'],
+            r['barge_name'],
+            r['cargo_name']
+        ])
+
+        from collections import OrderedDict
+
+        delay_counts = OrderedDict()
+
+        for row in cur.fetchall():
+
+            delay = (row["delay_name"] or "").strip()
+
+            if not delay:
+                continue
+
+            if delay.lower() == "unloading":
+                continue
+
+            delay_counts[delay] = delay_counts.get(delay, 0) + 1
+
+        delay_list = []
+
+        for delay, count in delay_counts.items():
+            if count > 1:
+                delay_list.append(f"{delay} ({count})")
+            else:
+                delay_list.append(delay)
+
+        r["delay_name"] = " / ".join(delay_list) if delay_list else "—"
+
         r['bal_qty'] = _balance_qty(
             cur,
             r.get('source_type'),
