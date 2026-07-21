@@ -195,6 +195,7 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
     conn = get_db()
     cur = get_cursor(conn)
 
+    # Main report query
     cur.execute("""
         SELECT
             berth_name,
@@ -202,17 +203,14 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             cargo_name,
             source_type,
             source_id,
-            COALESCE(SUM(quantity), 0) AS disch_qty
+            COALESCE(SUM(quantity),0) AS disch_qty
         FROM lueu_lines
         WHERE entry_date = %s
           AND (is_deleted IS NOT TRUE)
           AND berth_name IS NOT NULL
           AND berth_name <> ''
-          AND from_time IS NOT NULL
-          AND from_time <> ''
           AND from_time >= %s
           AND from_time < %s
-          AND quantity IS NOT NULL
           AND quantity > 0
           AND (%s = '' OR cargo_name = %s)
         GROUP BY
@@ -232,27 +230,31 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
         cargo
     ])
 
-    
-
     rows = [dict(r) for r in cur.fetchall()]
 
     for r in rows:
 
-        # Get all delays for this barge/cargo within the selected 2-hour window
+        # Delay query
         cur.execute("""
-            SELECT delay_name
-            FROM lueu_lines
-            WHERE entry_date = %s
-            AND from_time >= %s
-            AND from_time < %s
-            AND source_type = %s
-            AND source_id = %s
-            AND COALESCE(barge_name,'') = COALESCE(%s,'')
-            AND COALESCE(cargo_name,'') = COALESCE(%s,'')
-            AND (is_deleted IS NOT TRUE)
-            AND delay_name IS NOT NULL
-            AND delay_name <> ''
-            ORDER BY from_time
+            SELECT
+                l.delay_name,
+                COALESCE(d.type,'Other') AS delay_type,
+                l.from_time,
+                l.to_time
+            FROM lueu_lines l
+            LEFT JOIN port_delay_types d
+                   ON d.name = l.delay_name
+            WHERE l.entry_date=%s
+              AND l.from_time >= %s
+              AND l.from_time < %s
+              AND l.source_type=%s
+              AND l.source_id=%s
+              AND COALESCE(l.barge_name,'')=COALESCE(%s,'')
+              AND COALESCE(l.cargo_name,'')=COALESCE(%s,'')
+              AND l.is_deleted IS NOT TRUE
+              AND l.delay_name IS NOT NULL
+              AND d.type IN ('RMHS Delays','Maintenance Delays')
+            ORDER BY d.type,l.from_time
         """, [
             entry_date,
             from_time,
@@ -263,38 +265,31 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             r['cargo_name']
         ])
 
-        from collections import OrderedDict
-
-        delay_counts = OrderedDict()
-
-        for row in cur.fetchall():
-
-            delay = (row["delay_name"] or "").strip()
-
-            if not delay:
-                continue
-
-            if delay.lower() == "unloading":
-                continue
-
-            delay_counts[delay] = delay_counts.get(delay, 0) + 1
-
         delay_list = []
 
-        for delay, count in delay_counts.items():
-            if count > 1:
-                delay_list.append(f"{delay} ({count})")
-            else:
-                delay_list.append(delay)
+        for d in cur.fetchall():
+
+            start = datetime.strptime(d["from_time"], "%H:%M")
+            end = datetime.strptime(d["to_time"], "%H:%M")
+
+            mins = int((end - start).total_seconds() // 60)
+            if mins < 0:
+                mins += 24 * 60
+
+            duration = f"{mins//60:02d}:{mins%60:02d}"
+
+            delay_list.append(
+                f'{d["delay_type"]}: {d["delay_name"]} ({duration})'
+            )
 
         r["delay_name"] = " / ".join(delay_list) if delay_list else "—"
 
-        r['bal_qty'] = _balance_qty(
+        r["bal_qty"] = _balance_qty(
             cur,
-            r.get('source_type'),
-            r.get('source_id'),
-            r.get('barge_name'),
-            r.get('cargo_name')
+            r["source_type"],
+            r["source_id"],
+            r["barge_name"],
+            r["cargo_name"]
         )
 
     conn.close()
