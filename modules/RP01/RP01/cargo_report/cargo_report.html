@@ -736,6 +736,7 @@ $(document).ready(function () {
         class="material-po-input"
         value="${item.material_po || ''}"
         data-id="${item.id || ''}"
+        data-customer-detail-id="${item.customer_detail_id || ''}"
         data-vessel-type="${item.vessel_type || ''}"
         style="width:120px;padding:4px;">`,
 
@@ -800,10 +801,11 @@ $(document).ready(function () {
 
         const materialPo = $(this).val();
         const id = $(this).data('id');
+        const customerDetailId = $(this).data('customer-detail-id');
         const vesselType = $(this).data('vessel-type');
-
         console.log({
             id: id,
+            customer_detail_id: customerDetailId,
             vessel_type: vesselType,
             material_po: materialPo
         });
@@ -816,10 +818,11 @@ $(document).ready(function () {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    id: id,
-                    vessel_type: vesselType,
-                    material_po: materialPo
-                })
+                id: id,
+                customer_detail_id: customerDetailId,
+                vessel_type: vesselType,
+                material_po: materialPo
+            })
             });
 
             const result = await response.json();

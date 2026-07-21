@@ -356,10 +356,12 @@ def update_material_po():
     try:
 
         data = request.get_json()
+        
 
         print("UPDATE REQUEST:", data)
 
         record_id = data.get('id')
+        customer_detail_id = data.get('customer_detail_id')
         vessel_type = data.get('vessel_type')
         material_po = data.get('material_po')
 
@@ -380,10 +382,10 @@ def update_material_po():
         elif vessel_type == 'MBC':
 
             cur.execute("""
-                UPDATE mbc_customer_details
-                SET material_po = %s
-                WHERE mbc_id = %s
-            """, (material_po, record_id))
+            UPDATE mbc_customer_details
+            SET material_po = %s
+            WHERE id = %s
+        """, (material_po, customer_detail_id))
 
         else:
 
