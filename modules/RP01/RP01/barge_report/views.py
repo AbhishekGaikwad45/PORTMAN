@@ -31,6 +31,39 @@ def _fmt(val):
     return str(val)
 
 
+from datetime import datetime
+
+def _tat(start, end):
+    """Mirrors the UI's formatDuration(trip_start, cast_off_berth):
+    HH:MM elapsed, or '' if either value is missing/unparseable/negative."""
+    if not start or not end:
+        return ''
+    try:
+        start_dt = datetime.fromisoformat(str(start).replace(' ', 'T'))
+        end_dt   = datetime.fromisoformat(str(end).replace(' ', 'T'))
+    except (ValueError, TypeError):
+        return ''
+
+    total_min = round((end_dt - start_dt).total_seconds() / 60)
+    if total_min < 0:
+        return ''
+
+    h, m = divmod(total_min, 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def _fmt_datetime(val):
+    if not val:
+        return ""
+
+    try:
+        if isinstance(val, str):
+            val = datetime.fromisoformat(val.replace(" ", "T"))
+
+        return val.strftime("%d-%m-%Y %H:%M")
+    except Exception:
+        return str(val)
+
 # ── routes ──────────────────────────────────────────────────────────────────────
 
 @bp.route('/module/RP01/barge-report/')
@@ -252,8 +285,30 @@ _BARGE_COLUMNS = [
     ('Discharge End (Berth)',       'completed_discharge_berth'),
     ('Anch. Gull Island (Loaded)',  'anchored_gull_island_empty'),
     ('Aweigh Gull Island (Loaded)', 'aweigh_gull_island_empty'),
+    ('TAT',                         'tat'), 
 ]
 
+DATE_COLUMNS = {
+    'nor_tendered',
+    'discharge_commenced',
+    'discharge_completed',
+    'trip_start',
+    'anchored_gull_island',
+    'aweigh_gull_island',
+    'amf_at_port',
+    'along_side_vessel',
+    'along_side_berth',
+    'commenced_loading',
+    'completed_loading',
+    'cast_off_mv',
+    'cast_off_berth',
+    'cast_off_berth_nt',
+    'cast_off_port',
+    'commence_discharge_berth',
+    'completed_discharge_berth',
+    'anchored_gull_island_empty',
+    'aweigh_gull_island_empty',
+}
 
 @bp.route('/api/module/RP01/barge-report/download')
 @login_required
@@ -295,6 +350,11 @@ def barge_report_download():
     finally:
         conn.close()
 
+    # ── Compute TAT for every row — same source columns as the UI's
+    # formatDuration(trip_start, cast_off_berth) ──────────────────────────
+    for r in xl_rows:
+        r['tat'] = _tat(r.get('trip_start'), r.get('cast_off_berth'))
+
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -322,10 +382,11 @@ def barge_report_download():
     for row_idx, row in enumerate(xl_rows, 2):
         for col_idx, (_, key) in enumerate(_BARGE_COLUMNS, 1):
             val = row.get(key)
+
             if val is None:
-                val = ''
-            elif hasattr(val, 'isoformat'):
-                val = str(val)
+                val = ""
+            elif key in DATE_COLUMNS:
+                val = _fmt_datetime(val)
             c = ws.cell(row_idx, col_idx, val)
             c.font = cell_font; c.border = bdr
             c.alignment = rgt if key == 'discharge_quantity' else lft
