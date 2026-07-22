@@ -10,6 +10,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 import json as _json
 import traceback
+from collections import defaultdict
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -1470,25 +1471,35 @@ def api_shift_report_load():
         merged_gull = {}
         merged_notes = []
         latest_meta_updated_at = None
+        latest_notes_row = None
 
         for r in meta_candidates:
             for k, v in (r.get('wt_r19') or {}).items():
                 if v:
                     merged_wt_r19[k] = v
+
             for k, v in (r.get('mbc_eta') or {}).items():
                 if v:
                     merged_mbc_eta[k] = v
+
             for k, v in (r.get('eta_to_dharamtar') or {}).items():
                 if v:
                     merged_eta_dharamtar[k] = v
+
             for k, v in (r.get('on_the_way_gull') or {}).items():
                 if v:
                     merged_gull[k] = v
-            for n in (r.get('notes') or []):
-                if n and n not in merged_notes:
-                    merged_notes.append(n)
-            if r.get('updated_at'):
-                latest_meta_updated_at = r.get('updated_at')
+
+            # Keep only the latest notes
+            if r.get("notes"):
+                latest_notes_row = r
+
+            if r.get("updated_at"):
+                latest_meta_updated_at = r.get("updated_at")
+
+        # Carry forward only the latest saved notes
+        if latest_notes_row:
+            merged_notes = latest_notes_row.get("notes") or []
 
         found = (berth_source == 'own')
         carried = (berth_source == 'carried')
@@ -2556,3 +2567,392 @@ def download_movement_logs_range_excel():
         as_attachment=True,
         download_name=f"Movement_Logs_{from_date}_to_{to_date}_{stamp}.xlsx"
     )   
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  NEW — Date/Shift-wise Jetty Cargo Report (separate route, does not
+#  touch or replace the existing /api/module/RP01/jetty-cargo-report)
+# ══════════════════════════════════════════════════════════════════════════
+
+_JETTY_V2_SHIFT_WINDOWS = {
+    'ALL': {'fh': 6,  'fm': 0, 'th': 6,  'tm': 0, 'next_day': True},
+    'A':   {'fh': 6,  'fm': 0, 'th': 14, 'tm': 0, 'next_day': False},
+    'B':   {'fh': 14, 'fm': 0, 'th': 22, 'tm': 0, 'next_day': False},
+    'C':   {'fh': 22, 'fm': 0, 'th': 6,  'tm': 0, 'next_day': True},
+}
+
+
+def _jetty_v2_shift_window(report_date_str, shift):
+    """Returns (from_dt, to_dt) for the given date+shift."""
+    win = _JETTY_V2_SHIFT_WINDOWS.get((shift or 'ALL').upper(), _JETTY_V2_SHIFT_WINDOWS['ALL'])
+    base = datetime.strptime(report_date_str, '%Y-%m-%d')
+    from_dt = base.replace(hour=win['fh'], minute=win['fm'], second=0)
+    to_base = base + timedelta(days=1) if win['next_day'] else base
+    to_dt = to_base.replace(hour=win['th'], minute=win['tm'], second=0)
+    return from_dt, to_dt
+
+
+def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
+    """Independent copy — computes barge status AS OF `to_dt` (end of the
+    selected shift window) instead of 'right now'. Does not call or modify
+    _fetch_all_barges()."""
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    barges = []
+    cutoff_dt = datetime(2026, 5, 1)
+    shift = (shift or 'ALL').upper()
+
+    cur.execute("""
+        WITH discharge_sums AS (
+            SELECT
+                TRIM(UPPER(ll.barge_name)) AS barge_name,
+                ll.source_id,
+                SUM(COALESCE(ll.quantity,0)) AS discharged_qty
+            FROM lueu_lines ll
+            WHERE ll.is_deleted IS NOT TRUE
+              AND ll.source_type = 'VCN'
+              AND ll.entry_date <= %s
+            GROUP BY TRIM(UPPER(ll.barge_name)), ll.source_id
+        ),
+        latest_berth AS (
+            SELECT DISTINCT ON (
+                source_id,
+                TRIM(UPPER(barge_name))
+            )
+                source_id,
+                TRIM(UPPER(barge_name)) AS barge_key,
+                berth_name
+            FROM lueu_lines
+            WHERE source_type = 'VCN'
+              AND berth_name IS NOT NULL
+              AND TRIM(berth_name) <> ''
+              AND entry_date <= %s
+              AND (%s = 'ALL' OR shift = %s)
+            ORDER BY
+                source_id,
+                TRIM(UPPER(barge_name)),
+                entry_date DESC,
+                id DESC
+        )
+        SELECT
+            l.id,
+            l.barge_name,
+            l.trip_number,
+            l.cargo_name,
+            lb.berth_name,
+            l.anchored_gull_island,
+            l.cast_off_mv,
+            l.cast_off_port,
+            l.along_side_berth,
+            l.commence_discharge_berth,
+            l.completed_discharge_berth,
+            COALESCE(l.discharge_quantity,0) AS discharge_qty,
+            (
+                COALESCE(l.discharge_quantity,0)
+                - COALESCE(ds.discharged_qty,0)
+            ) AS balance_qty
+        FROM ldud_barge_lines l
+        LEFT JOIN ldud_header h
+            ON h.id = l.ldud_id
+        LEFT JOIN discharge_sums ds
+            ON ds.barge_name = TRIM(
+                UPPER(
+                    CONCAT(
+                        l.barge_name,
+                        ' / ',
+                        COALESCE(l.trip_number::text,'1')
+                    )
+                )
+            )
+            AND ds.source_id = h.vcn_id
+        LEFT JOIN latest_berth lb
+            ON lb.source_id = h.vcn_id
+            AND lb.barge_key = TRIM(
+                UPPER(
+                    CONCAT(
+                        l.barge_name,
+                        ' / ',
+                        COALESCE(l.trip_number::text,'1')
+                    )
+                )
+            )
+        WHERE COALESCE(TRIM(l.barge_name),'') <> ''
+    """, (report_date_str, report_date_str, shift, shift))
+
+    for row in cur.fetchall():
+        row = dict(row)
+        balance_qty = max(float(row.get("balance_qty") or 0), 0)
+
+        alongside_dt   = _parse_dt(row.get("along_side_berth"))
+        commence_dt    = _parse_dt(row.get("commence_discharge_berth"))
+        completed_dt   = _parse_dt(row.get("completed_discharge_berth"))
+        cast_off_dt    = _parse_dt(row.get("cast_off_port"))
+        cast_off_mv_dt = _parse_dt(row.get("cast_off_mv"))
+
+        if alongside_dt and alongside_dt < cutoff_dt:
+            continue
+
+        cast_off_by_then  = bool(cast_off_dt and cast_off_dt <= to_dt)
+        completed_by_then = bool(completed_dt and completed_dt <= to_dt)
+
+        status = None
+        if alongside_dt and alongside_dt <= to_dt and not cast_off_by_then:
+            if commence_dt and commence_dt <= to_dt and not completed_by_then:
+                status = "Under Discharge"
+            elif not commence_dt or commence_dt > to_dt:
+                status = "Waiting"
+
+        # ── ETA = "Loaded & Transit": cast off mother vessel by to_dt,
+        # but NOT yet alongside the discharge berth as of to_dt.
+        alongside_by_then = bool(alongside_dt and alongside_dt <= to_dt)
+        eta_active = bool(
+            cast_off_mv_dt
+            and cast_off_mv_dt <= to_dt
+            and not alongside_by_then
+        )
+
+        berth = (row.get("berth_name") or "").upper()
+
+        barges.append({
+            "id": row["id"],
+            "type": "BARGE",
+            "barge_name": row["barge_name"],
+            "name": row["barge_name"],
+            "cargo": row.get("cargo_name") or "",
+            "balance_qty": balance_qty,
+            "berth": berth,
+            "status": status,
+            "eta_active": eta_active,
+        })
+
+    cur.close()
+    conn.close()
+    return barges
+
+def _fetch_mbc_asof_v2(to_dt, report_date_str, shift='ALL'):
+    """MBC equivalent of _fetch_barges_asof_v2 — status/balance as of `to_dt`."""
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    cutoff_dt = datetime(2026, 5, 1)
+    shift = (shift or 'ALL').upper()
+
+    cur.execute("""
+        WITH actual AS (
+            SELECT source_id, SUM(COALESCE(quantity,0)) AS actual_qty
+            FROM lueu_lines
+            WHERE source_type = 'MBC'
+              AND is_deleted IS NOT TRUE
+              AND entry_date <= %s
+            GROUP BY source_id
+        ),
+        latest_berth AS (
+            SELECT DISTINCT ON (mbc_id)
+                mbc_id,
+                vessel_unloading_berth AS berth_name
+            FROM mbc_discharge_port_lines
+            WHERE vessel_unloading_berth IS NOT NULL
+              AND TRIM(vessel_unloading_berth) <> ''
+            ORDER BY mbc_id, id DESC
+        )
+        SELECT
+            h.id,
+            h.mbc_name,
+            h.cargo_name,
+            COALESCE(h.bl_quantity,0) AS bl_qty,
+            p.vessel_arrival_port,
+            p.unloading_commenced,
+            p.unloading_completed,
+            p.vessel_cast_off,
+            lb.berth_name,
+            COALESCE(a.actual_qty,0) AS actual_qty
+        FROM mbc_header h
+        JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+        LEFT JOIN actual a ON a.source_id = h.id
+        LEFT JOIN latest_berth lb ON lb.mbc_id = h.id
+        WHERE p.vessel_arrival_port IS NOT NULL
+          AND TRIM(COALESCE(p.vessel_arrival_port,'')) <> ''
+    """, (report_date_str,))
+
+    mbcs = []
+    for row in cur.fetchall():
+        row = dict(row)
+        arrival_dt   = _parse_dt(row.get("vessel_arrival_port"))
+        commence_dt  = _parse_dt(row.get("unloading_commenced"))
+        completed_dt = _parse_dt(row.get("unloading_completed"))
+        cast_off_dt  = _parse_dt(row.get("vessel_cast_off"))
+
+        if arrival_dt and arrival_dt < cutoff_dt:
+            continue
+        if not arrival_dt or arrival_dt > to_dt:
+            continue
+
+        cast_off_by_then  = bool(cast_off_dt and cast_off_dt <= to_dt)
+        completed_by_then = bool(completed_dt and completed_dt <= to_dt)
+        if cast_off_by_then or completed_by_then:
+            continue  # finished before/at this point — not "active as of" to_dt
+
+        balance_qty = max(float(row["bl_qty"] or 0) - float(row["actual_qty"] or 0), 0)
+        if balance_qty <= 0:
+            continue
+
+        unloading_started = bool(commence_dt and commence_dt <= to_dt)
+
+        mbcs.append({
+            "id": row["id"],
+            "type": "MBC",
+            "name": row["mbc_name"],
+            "cargo": row.get("cargo_name") or "",
+            "balance_qty": balance_qty,
+            "berth": (row.get("berth_name") or "").upper(),
+            "status": "Under Discharge" if unloading_started else "Waiting",
+            "unloading_commenced": str(row.get("unloading_commenced") or "").strip(),
+        })
+
+    cur.close()
+    conn.close()
+    return mbcs
+
+
+@bp.route('/api/module/RP01/jetty-cargo-report-v2')
+@login_required
+def api_jetty_cargo_report_v2():
+    """New, separate endpoint — date/shift-wise version.
+    Does not affect /api/module/RP01/jetty-cargo-report."""
+    report_date = request.args.get('date', '')
+    shift = request.args.get('shift', 'ALL')
+    if not report_date:
+        return jsonify({'jetty_waiting': [], 'total_jetty': 0, 'total_eta': 0, 'berth_discharge': []})
+
+    from_dt, to_dt = _jetty_v2_shift_window(report_date, shift)
+    barges = _fetch_barges_asof_v2(to_dt, report_date, shift)
+    mbcs   = _fetch_mbc_asof_v2(to_dt, report_date, shift)
+
+    jetty_counts = defaultdict(int)
+    eta_counts = defaultdict(int)
+    berth_rows = []
+
+    for b in barges:
+        cargo = (b.get('cargo') or 'UNKNOWN').strip().upper() or 'UNKNOWN'
+        if b['status'] == 'Waiting':
+            jetty_counts[cargo] += 1
+        if b.get('eta_active'):
+            eta_counts[cargo] += 1
+
+        # Only genuinely-under-discharge, berth-assigned, non-zero-balance items
+        if (
+            b['status'] == 'Under Discharge'
+            and (b.get('berth') or '').strip()
+            and float(b.get('balance_qty') or 0) > 0
+        ):
+            berth_rows.append({
+                'cargo': b.get('cargo') or '',
+                'berth': (b.get('berth') or '').upper(),
+                'balance': b.get('balance_qty', 0),
+            })
+
+    for m in mbcs:
+        if (
+            m['status'] == 'Under Discharge'
+            and (m.get('berth') or '').strip()
+            and float(m.get('balance_qty') or 0) > 0
+        ):
+            berth_rows.append({
+                'cargo': m.get('cargo') or '',
+                'berth': (m.get('berth') or '').upper(),
+                'balance': m.get('balance_qty', 0),
+            })
+
+    all_cargos = sorted(set(jetty_counts) | set(eta_counts))
+    jetty_waiting = [
+        {'cargo': c, 'jetty': jetty_counts.get(c, 0), 'eta': eta_counts.get(c, 0)}
+        for c in all_cargos
+    ]
+
+    return jsonify({
+        'jetty_waiting': jetty_waiting,
+        'total_jetty': sum(jetty_counts.values()),
+        'total_eta': sum(eta_counts.values()),
+        'berth_discharge': berth_rows,
+    })
+
+    
+@bp.route('/api/module/RP01/jetty-cargo-report')
+@login_required
+def api_jetty_cargo_report():
+    report_date = request.args.get('date', '')
+    shift = request.args.get('shift', 'ALL')
+    if not report_date:
+        return jsonify({'jetty_waiting': [], 'total_jetty': 0, 'total_eta': 0, 'berth_discharge': []})
+
+    barges, _ = _fetch_all_barges()
+
+    jetty_counts = defaultdict(int)
+    for b in barges:
+        if b['type'] == 'BARGE' and b['status'] == 'Waiting':
+            cargo = (b.get('cargo') or 'UNKNOWN').strip().upper() or 'UNKNOWN'
+            jetty_counts[cargo] += 1
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    cur.execute("""
+        SELECT COALESCE(NULLIF(TRIM(cargo_name),''),'UNKNOWN') AS cargo, COUNT(*) AS cnt
+        FROM ldud_barge_lines
+        WHERE anchored_gull_island IS NOT NULL
+          AND (cast_off_port IS NULL OR TRIM(cast_off_port) = '')
+        GROUP BY 1
+    """)
+    eta_counts = {(r['cargo'] or 'UNKNOWN').upper(): r['cnt'] for r in cur.fetchall()}
+
+    all_cargos = sorted(set(jetty_counts) | set(eta_counts))
+    jetty_waiting = [
+        {'cargo': c, 'jetty': jetty_counts.get(c, 0), 'eta': eta_counts.get(c, 0)}
+        for c in all_cargos
+    ]
+    total_jetty = sum(jetty_counts.values())
+    total_eta = sum(eta_counts.values())
+
+    berth_rows = []
+    for b in barges:
+        if b['type'] == 'BARGE' and b['status'] == 'Under Discharge':
+            berth = (b.get('berth') or b.get('commence_discharge_berth') or '').upper()
+            berth_rows.append({
+                'cargo': b.get('cargo') or '',
+                'berth': berth,
+                'balance': b.get('balance_qty', 0),
+            })
+
+    cur.execute("""
+        SELECT berth_layout FROM barge_position_report
+        WHERE report_date = %s AND shift = %s
+    """, (report_date, shift))
+    row = cur.fetchone()
+    saved_layout = (dict(row).get('berth_layout') if row else []) or []
+    mbc_live = {b['name'].upper(): b for b in barges if b['type'] == 'MBC'}
+
+    for item in saved_layout:
+        if (item.get('type') or '').upper() != 'MBC':
+            continue
+        name = (item.get('name') or '').upper()
+        live = mbc_live.get(name)
+        unloading_started = bool(str(item.get('unloading_commenced') or '').strip())
+        if live and unloading_started:
+            berth_rows.append({
+                'cargo': live.get('cargo') or item.get('cargo') or '',
+                'berth': (item.get('berth') or '').upper(),
+                'balance': live.get('balance_qty', item.get('balance', 0)),
+            })
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        'jetty_waiting': jetty_waiting,
+        'total_jetty': total_jetty,
+        'total_eta': total_eta,
+        'berth_discharge': berth_rows,
+    })
