@@ -2835,25 +2835,16 @@ def api_jetty_cargo_report_v2():
     eta_counts = defaultdict(int)
     berth_rows = []
 
+    # ── Barges still feed JETTY (Waiting) and ETA (Loaded/Transit) counts ──
     for b in barges:
         cargo = (b.get('cargo') or 'UNKNOWN').strip().upper() or 'UNKNOWN'
         if b['status'] == 'Waiting':
             jetty_counts[cargo] += 1
         if b.get('eta_active'):
             eta_counts[cargo] += 1
+        # NOTE: barges no longer added to berth_rows — that table is MBC-only now.
 
-        # Only genuinely-under-discharge, berth-assigned, non-zero-balance items
-        if (
-            b['status'] == 'Under Discharge'
-            and (b.get('berth') or '').strip()
-            and float(b.get('balance_qty') or 0) > 0
-        ):
-            berth_rows.append({
-                'cargo': b.get('cargo') or '',
-                'berth': (b.get('berth') or '').upper(),
-                'balance': b.get('balance_qty', 0),
-            })
-
+    # ── CARGO / BERTH / CARGO BAL table — MBC only ──────────────────────────
     for m in mbcs:
         if (
             m['status'] == 'Under Discharge'
