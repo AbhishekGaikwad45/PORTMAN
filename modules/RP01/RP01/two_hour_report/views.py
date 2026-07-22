@@ -265,7 +265,9 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             r['cargo_name']
         ])
 
-        delay_list = []
+        from collections import defaultdict
+
+        delay_totals = defaultdict(int)
 
         for d in cur.fetchall():
 
@@ -276,10 +278,20 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             if mins < 0:
                 mins += 24 * 60
 
-            duration = f"{mins//60:02d}:{mins%60:02d}"
+            key = (d["delay_type"], d["delay_name"])
+            delay_totals[key] += mins
+
+        delay_list = []
+
+        for (delay_type, delay_name), total_mins in delay_totals.items():
+
+            hrs = total_mins // 60
+            mins = total_mins % 60
+
+            duration = f"{hrs:02d}:{mins:02d}"
 
             delay_list.append(
-                f'{d["delay_type"]}: {d["delay_name"]} ({duration})'
+                f"{delay_type}: {delay_name} ({duration})"
             )
 
         r["delay_name"] = " / ".join(delay_list) if delay_list else "—"
