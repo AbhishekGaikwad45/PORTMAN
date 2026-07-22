@@ -341,6 +341,21 @@
             .catch(() => { sel.innerHTML = '<option disabled>Error</option>'; });
     }
 
+
+    function formatDateTime(value) {
+    if (!value) return "";
+
+    const d = new Date(value.replace(" ", "T"));
+    if (isNaN(d.getTime())) return value;
+
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+
+    return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
+}
     /* ── Data load ───────────────────────────────────────────────────────── */
     function loadData() {
         const sel = document.getElementById('vessel-sel');
@@ -415,6 +430,7 @@
             const v = cell.getValue();
             return v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
         };
+        const dateFmt = cell => formatDateTime(cell.getValue());
         const columns = [
             colDef('Trip #', 'trip_number', { width: 55, hozAlign: 'center' }),
             colDef('Hold', 'hold_name', { width: 80 }),
@@ -425,22 +441,22 @@
             colDef('Qty (MT)', 'discharge_quantity', { width: 85, hozAlign: 'right', formatter: qtyFmt }),
             colDef('Crane (MV)', 'crane_loaded_from', { width: 100 }),
             colDef('Port Crane', 'port_crane', { width: 90 }),
-            colDef('Trip Start', 'trip_start', { width: 130 }),
-            colDef('Anch. Gull Island', 'anchored_gull_island', { width: 130 }),
-            colDef('Aweigh Gull Island', 'aweigh_gull_island', { width: 130 }),
+            colDef('Trip Start', 'trip_start', { width: 130 ,formatter: dateFmt}),
+            colDef('Anch. Gull Island', 'anchored_gull_island', { width: 130, formatter: dateFmt }),
+            colDef('Aweigh Gull Island', 'aweigh_gull_island', { width: 130 , formatter: dateFmt}),
             colDef('AMF at Port', 'amf_at_port', { width: 130 }),
-            colDef('Alongside MV', 'along_side_vessel', { width: 130 }),
-            colDef('Alongside Berth', 'along_side_berth', { width: 130 }),
-            colDef('Loading Start', 'commenced_loading', { width: 130 }),
-            colDef('Loading End', 'completed_loading', { width: 130 }),
-            colDef('Cast Off MV', 'cast_off_mv', { width: 130 }),
-            colDef('Cast Off Berth', 'cast_off_berth', { width: 130 }),
-            colDef('Cast Off NT', 'cast_off_berth_nt', { width: 130 }),
+            colDef('Alongside MV', 'along_side_vessel', { width: 130 , formatter: dateFmt}),
+            colDef('Alongside Berth', 'along_side_berth', { width: 130, formatter: dateFmt }),
+            colDef('Loading Start', 'commenced_loading', { width: 130, formatter: dateFmt }),
+            colDef('Loading End', 'completed_loading', { width: 130, formatter: dateFmt }),
+            colDef('Cast Off MV', 'cast_off_mv', { width: 130, formatter: dateFmt }),
+            colDef('Cast Off Berth', 'cast_off_berth', { width: 130 , formatter: dateFmt}),
+            colDef('Cast Off NT', 'cast_off_berth_nt', { width: 130, formatter: dateFmt }),
             colDef('Cast Off Port', 'cast_off_port', { width: 130 }),
-            colDef('Discharge Start (Berth)', 'commence_discharge_berth', { width: 150 }),
-            colDef('Discharge End (Berth)', 'completed_discharge_berth', { width: 150 }),
-            colDef('Anch. Gull (Loaded)', 'anchored_gull_island_empty', { width: 140 }),
-            colDef('Aweigh Gull (Loaded)', 'aweigh_gull_island_empty', { width: 140 }),
+            colDef('Discharge Start (Berth)', 'commence_discharge_berth', { width: 150 , formatter: dateFmt}),
+            colDef('Discharge End (Berth)', 'completed_discharge_berth', { width: 150, formatter: dateFmt }),
+            colDef('Anch. Gull (Loaded)', 'anchored_gull_island_empty', { width: 140, formatter: dateFmt }),
+            colDef('Aweigh Gull (Loaded)', 'aweigh_gull_island_empty', { width: 140, formatter: dateFmt }),
             colDef('TAT', 'cast_off_berth', {
                 width: 110,
                 hozAlign: 'center',
