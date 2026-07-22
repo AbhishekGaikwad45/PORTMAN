@@ -131,12 +131,37 @@ LEFT JOIN (
     ON mbc.source_id = h.id
 
 WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+AND (
+    (
+        dp.unloading_commenced::timestamp BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
 
-  AND dp.unloading_commenced::timestamp >=
-      (%s::date + INTERVAL '6 hours')
+    OR
 
-  AND dp.unloading_commenced::timestamp <=
-      (%s::date + INTERVAL '6 hours')
+    (
+        dp.unloading_commenced::timestamp <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
+
+    OR
+
+    (
+        dp.unloading_commenced::timestamp <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+    )
+)
 
 GROUP BY
     h.id,
@@ -274,12 +299,37 @@ AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
 
 WHERE la.first_discharge_started IS NOT NULL
+AND (
+    (
+        la.first_discharge_started BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
 
-  AND la.first_discharge_started >=
-      (%s::date + INTERVAL '6 hours')
+    OR
 
-  AND la.first_discharge_started <=
-      (%s::date + INTERVAL '6 hours')
+    (
+        la.first_discharge_started <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        la.last_discharge_completed IS NOT NULL
+        AND
+        la.last_discharge_completed BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
+
+    OR
+
+    (
+        la.first_discharge_started <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        la.last_discharge_completed IS NULL
+    )
+)
 
 GROUP BY
     lh.id,
@@ -299,7 +349,22 @@ GROUP BY
 ORDER BY discharge_commenced DESC;
 """
 
-        cur.execute(query, (from_date, to_date, from_date, to_date))
+        cur.execute(
+    query,
+    (
+        # MBC
+        from_date, to_date,
+        from_date,
+        from_date, to_date,
+        from_date,
+
+        # MV
+        from_date, to_date,
+        from_date,
+        from_date, to_date,
+        from_date
+    )
+)
         rows = cur.fetchall()
         data = []
         for row in rows:
@@ -491,12 +556,37 @@ LEFT JOIN (
     ON mbc.source_id = h.id
 
 WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+AND (
+    (
+        dp.unloading_commenced::timestamp BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
 
-  AND dp.unloading_commenced::timestamp >=
-      (%s::date + INTERVAL '6 hours')
+    OR
 
-  AND dp.unloading_commenced::timestamp <=
-      (%s::date + INTERVAL '6 hours')
+    (
+        dp.unloading_commenced::timestamp <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
+
+    OR
+
+    (
+        dp.unloading_commenced::timestamp <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+    )
+)
 
 GROUP BY
     h.id,
@@ -632,13 +722,37 @@ AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
 
 WHERE la.first_discharge_started IS NOT NULL
+AND (
+    (
+        la.first_discharge_started BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
 
-  AND la.first_discharge_started >=
-      (%s::date + INTERVAL '6 hours')
+    OR
 
-  AND la.first_discharge_started <=
-      (%s::date + INTERVAL '6 hours')
+    (
+        la.first_discharge_started <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        la.last_discharge_completed IS NOT NULL
+        AND
+        la.last_discharge_completed BETWEEN
+            (%s::date + INTERVAL '6 hours')
+        AND
+            (%s::date + INTERVAL '6 hours')
+    )
 
+    OR
+
+    (
+        la.first_discharge_started <
+            (%s::date + INTERVAL '6 hours')
+        AND
+        la.last_discharge_completed IS NULL
+    )
+)
 GROUP BY
     lh.id,
     vh.vcn_doc_num,
@@ -656,7 +770,22 @@ GROUP BY
 
 ORDER BY discharge_commenced DESC;
 """
-        cur.execute(query, (from_date, to_date, from_date, to_date))
+        cur.execute(
+    query,
+    (
+        # MBC
+        from_date, to_date,
+        from_date,
+        from_date, to_date,
+        from_date,
+
+        # MV
+        from_date, to_date,
+        from_date,
+        from_date, to_date,
+        from_date
+    )
+)
         rows = cur.fetchall()
 
         wb = Workbook()
