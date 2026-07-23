@@ -739,12 +739,12 @@ def get_24_hours_report():
                     delay_window_end
                 ))
 
-                delay_rows = cur.fetchall()
+                delay_rows_for_vessel = cur.fetchall()
 
                 print("\n========== RAW DELAY ROWS ==========")
                 print(f"VESSEL: {row['vessel_name']} | LDUD: {ldud_id}")
                 print(f"WINDOW: {delay_window_start} TO {delay_window_end}")
-                print(f"Total delay rows: {len(delay_rows)}")
+                print(f"Total delay rows: {len(delay_rows_for_vessel)}")
 
                 excluded_delays = {
                     'crane idle due to hold completion',
@@ -753,7 +753,7 @@ def get_24_hours_report():
 
                 delay_totals = {}
 
-                for d in delay_rows:
+                for d in delay_rows_for_vessel:
 
                     delay_name_mapping = {
                         'Different Type of Cargo': 'DTC',
@@ -1504,6 +1504,7 @@ def get_24_hours_report():
 
         # =================================================
         # RHMS, NO CARGO, MAINTENANCE & CEMENT PLANT DELAYS
+        # (source: lueu_lines - jetty-level delay entries)
         # =================================================
 
         delay_rows = []
@@ -1589,8 +1590,6 @@ def get_24_hours_report():
             maintenance_delay_hours = round(maintenance_delay_hours, 2)
             cement_plant_delay_hours = round(cement_plant_delay_hours, 2)
 
-            delay_rows = []
-
             if rhms_delay_hours > 0:
                 delay_rows.append({
                     'delay_name': 'RHMS Delays',
@@ -1633,6 +1632,130 @@ def get_24_hours_report():
             maintenance_delay_hours = 0
             cement_plant_delay_hours = 0
 
+        # =================================================
+        # BAD WEATHER DELAY
+        # (source: ldud_delays - per-vessel delay entries,
+        #  aggregated across all vessels for the report window)
+        # =================================================
+
+        bad_weather_delay_hours = 0
+
+        try:
+
+            print("\n--- FETCHING BAD WEATHER DELAY ---")
+
+            selected_dt = datetime.strptime(
+                selected_date,
+                '%Y-%m-%d'
+            )
+
+            weather_window_start = (
+                selected_dt - timedelta(days=1)
+            ).replace(
+                hour=8,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+            weather_window_end = selected_dt.replace(
+                hour=8,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+            print("WEATHER WINDOW START:", weather_window_start)
+            print("WEATHER WINDOW END  :", weather_window_end)
+
+            cur.execute("""
+                SELECT
+                    delay_name,
+                    crane_number,
+                    COALESCE(total_time_hrs, 0) AS total_hrs
+
+                FROM ldud_delays
+
+                WHERE TO_TIMESTAMP(
+                        start_datetime,
+                        'YYYY-MM-DD"T"HH24:MI'
+                    ) >= %s
+
+                AND TO_TIMESTAMP(
+                        start_datetime,
+                        'YYYY-MM-DD"T"HH24:MI'
+                    ) < %s
+
+            """, (
+                weather_window_start,
+                weather_window_end
+            ))
+
+            weather_rows = cur.fetchall()
+
+            print("BAD WEATHER CANDIDATE ROWS:", len(weather_rows))
+
+            for d in weather_rows:
+
+                raw_delay_name = (d['delay_name'] or '').strip()
+                delay_name_lower = raw_delay_name.lower()
+
+                is_weather = (
+                    'weather' in delay_name_lower
+                    or 'rain' in delay_name_lower
+                )
+
+                if not is_weather:
+                    continue
+
+                total_hrs = float(d['total_hrs'] or 0)
+
+                crane_text = (d['crane_number'] or '')
+
+                cranes = set()
+
+                for part in crane_text.replace(',', ' ').split():
+
+                    part = part.strip()
+
+                    if part:
+                        cranes.add(part)
+
+                total_cranes = len(cranes)
+
+                if total_cranes <= 0:
+                    total_cranes = 1
+
+                # Same crane-wise adjustment used for per-vessel delays
+                adjusted_hrs = (total_hrs * total_cranes) / 4
+
+                bad_weather_delay_hours += adjusted_hrs
+
+                print(
+                    "BAD WEATHER ROW | NAME:", raw_delay_name,
+                    "| TOTAL HRS:", total_hrs,
+                    "| TOTAL CRANES:", total_cranes,
+                    "| ADJUSTED HRS:", round(adjusted_hrs, 2)
+                )
+
+            bad_weather_delay_hours = round(bad_weather_delay_hours, 2)
+
+            print("TOTAL BAD WEATHER DELAY HOURS:", bad_weather_delay_hours)
+
+            if bad_weather_delay_hours > 0:
+                delay_rows.append({
+                    'delay_name': 'Bad Weather',
+                    'total_hours': bad_weather_delay_hours
+                })
+
+        except Exception as e:
+
+            print("BAD WEATHER DELAY ERROR:", str(e))
+
+            conn.rollback()
+
+            bad_weather_delay_hours = 0
+
         response = {
         'success': True,
 
@@ -1667,6 +1790,7 @@ def get_24_hours_report():
         'maintenance_delay_hours': maintenance_delay_hours if maintenance_delay_hours > 0 else None,
         'no_cargo_hours': no_cargo_hours if no_cargo_hours > 0 else None,
         'cement_plant_delay_hours': cement_plant_delay_hours if cement_plant_delay_hours > 0 else None,
+        'bad_weather_delay_hours': bad_weather_delay_hours if bad_weather_delay_hours > 0 else None,
 
         'delay_rows': delay_rows
 
