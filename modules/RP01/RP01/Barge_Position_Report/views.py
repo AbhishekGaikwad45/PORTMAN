@@ -1433,6 +1433,10 @@ def api_shift_report_load():
         # WAITING AREA — ALWAYS LIVE, NEVER SAVED / NEVER CARRIED
         # ══════════════════════════════════════════════════════════════
         live_barges, _ = _fetch_all_barges()
+        live_map = {
+            (b["name"] or "").strip().upper(): b
+            for b in live_barges
+        }
         waiting_area_out = [
             {
                 'berth': 'WAITING',
@@ -1456,6 +1460,27 @@ def api_shift_report_load():
             for item in waiting_area_out
             if (item.get("name") or "").strip().upper() not in saved_names
         ]
+        for item in berth_layout_out:
+            key = (item.get("name") or "").strip().upper()
+
+            if key in live_map:
+                live = live_map[key]
+
+                print(
+                    "MERGE:",
+                    key,
+                    "saved =", item.get("balance"),
+                    "live =", live.get("balance_qty")
+                )
+
+                item["balance"] = live.get("balance_qty", 0)
+                item["balance_qty"] = live.get("balance_qty", 0)
+
+                item["total"] = live.get("total_qty", live.get("qty", 0))
+                item["total_qty"] = live.get("total_qty", live.get("qty", 0))
+
+                item["cargo"] = live.get("cargo", item.get("cargo", ""))
+                item["status"] = live.get("status", item.get("status"))
 
         berth_layout_out.extend(waiting_area_out)
 
@@ -1524,6 +1549,8 @@ def api_shift_report_load():
         }
         print("LIVE BARGES:", len(live_barges))
         for b in live_barges:
+            if b["name"] == "SURLA":
+                  print("LIVE:", b)
             print(
                 b["name"],
                 b["type"],
