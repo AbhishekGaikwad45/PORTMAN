@@ -22,6 +22,7 @@ from .Barge_Position_Report  import views as _barge_position_views
 
 from .report_24_hours import views as _report_24_hours_views
 from .daily_progress_report import views as _daily_progress_report_views
+from .port_overview import views as _port_overview_views  # noqa: registers port-overview routes on bp
 
 def login_required(f):
     @wraps(f)

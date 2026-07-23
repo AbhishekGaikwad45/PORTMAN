@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Port Overview — RP01</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #F1F5F9; --surface: #FFFFFF; --border: #E2E8F0; --border2: #CBD5E1;
+  --text:  #0F172A; --text2: #475569; --text3: #94A3B8;
+  --blue:  #2563EB; --blue-lt:  #EFF6FF; --blue-bd:  #BFDBFE;
+  --green: #059669; --green-lt: #ECFDF5; --green-bd: #6EE7B7;
+  --amber: #D97706; --amber-lt: #FFFBEB;
+  --red:   #DC2626; --red-lt:   #FEF2F2;
+  --hdr-h: 50px; --ftr-h: 30px;
+}
+html, body { width:100vw; height:100vh; overflow:hidden; font-family:'Outfit',system-ui,sans-serif; background:var(--bg); }
+
+/* ── HEADER ── */
+#hdr {
+  position:fixed; top:0; left:0; right:0; height:var(--hdr-h);
+  background:var(--surface); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 14px; gap:10px; z-index:1000;
+  box-shadow:0 1px 3px rgba(0,0,0,.05);
+}
+#hdr-logo { height:28px; width:auto; object-fit:contain; }
+.hdr-sep  { width:1px; height:22px; background:var(--border); }
+.hdr-tag  { font-size:9px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+            color:var(--blue); background:var(--blue-lt); border:1px solid var(--blue-bd); padding:2px 7px; border-radius:4px; }
+.hdr-live { display:flex; align-items:center; gap:5px; font-size:10px; font-weight:600; color:var(--green); }
+.hdr-live-dot { width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(5,150,105,.5)} 50%{box-shadow:0 0 0 4px rgba(5,150,105,0)} }
+.hdr-flex { flex:1; }
+.hdr-clock { font-family:'DM Mono',monospace; font-size:16px; font-weight:500; color:var(--text); letter-spacing:1px; }
+.hdr-date  { font-size:9px; color:var(--text3); font-family:'DM Mono',monospace; }
+.hdr-btn {
+  border:1px solid var(--border2); background:var(--surface); color:var(--text2);
+  font-family:'Outfit',sans-serif; font-size:10px; font-weight:500;
+  padding:4px 10px; border-radius:5px; cursor:pointer; transition:all .15s; white-space:nowrap;
+}
+.hdr-btn:hover, .hdr-btn.active { border-color:var(--blue); color:var(--blue); background:var(--blue-lt); }
+
+/* ── LAYOUT ── */
+#app { position:fixed; top:var(--hdr-h); bottom:var(--ftr-h); left:0; right:0; display:flex; gap:12px; padding:12px; overflow:hidden; }
+
+/* ── IMAGE COLUMN ── */
+#image-col { width:300px; flex-shrink:0; height:100%; overflow-y:auto; }
+.image-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.panel-hdr {
+  padding:9px 12px; font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+  color:var(--text2); background:#FAFBFD; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.image-inner { position:relative; width:100%; }
+.image-inner img { width:100%; display:block; }
+.overlay { position:absolute; inset:0; }
+.berth-box {
+  position:absolute; border:1.5px solid var(--border2); background:rgba(148,163,184,.15);
+  border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:default;
+}
+.berth-box.occupied { border-color:var(--green); background:rgba(5,150,105,.35); }
+.berth-label {
+  font-size:7px; font-weight:700; color:var(--text); text-align:center; line-height:1.15;
+  text-shadow:0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
+.berth-box.occupied .berth-label { color:#fff; text-shadow:0 0 3px rgba(0,0,0,.5); }
+.berth-asset-name { font-weight:400; font-size:6.5px; }
+
+/* ── RIGHT COLUMN ── */
+#right-col { flex:1; height:100%; overflow-y:auto; display:flex; flex-direction:column; gap:12px; min-width:0; }
+
+/* Cards */
+.cards-row { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+.kpi-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px 14px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.kpi-label { font-size:9px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--text3); margin-bottom:4px; }
+.kpi-total { font-family:'DM Mono',monospace; font-size:19px; font-weight:600; color:var(--text); }
+.kpi-unit { font-size:10px; color:var(--text3); font-weight:400; }
+.kpi-breakdown { margin-top:6px; border-top:1px solid var(--border); padding-top:6px; display:flex; flex-direction:column; gap:2px; }
+.kpi-row { display:flex; justify-content:space-between; font-size:10px; color:var(--text2); }
+.kpi-row span:last-child { font-family:'DM Mono',monospace; color:var(--text); }
+.kpi-empty { font-size:10px; color:var(--text3); }
+
+/* Panels */
+.panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+.panel-body { padding:12px 14px; }
+.mini-btn {
+  border:1px solid var(--border2); background:var(--surface); color:var(--text2);
+  font-size:9px; font-weight:600; padding:2px 8px; border-radius:10px; cursor:pointer;
+}
+.mini-btn:hover { border-color:var(--blue); color:var(--blue); }
+
+/* Delay panel */
+.delay-headline { display:flex; align-items:baseline; justify-content:space-between; }
+.delay-name { font-size:14px; font-weight:600; color:var(--text); }
+.delay-mins { font-family:'DM Mono',monospace; font-size:14px; font-weight:600; color:var(--amber); }
+.delay-all { margin-top:8px; border-top:1px solid var(--border); padding-top:8px; max-height:140px; overflow-y:auto; }
+.delay-row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0; color:var(--text2); }
+.delay-row span:last-child { font-family:'DM Mono',monospace; color:var(--text); }
+.muted { color:var(--text3); font-size:11px; }
+
+/* Tide + Notes row */
+.split-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; flex:1; min-height:0; }
+.tide-table { width:100%; border-collapse:collapse; }
+.tide-table th { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--text3); text-align:left; padding:4px 6px; border-bottom:1px solid var(--border); }
+.tide-table td { font-size:11px; padding:5px 6px; border-bottom:1px solid var(--border); color:var(--text2); }
+.tide-tag { font-size:9px; font-weight:800; padding:1px 6px; border-radius:8px; }
+.tide-tag.hw { background:var(--green-lt); color:var(--green); }
+.tide-tag.lw { background:var(--blue-lt); color:var(--blue); }
+.notes-list { display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; }
+.note-item { font-size:11px; color:var(--text2); background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:6px 8px; }
+.notes-hint { font-size:9px; color:var(--text3); margin-top:6px; }
+
+/* ── FOOTER ── */
+#ftr {
+  position:fixed; bottom:0; left:0; right:0; height:var(--ftr-h);
+  background:var(--surface); border-top:1px solid var(--border);
+  display:flex; align-items:center; padding:0 14px; gap:12px; z-index:1000;
+}
+.ftr-lbl { font-size:8px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--text3); }
+.ftr-val { font-family:'DM Mono',monospace; font-size:10px; color:var(--text2); }
+.ftr-sep { width:1px; height:12px; background:var(--border); }
+.ftr-bar { flex:1; height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
+.ftr-fill { height:100%; background:linear-gradient(90deg,var(--blue),#93C5FD); transition:width 1s linear; }
+</style>
+</head>
+<body>
+
+<header id="hdr">
+  <img id="hdr-logo" src="{{ url_for('static', filename='img/logo31.png') }}" alt="Logo">
+  <div class="hdr-sep"></div>
+  <div class="hdr-tag">RP01</div>
+  <div class="hdr-live"><div class="hdr-live-dot"></div>PORT OVERVIEW</div>
+  <div class="hdr-flex"></div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+    <div class="hdr-clock" id="hdr-clock">--:--:--</div>
+    <div class="hdr-date"  id="hdr-date"></div>
+  </div>
+  <div class="hdr-sep"></div>
+  <button class="hdr-btn" id="fs-btn" onclick="toggleFS()">⛶ Fullscreen</button>
+  <button class="hdr-btn" onclick="reload()">⟳ Refresh</button>
+</header>
+
+<div id="app">
+
+  <div id="image-col">
+    <div class="image-panel">
+      <div class="panel-hdr"><span>Berth Layout</span><span id="occupiedCount" class="muted">—</span></div>
+      <div class="image-inner">
+        <img id="berthImg" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
+        <div class="overlay" id="berthOverlay"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="right-col">
+
+    <div class="cards-row" id="cardsRow"></div>
+
+    <div class="panel delay-panel">
+      <div class="panel-hdr">
+        <span>Top Delays — Today</span>
+        <button id="delayToggle" class="mini-btn">Show All</button>
+      </div>
+      <div class="panel-body">
+        <div id="delayHeadline" class="delay-headline"></div>
+        <div id="delayAll" class="delay-all" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="split-row">
+      <div class="panel">
+        <div class="panel-hdr"><span>Tide Table</span></div>
+        <div class="panel-body" style="padding:0 14px 12px">
+          <table class="tide-table">
+            <thead><tr><th>Type</th><th>Time</th><th>Height (m)</th></tr></thead>
+            <tbody id="tideBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-hdr"><span>Shift Notes</span></div>
+        <div class="panel-body">
+          <div id="notesList" class="notes-list"></div>
+          <div class="notes-hint">Read-only — edit in the Barge Position report for the current shift.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<footer id="ftr">
+  <div style="display:flex;align-items:center;gap:5px">
+    <span class="ftr-lbl">Refresh in</span>
+    <span class="ftr-val" id="ftr-cd">60s</span>
+  </div>
+  <div class="ftr-bar"><div class="ftr-fill" id="ftr-fill" style="width:0%"></div></div>
+  <div class="ftr-sep"></div>
+  <span class="ftr-lbl">Updated</span>
+  <span class="ftr-val" id="ftr-upd">—</span>
+  <div class="ftr-sep"></div>
+  <span class="ftr-val" style="color:var(--text3)">RP01 · Port Overview</span>
+</footer>
+
+<script>
+const REFRESH = 60;
+let cd = REFRESH;
+
+/* ── CLOCK ── */
+(function tick() {
+  const n = new Date();
+  const p = v => String(v).padStart(2,'0');
+  document.getElementById('hdr-clock').textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('hdr-date').textContent = `${D[n.getDay()]} ${p(n.getDate())} ${M[n.getMonth()]} ${n.getFullYear()}`;
+  setTimeout(tick, 1000);
+})();
+
+/* ── FULLSCREEN ── */
+function toggleFS() {
+  const btn = document.getElementById('fs-btn');
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(()=>{});
+    btn.textContent='✕ Exit'; btn.classList.add('active');
+  } else {
+    document.exitFullscreen().catch(()=>{});
+    btn.textContent='⛶ Fullscreen'; btn.classList.remove('active');
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    document.getElementById('fs-btn').textContent='⛶ Fullscreen';
+    document.getElementById('fs-btn').classList.remove('active');
+  }
+});
+
+/* ── FORMAT HELPERS ── */
+function fmtNum(v) {
+  if (v == null || isNaN(v)) return '0';
+  return Number(v).toLocaleString('en-IN', {maximumFractionDigits:0});
+}
+function fmtMins(m) {
+  m = Math.round(m || 0);
+  const h = Math.floor(m/60), mm = m%60;
+  return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+}
+
+/* ── BERTH OVERLAY ── */
+function renderBerths(layout) {
+  const overlay = document.getElementById('berthOverlay');
+  overlay.innerHTML = '';
+  const [iw, ih] = layout.image_size && layout.image_size[0] ? layout.image_size : [1, 1];
+  let occupied = 0;
+
+  (layout.berths || []).forEach(b => {
+    const assets = b.assets || [];
+    if (assets.length) occupied++;
+
+    const box = document.createElement('div');
+    box.className = 'berth-box' + (assets.length ? ' occupied' : '');
+    box.style.left   = (b.cx / iw * 100) + '%';
+    box.style.top    = (b.cy / ih * 100) + '%';
+    box.style.width  = (b.w  / iw * 100) + '%';
+    box.style.height = (b.h  / ih * 100) + '%';
+    box.style.transform = `translate(-50%,-50%) rotate(${b.angle || 0}deg)`;
+    box.title = assets.length
+      ? `${b.label}: ${assets.map(a => `${a.name} (${a.type})`).join(', ')}`
+      : `${b.label} — empty`;
+
+    const label = document.createElement('div');
+    label.className = 'berth-label';
+    label.style.transform = `rotate(${-(b.angle || 0)}deg)`;
+    let html = `<div>${b.label}</div>`;
+    if (assets.length) {
+      html += assets.slice(0, 2).map(a => `<div class="berth-asset-name">${a.name}</div>`).join('');
+    }
+    label.innerHTML = html;
+
+    box.appendChild(label);
+    overlay.appendChild(box);
+  });
+
+  document.getElementById('occupiedCount').textContent =
+    `${occupied}/${(layout.berths || []).length} occupied`;
+}
+
+/* ── CARGO CARDS ── */
+function renderCards(cards) {
+  const row = document.getElementById('cardsRow');
+  row.innerHTML = '';
+  const order = ['today', 'yesterday', 'current_month', 'current_fy', 'all_time'];
+  order.forEach(key => {
+    const c = cards[key];
+    if (!c) return;
+    const entries = Object.entries(c.by_type || {}).sort((a, b) => b[1] - a[1]);
+    const breakdown = entries.length
+      ? entries.map(([k, v]) => `<div class="kpi-row"><span>${k}</span><span>${fmtNum(v)}</span></div>`).join('')
+      : '<div class="kpi-empty">No data</div>';
+    const div = document.createElement('div');
+    div.className = 'kpi-card';
+    div.innerHTML = `
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-total">${fmtNum(c.total)} <span class="kpi-unit">MT</span></div>
+      <div class="kpi-breakdown">${breakdown}</div>`;
+    row.appendChild(div);
+  });
+}
+
+/* ── DELAYS ── */
+function renderDelays(delays) {
+  const headline = document.getElementById('delayHeadline');
+  const all = document.getElementById('delayAll');
+  if (!delays.length) {
+    headline.innerHTML = '<span class="muted">No delays logged today</span>';
+    all.innerHTML = '';
+    return;
+  }
+  const top = delays[0];
+  headline.innerHTML = `<span class="delay-name">${top.delay_name}</span><span class="delay-mins">${fmtMins(top.minutes)}</span>`;
+  all.innerHTML = delays.map(d =>
+    `<div class="delay-row"><span>${d.delay_name}</span><span>${fmtMins(d.minutes)}</span></div>`
+  ).join('');
+}
+document.getElementById('delayToggle').addEventListener('click', () => {
+  const all = document.getElementById('delayAll');
+  const btn = document.getElementById('delayToggle');
+  const show = all.style.display === 'none';
+  all.style.display = show ? 'block' : 'none';
+  btn.textContent = show ? 'Hide' : 'Show All';
+});
+
+/* ── TIDE ── */
+function renderTide(tide) {
+  const body = document.getElementById('tideBody');
+  body.innerHTML = (tide || []).map(t => `
+    <tr>
+      <td><span class="tide-tag ${(t.type || '').toLowerCase()}">${t.type}</span></td>
+      <td>${t.time}</td>
+      <td>${t.height}</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="muted">No tide data</td></tr>';
+}
+
+/* ── NOTES ── */
+function renderNotes(notes) {
+  const list = document.getElementById('notesList');
+  list.innerHTML = (notes || []).map(n => `<div class="note-item">${n}</div>`).join('')
+    || '<div class="muted">No notes for the current shift</div>';
+}
+
+/* ── LOAD ── */
+function loadData() {
+  fetch('/api/module/RP01/port-overview/data')
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(d => {
+      renderBerths(d.layout || {});
+      renderCards(d.cargo_cards || {});
+      renderDelays(d.delays || []);
+      renderTide(d.tide || []);
+      renderNotes(d.notes || []);
+      document.getElementById('ftr-upd').textContent = d.as_of || '—';
+    })
+    .catch(e => console.error('Port overview error:', e));
+}
+
+function reload() { cd = REFRESH; loadData(); }
+
+setInterval(() => {
+  cd--;
+  if (cd <= 0) { cd = REFRESH; loadData(); }
+  document.getElementById('ftr-cd').textContent = cd + 's';
+  document.getElementById('ftr-fill').style.width = ((REFRESH - cd) / REFRESH * 100) + '%';
+}, 1000);
+
+loadData();
+</script>
+</body>
+</html>

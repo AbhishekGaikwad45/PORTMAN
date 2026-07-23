@@ -1,3 +1,4 @@
+import json
 from database import get_db, get_cursor
 
 def _to_float_or_none(v):
@@ -25,19 +26,22 @@ def save(data):
     except (TypeError, ValueError):
         seq = None
 
+    image_position = data.get('image_position')
+    image_position_json = json.dumps(image_position) if image_position else None
+
     if data.get('id'):
         cur.execute(
             'UPDATE port_berth_master SET berth_name=%s, berth_location=%s, remarks=%s, '
-            'latitude=%s, longitude=%s, berth_sequence=%s WHERE id=%s',
+            'latitude=%s, longitude=%s, berth_sequence=%s, image_position=%s::jsonb WHERE id=%s',
             [data.get('berth_name'), data.get('berth_location'), data.get('remarks'),
-             lat, lon, seq, data['id']]
+             lat, lon, seq, image_position_json, data['id']]
         )
         row_id = data['id']
     else:
         cur.execute(
-            'INSERT INTO port_berth_master (berth_name, berth_location, remarks, latitude, longitude, berth_sequence) '
-            'VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
-            [data.get('berth_name'), data.get('berth_location'), data.get('remarks'), lat, lon, seq]
+            'INSERT INTO port_berth_master (berth_name, berth_location, remarks, latitude, longitude, berth_sequence, image_position) '
+            'VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) RETURNING id',
+            [data.get('berth_name'), data.get('berth_location'), data.get('remarks'), lat, lon, seq, image_position_json]
         )
         row_id = cur.fetchone()['id']
     conn.commit()

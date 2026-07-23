@@ -47,6 +47,22 @@
     cursor: pointer; padding: 2px 6px; font-size: 11px; color: #2563EB;
 }
 .map-pin-btn:hover { background: #EFF6FF; }
+
+#img-modal-overlay .map-modal { width: auto; }
+#img-picker-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+#img-picker-wrap img { display: block; max-height: 65vh; width: auto; max-width: 100%; }
+#img-picker-overlay { position: absolute; inset: 0; }
+.img-picker-ref-box {
+    position: absolute; border: 1px solid #94A3B8; background: rgba(148,163,184,.15);
+    border-radius: 2px; pointer-events: none; display: flex; align-items: center;
+    justify-content: center; font-size: 7px; color: #64748B; text-align: center; overflow: hidden;
+}
+.img-picker-active-box {
+    position: absolute; border: 2px solid #F59E0B; background: rgba(245,158,11,.3);
+    border-radius: 3px; cursor: grab; display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: #7C2D12;
+}
+.img-picker-active-box:active { cursor: grabbing; }
 </style>
 {% endblock %}
 
@@ -94,6 +110,32 @@
     </div>
   </div>
 </div>
+
+<!-- IMAGE POSITION PICKER MODAL -->
+<div class="map-modal-overlay" id="img-modal-overlay">
+  <div class="map-modal">
+    <div class="map-modal-hdr">
+      <h3>🖼 Position on Berth Image</h3>
+      <span id="img-picker-berth-name" style="font-size:11px;color:#64748B;font-weight:500"></span>
+      <button onclick="closeImagePicker()">✕</button>
+    </div>
+    <div id="img-picker-wrap">
+      <img id="img-picker-img" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
+      <div id="img-picker-overlay"></div>
+    </div>
+    <p class="hint">Drag the amber box to position this berth. Other positioned berths are shown as grey outlines for reference.</p>
+    <div class="map-modal-body">
+      <div><label>Width (px)</label><input id="img-picker-w" type="number" min="4" style="width:80px"></div>
+      <div><label>Height (px)</label><input id="img-picker-h" type="number" min="4" style="width:80px"></div>
+      <div><label>Angle (°)</label><input id="img-picker-angle" type="number" step="1" style="width:70px"></div>
+    </div>
+    <div class="map-modal-foot">
+      <button onclick="clearImagePosition()" style="margin-right:auto;color:#DC2626">Clear Position</button>
+      <button onclick="closeImagePicker()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmImagePicker()">Use This Position</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -129,6 +171,11 @@ const table = new Tabulator("#table", {
             title:"📍", headerSort:false, width:45, hozAlign:"center",
             formatter: cell => `<button class="map-pin-btn" onclick="openMapPicker(event)">📍</button>`,
             cellClick: (e, cell) => { e.stopPropagation(); openMapPickerForRow(cell.getRow()); }
+        }] : []),
+        ...(canEdit ? [{
+            title:"🖼", headerSort:false, width:45, hozAlign:"center",
+            formatter: cell => `<button class="map-pin-btn">🖼</button>`,
+            cellClick: (e, cell) => { e.stopPropagation(); openImagePickerForRow(cell.getRow()); }
         }] : [])
     ],
     selectable: true
@@ -241,6 +288,115 @@ function confirmPicker() {
 function closeMapPicker() {
     document.getElementById('map-modal-overlay').classList.remove('open');
     pickerRow = null;
+}
+
+/* ── Image Position Picker ── */
+let imgPickerRow = null, imgPos = null, imgDragState = null;
+let IMG_SIZE = [941, 1672]; // fallback; replaced by the image's real size once loaded
+
+(function captureImgSize() {
+    const el = document.getElementById('img-picker-img');
+    const set = () => { if (el.naturalWidth) IMG_SIZE = [el.naturalWidth, el.naturalHeight]; };
+    if (el.complete) set(); else el.addEventListener('load', set);
+})();
+
+function openImagePickerForRow(row) {
+    imgPickerRow = row;
+    const d = row.getData();
+    document.getElementById('img-picker-berth-name').textContent = d.berth_name || '';
+    imgPos = (d.image_position && typeof d.image_position === 'object')
+        ? Object.assign({}, d.image_position)
+        : { cx: IMG_SIZE[0] / 2, cy: IMG_SIZE[1] / 2, w: 80, h: 60, angle: 0 };
+    document.getElementById('img-picker-w').value = imgPos.w;
+    document.getElementById('img-picker-h').value = imgPos.h;
+    document.getElementById('img-picker-angle').value = imgPos.angle || 0;
+    document.getElementById('img-modal-overlay').classList.add('open');
+    renderImagePickerOverlay();
+}
+
+function renderImagePickerOverlay() {
+    const overlay = document.getElementById('img-picker-overlay');
+    overlay.innerHTML = '';
+    const [iw, ih] = IMG_SIZE;
+    const currentId = imgPickerRow.getData().id;
+
+    // Reference outlines for every other berth that already has a position
+    table.getData().forEach(row => {
+        if (row.id === currentId || !row.image_position) return;
+        const p = row.image_position;
+        const box = document.createElement('div');
+        box.className = 'img-picker-ref-box';
+        box.style.left = (p.cx / iw * 100) + '%';
+        box.style.top = (p.cy / ih * 100) + '%';
+        box.style.width = (p.w / iw * 100) + '%';
+        box.style.height = (p.h / ih * 100) + '%';
+        box.style.transform = `translate(-50%,-50%) rotate(${p.angle || 0}deg)`;
+        box.textContent = row.berth_name || '';
+        overlay.appendChild(box);
+    });
+
+    // The active, draggable box for the berth being edited
+    const active = document.createElement('div');
+    active.className = 'img-picker-active-box';
+    active.id = 'img-picker-active-box';
+    active.textContent = imgPickerRow.getData().berth_name || '';
+    active.addEventListener('mousedown', e => {
+        imgDragState = { startX: e.clientX, startY: e.clientY, startCx: imgPos.cx, startCy: imgPos.cy };
+        e.preventDefault();
+    });
+    overlay.appendChild(active);
+    positionActiveBox();
+}
+
+function positionActiveBox() {
+    const box = document.getElementById('img-picker-active-box');
+    if (!box) return;
+    const [iw, ih] = IMG_SIZE;
+    box.style.left = (imgPos.cx / iw * 100) + '%';
+    box.style.top = (imgPos.cy / ih * 100) + '%';
+    box.style.width = (imgPos.w / iw * 100) + '%';
+    box.style.height = (imgPos.h / ih * 100) + '%';
+    box.style.transform = `translate(-50%,-50%) rotate(${imgPos.angle || 0}deg)`;
+}
+
+window.addEventListener('mousemove', e => {
+    if (!imgDragState || !imgPos) return;
+    const wrap = document.getElementById('img-picker-wrap');
+    const rect = wrap.getBoundingClientRect();
+    const [iw, ih] = IMG_SIZE;
+    imgPos.cx = imgDragState.startCx + (e.clientX - imgDragState.startX) / rect.width * iw;
+    imgPos.cy = imgDragState.startCy + (e.clientY - imgDragState.startY) / rect.height * ih;
+    positionActiveBox();
+});
+window.addEventListener('mouseup', () => { imgDragState = null; });
+
+['img-picker-w', 'img-picker-h', 'img-picker-angle'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+        if (!imgPos) return;
+        const w = parseFloat(document.getElementById('img-picker-w').value);
+        const h = parseFloat(document.getElementById('img-picker-h').value);
+        const angle = parseFloat(document.getElementById('img-picker-angle').value);
+        if (!isNaN(w)) imgPos.w = w;
+        if (!isNaN(h)) imgPos.h = h;
+        imgPos.angle = isNaN(angle) ? 0 : angle;
+        positionActiveBox();
+    });
+});
+
+function confirmImagePicker() {
+    imgPickerRow.update({ image_position: Object.assign({}, imgPos) });
+    closeImagePicker();
+}
+
+function clearImagePosition() {
+    imgPickerRow.update({ image_position: null });
+    closeImagePicker();
+}
+
+function closeImagePicker() {
+    document.getElementById('img-modal-overlay').classList.remove('open');
+    imgPickerRow = null;
+    imgPos = null;
 }
 </script>
 {% endblock %}
