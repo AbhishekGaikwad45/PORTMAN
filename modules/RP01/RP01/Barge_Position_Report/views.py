@@ -1382,9 +1382,9 @@ def api_shift_report_load():
         if latest:
             combined = latest.get("berth_layout") or []  # berths only, no waiting
 
-            shift_incharge_out = latest.get("shift_incharge", "")
-            bpo_out = latest.get("bpo", "")
-            crane_operator_out = latest.get("crane_operator", "")
+            # shift_incharge_out = latest.get("shift_incharge", "")
+            # bpo_out = latest.get("bpo", "")
+            # crane_operator_out = latest.get("crane_operator", "")
             berth_updated_at = latest.get("updated_at")
 
             if berth_source == "own":
@@ -1522,6 +1522,8 @@ def api_shift_report_load():
             for k, v in (r.get('on_the_way_gull') or {}).items():
                 if v:
                     merged_gull[k] = v
+            
+       
 
             # Keep only the latest notes
             if r.get("notes"):
@@ -1537,14 +1539,23 @@ def api_shift_report_load():
         found = (berth_source == 'own')
         carried = (berth_source == 'carried')
         updated_at = berth_updated_at or latest_meta_updated_at
+        
+        merged_shift_incharge = ""
+        merged_bpo = ""
+        merged_crane_operator = ""
 
+        if exact_row:
+            merged_shift_incharge = exact_row.get("shift_incharge", "") or ""
+            merged_bpo = exact_row.get("bpo", "") or ""
+            merged_crane_operator = exact_row.get("crane_operator", "") or ""
+    
         result = {
             'found': found,
             'carried': carried,
             'berth_source': berth_source,
-            'shift_incharge': shift_incharge_out,
-            'bpo': bpo_out,
-            'crane_operator': crane_operator_out,
+            'shift_incharge': merged_shift_incharge,
+            'bpo': merged_bpo,
+            'crane_operator': merged_crane_operator,
             'berth_layout': berth_layout_out,
             'notes': merged_notes,
             'wt_r19': merged_wt_r19,
@@ -2880,6 +2891,10 @@ def api_jetty_cargo_report_v2():
         # NOTE: barges no longer added to berth_rows — that table is MBC-only now.
 
     # ── CARGO / BERTH / CARGO BAL table — MBC only ──────────────────────────
+    # Two cargoes can't physically occupy the same berth at once, so if more
+    # than one MBC maps to the same berth, keep only the one that actually
+    # started discharging most recently — everything else is stale/carried
+    # data pointing at a berth that MBC no longer occupies.
     for m in mbcs:
         if (
             m['status'] == 'Under Discharge'
@@ -2887,10 +2902,25 @@ def api_jetty_cargo_report_v2():
             and float(m.get('balance_qty') or 0) > 0
         ):
             berth_rows.append({
+                'mbc_name': m.get('name') or '',
                 'cargo': m.get('cargo') or '',
                 'berth': (m.get('berth') or '').upper(),
                 'balance': m.get('balance_qty', 0),
+                '_commence_dt': _parse_dt(m.get('unloading_commenced')),
             })
+
+    latest_by_berth = {}
+    for row in berth_rows:
+        b = row['berth']
+        existing = latest_by_berth.get(b)
+        row_dt = row['_commence_dt']
+        existing_dt = existing['_commence_dt'] if existing else None
+        if not existing or (row_dt and (not existing_dt or row_dt > existing_dt)):
+            latest_by_berth[b] = row
+
+    berth_rows = list(latest_by_berth.values())
+    for row in berth_rows:
+        row.pop('_commence_dt', None)
 
     all_cargos = sorted(set(jetty_counts) | set(eta_counts))
     jetty_waiting = [
