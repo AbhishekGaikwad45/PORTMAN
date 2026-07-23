@@ -48,7 +48,7 @@ html, body { width:100vw; height:100vh; overflow:hidden; font-family:'Outfit',sy
 #app { position:fixed; top:var(--hdr-h); bottom:var(--ftr-h); left:0; right:0; display:flex; gap:12px; padding:12px; overflow:hidden; }
 
 /* ── IMAGE COLUMN ── */
-#image-col { width:300px; flex-shrink:0; height:100%; overflow-y:auto; }
+#image-col { width:520px; flex-shrink:0; height:100%; overflow-y:auto; }
 .image-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.05); }
 .panel-hdr {
   padding:9px 12px; font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
@@ -58,17 +58,15 @@ html, body { width:100vw; height:100vh; overflow:hidden; font-family:'Outfit',sy
 .image-inner { position:relative; width:100%; }
 .image-inner img { width:100%; display:block; }
 .overlay { position:absolute; inset:0; }
-.berth-box {
-  position:absolute; border:1.5px solid var(--border2); background:rgba(148,163,184,.15);
-  border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:default;
+.vessel-dot {
+  position:absolute; width:11px; height:11px; border-radius:50%; transform:translate(-50%,-50%);
+  background:var(--green); border:1.5px solid #fff; box-shadow:0 0 4px rgba(0,0,0,.45); cursor:default;
 }
-.berth-box.occupied { border-color:var(--green); background:rgba(5,150,105,.35); }
-.berth-label {
-  font-size:7px; font-weight:700; color:var(--text); text-align:center; line-height:1.15;
-  text-shadow:0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+.vessel-badge {
+  position:absolute; transform:translate(6px,-14px);
+  background:var(--green); color:#fff; font-size:8px; font-weight:700; line-height:1;
+  border:1px solid #fff; border-radius:8px; padding:2px 4px; pointer-events:none;
 }
-.berth-box.occupied .berth-label { color:#fff; text-shadow:0 0 3px rgba(0,0,0,.5); }
-.berth-asset-name { font-weight:400; font-size:6.5px; }
 
 /* ── RIGHT COLUMN ── */
 #right-col { flex:1; height:100%; overflow-y:auto; display:flex; flex-direction:column; gap:12px; min-width:0; }
@@ -250,7 +248,7 @@ function fmtMins(m) {
   return h > 0 ? `${h}h ${mm}m` : `${mm}m`;
 }
 
-/* ── BERTH OVERLAY ── */
+/* ── BERTH OVERLAY (vessels only) ── */
 function renderBerths(layout) {
   const overlay = document.getElementById('berthOverlay');
   overlay.innerHTML = '';
@@ -259,30 +257,27 @@ function renderBerths(layout) {
 
   (layout.berths || []).forEach(b => {
     const assets = b.assets || [];
-    if (assets.length) occupied++;
+    if (!assets.length) return;
+    occupied++;
 
-    const box = document.createElement('div');
-    box.className = 'berth-box' + (assets.length ? ' occupied' : '');
-    box.style.left   = (b.cx / iw * 100) + '%';
-    box.style.top    = (b.cy / ih * 100) + '%';
-    box.style.width  = (b.w  / iw * 100) + '%';
-    box.style.height = (b.h  / ih * 100) + '%';
-    box.style.transform = `translate(-50%,-50%) rotate(${b.angle || 0}deg)`;
-    box.title = assets.length
-      ? `${b.label}: ${assets.map(a => `${a.name} (${a.type})`).join(', ')}`
-      : `${b.label} — empty`;
+    const left = (b.cx / iw * 100) + '%';
+    const top  = (b.cy / ih * 100) + '%';
 
-    const label = document.createElement('div');
-    label.className = 'berth-label';
-    label.style.transform = `rotate(${-(b.angle || 0)}deg)`;
-    let html = `<div>${b.label}</div>`;
-    if (assets.length) {
-      html += assets.slice(0, 2).map(a => `<div class="berth-asset-name">${a.name}</div>`).join('');
+    const dot = document.createElement('div');
+    dot.className = 'vessel-dot';
+    dot.style.left = left;
+    dot.style.top  = top;
+    dot.title = assets.map(a => `${a.name} (${a.type})`).join(', ');
+    overlay.appendChild(dot);
+
+    if (assets.length > 1) {
+      const badge = document.createElement('div');
+      badge.className = 'vessel-badge';
+      badge.style.left = left;
+      badge.style.top  = top;
+      badge.textContent = assets.length;
+      overlay.appendChild(badge);
     }
-    label.innerHTML = html;
-
-    box.appendChild(label);
-    overlay.appendChild(box);
   });
 
   document.getElementById('occupiedCount').textContent =
