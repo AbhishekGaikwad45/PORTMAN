@@ -102,6 +102,8 @@ def _fetch_berth_occupancy():
         lv = live.get(name.upper())
         if lv and float(lv.get('balance_qty') or 0) <= 0:
             continue  # completed since the layout was saved
+        if lv is None and live:
+            continue  # dropped from the live list = completed/removed in LUEU01/LDUD
         commenced = (item.get('unloading_commenced') or item.get('commence_discharge_berth') or '').strip()
         if not commenced and lv:
             commenced = (lv.get('unloading_commenced') or lv.get('commence_discharge_berth') or '').strip()

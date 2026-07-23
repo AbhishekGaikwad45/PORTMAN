@@ -2111,12 +2111,19 @@
         });
         document.getElementById('waitingAreaZone').innerHTML = '';
 
+        // Saved layouts on prod carry empty ids (an old save dropped them and every
+        // carry-forward re-saved ''), so match by id only when both sides have one,
+        // otherwise by name + type.
+        const findLive = item => (_currentItems || []).find(x => {
+            if (String(x.type) !== String(item.type)) return false;
+            if (String(item.id || '') && String(x.id || '')) return String(x.id) === String(item.id);
+            return (x.name || '').trim().toUpperCase() === (item.name || '').trim().toUpperCase();
+        });
+        const haveLive = (_currentItems || []).length > 0;
+
         layout.forEach(item => {
             if (item.berth === 'WAITING') {
-                const live = (_currentItems || []).find(x =>
-                    String(x.id) === String(item.id) &&
-                    String(x.type) === String(item.type)
-                );
+                const live = findLive(item);
 
                 const effectiveBalance = live
                     ? Number(live.balance_qty)
@@ -2140,11 +2147,7 @@
                     `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
                 );
                 if (!zone) return;
-                zone.classList.remove('empty-slot');
-                const live = (_currentItems || []).find(x =>
-                    String(x.id) === String(item.id) &&
-                    String(x.type) === String(item.type)
-                );
+                const live = findLive(item);
 
                 // If completed, don't display it
                 if (live && Number(live.balance_qty) <= 0) {
@@ -2152,12 +2155,15 @@
                     return;
                 }
 
-                if (!live) {
-                    console.warn(`[BPR] ${item.name} @ ${item.berth}/${item.position}: NO live match for id=${item.id} type=${item.type} — painting STALE saved card (balance ${item.balance}). Completed/removed barges fall out of the live list, so if this one is done in LUEU01/LDUD, this is why it still shows.`);
-                } else {
-                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live.balance_qty} — painted`);
+                // Not in the live list at all = completed/removed in LUEU01/LDUD —
+                // hide it (skip this rule only if the live fetch returned nothing).
+                if (!live && haveLive) {
+                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: not in live list — hidden (completed/removed)`);
+                    return;
                 }
 
+                console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live ? live.balance_qty : item.balance} — painted`);
+                zone.classList.remove('empty-slot');
                 zone.innerHTML = buildBerthCard(
                     live || item,
                     live ? live.balance_qty : item.balance
