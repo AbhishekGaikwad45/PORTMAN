@@ -193,8 +193,10 @@ def _top_delays_today():
     delays = _fetch_delays(today_s, 'ALL')
     totals = {}
     for d in delays:
+        name = (d.get('delay_name') or '(blank)').strip()
+        if name.lower() in ('idle', 'unloading'):
+            continue
         equip = (d.get('equipment_name') or '').strip()
-        name = d.get('delay_name') or '(blank)'
         key = f"{equip} — {name}" if equip else name
         totals[key] = totals.get(key, 0) + int(d.get('total_minutes') or 0)
     ranked = [{'delay_name': k, 'minutes': v} for k, v in totals.items() if v > 0]
