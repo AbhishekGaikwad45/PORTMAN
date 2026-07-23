@@ -172,12 +172,14 @@ def _cargo_by_type(start_date_s, end_date_s):
 
 
 def _top_delays_today():
-    """Every delay reason logged today (all shifts), summed and ranked."""
+    """Today's delays (all shifts), summed per (equipment, reason) and ranked."""
     today_s = date.today().strftime('%Y-%m-%d')
     delays = _fetch_delays(today_s, 'ALL')
     totals = {}
     for d in delays:
-        key = d.get('delay_name') or '(blank)'
+        equip = (d.get('equipment_name') or '').strip()
+        name = d.get('delay_name') or '(blank)'
+        key = f"{equip} — {name}" if equip else name
         totals[key] = totals.get(key, 0) + int(d.get('total_minutes') or 0)
     ranked = [{'delay_name': k, 'minutes': v} for k, v in totals.items() if v > 0]
     ranked.sort(key=lambda x: x['minutes'], reverse=True)
@@ -202,10 +204,13 @@ def port_overview_data():
     for b in layout.get('berths', []):
         b['assets'] = occupancy.get(str(b.get('label', '')).strip().upper(), [])
 
-    editable_fy = _get_cutoff_editable_values()
-    fy_data = _compute_fy_throughput(today_s, editable_fy)
     current_fy_start = today.year if today.month >= 4 else today.year - 1
     current_fy_label = fy_label(current_fy_start)
+    editable_fy = _get_cutoff_editable_values()
+    # ponytail: a saved cutoff override must never zero the running FY here —
+    # live lueu_lines + rp01_historical_lueu are the truth for the current year
+    editable_fy.pop(current_fy_label, None)
+    fy_data = _compute_fy_throughput(today_s, editable_fy)
 
     all_time = {}
     for fy_dict in fy_data.values():

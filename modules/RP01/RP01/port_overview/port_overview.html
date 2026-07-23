@@ -58,14 +58,10 @@ html, body { width:100vw; height:100vh; overflow:hidden; font-family:'Outfit',sy
 .image-inner { position:relative; width:100%; }
 .image-inner img { width:100%; display:block; }
 .overlay { position:absolute; inset:0; }
-.vessel-dot {
-  position:absolute; width:11px; height:11px; border-radius:50%; transform:translate(-50%,-50%);
-  background:var(--green); border:1.5px solid #fff; box-shadow:0 0 4px rgba(0,0,0,.45); cursor:default;
-}
-.vessel-badge {
-  position:absolute; transform:translate(6px,-14px);
-  background:var(--green); color:#fff; font-size:8px; font-weight:700; line-height:1;
-  border:1px solid #fff; border-radius:8px; padding:2px 4px; pointer-events:none;
+.vessel {
+  position:absolute; background:#4ADE80; cursor:default;
+  clip-path:polygon(50% 0, 100% 15%, 100% 100%, 0 100%, 0 15%);
+  filter:drop-shadow(0 0 2px rgba(0,0,0,.6));
 }
 
 /* ── RIGHT COLUMN ── */
@@ -260,24 +256,29 @@ function renderBerths(layout) {
     if (!assets.length) return;
     occupied++;
 
-    const left = (b.cx / iw * 100) + '%';
-    const top  = (b.cy / ih * 100) + '%';
+    // Vessels moor against the box's right edge (jetty face), stacked along it.
+    const th = (b.angle || 0) * Math.PI / 180;
+    const n = assets.length;
+    const slot = (b.h || 60) / n;
+    const len  = Math.max(slot * 0.8, 16);   // vessel long axis, image px
+    const beam = Math.max(len * 0.45, 8);    // vessel short axis, image px
+    const ex = b.cx + (b.w / 2 - beam / 2) * Math.cos(th);
+    const ey = b.cy + (b.w / 2 - beam / 2) * Math.sin(th);
 
-    const dot = document.createElement('div');
-    dot.className = 'vessel-dot';
-    dot.style.left = left;
-    dot.style.top  = top;
-    dot.title = assets.map(a => `${a.name} (${a.type})`).join(', ');
-    overlay.appendChild(dot);
-
-    if (assets.length > 1) {
-      const badge = document.createElement('div');
-      badge.className = 'vessel-badge';
-      badge.style.left = left;
-      badge.style.top  = top;
-      badge.textContent = assets.length;
-      overlay.appendChild(badge);
-    }
+    assets.forEach((a, i) => {
+      const t = (i - (n - 1) / 2) * slot;    // offset along the edge (local y)
+      const px = ex - t * Math.sin(th);
+      const py = ey + t * Math.cos(th);
+      const v = document.createElement('div');
+      v.className = 'vessel';
+      v.style.left   = (px / iw * 100) + '%';
+      v.style.top    = (py / ih * 100) + '%';
+      v.style.width  = (beam / iw * 100) + '%';
+      v.style.height = (len / ih * 100) + '%';
+      v.style.transform = `translate(-50%,-50%) rotate(${b.angle || 0}deg)`;
+      v.title = `${b.label}: ${a.name} (${a.type})`;
+      overlay.appendChild(v);
+    });
   });
 
   document.getElementById('occupiedCount').textContent =
