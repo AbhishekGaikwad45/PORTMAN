@@ -5525,28 +5525,63 @@ LEFT JOIN ldud_vessel_operations lco
 
         # =====================================================
         # VESSELS COMPLETED FOR THE MONTH
+        #
+        # FIX: The previous version joined vcn_cargo_declaration
+        # (one row per cargo line) AND ldud_anchorage (one row per
+        # anchorage/discharge leg) directly to ldud_header in the
+        # SAME query, then did SUM(vcd.bl_quantity) and MIN/MAX over
+        # la.*. Both joined tables are one-to-many against lh, so the
+        # join produced a cross-product per vessel: 1 cargo row x N
+        # anchorage rows = the cargo row (and its bl_quantity) counted
+        # N times before the outer SUM ran. That's exactly the same
+        # bug that doubled BL quantities in vessel_discharge_summary,
+        # and it hit this section too — any vessel with more than one
+        # ldud_anchorage row got its B/L Qty. multiplied here.
+        #
+        # Fix: aggregate cargo (bl_quantity/cargo_name) and anchorage
+        # (discharge_commenced/discharge_completed) independently in
+        # their own LATERAL subqueries — each returns exactly one row
+        # per vessel — then join those single rows together. No more
+        # fanout, so no more GROUP BY/SUM needed at the outer level.
         # =====================================================
 
         cur.execute("""
             SELECT
+                lh.id,
                 lh.vessel_name,
-                STRING_AGG(DISTINCT TRIM(vcd.cargo_name), ', ' ORDER BY TRIM(vcd.cargo_name)) AS cargo_name,
-                SUM(COALESCE(vcd.bl_quantity, 0)) AS bl_quantity,
-                vh.load_port, vh.vcn_doc_num,
-                MIN(la.discharge_started) AS discharge_commenced,
-                MAX(la.discharge_commenced) AS discharge_completed,
-                ROUND(EXTRACT(EPOCH FROM (
-                    MAX(la.discharge_commenced) - MIN(la.discharge_started)
-                )) / 3600, 2) AS time_taken_hrs
+                vcd.cargo_name,
+                vcd.bl_quantity,
+                vh.load_port,
+                vh.vcn_doc_num,
+                anch.discharge_commenced,
+                anch.discharge_completed,
+                ROUND(
+                    EXTRACT(EPOCH FROM (
+                        anch.discharge_completed - anch.discharge_commenced
+                    )) / 3600,
+                    2
+                ) AS time_taken_hrs
             FROM ldud_header lh
-            LEFT JOIN vcn_cargo_declaration vcd ON lh.vcn_id = vcd.vcn_id
-            LEFT JOIN vcn_header vh ON vh.id = lh.vcn_id
-            LEFT JOIN ldud_anchorage la ON la.ldud_id = lh.id
+            LEFT JOIN vcn_header vh
+                ON vh.id = lh.vcn_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    STRING_AGG(DISTINCT TRIM(cargo_name), ', ' ORDER BY TRIM(cargo_name)) AS cargo_name,
+                    SUM(COALESCE(bl_quantity, 0)) AS bl_quantity
+                FROM vcn_cargo_declaration
+                WHERE vcn_id = lh.vcn_id
+            ) vcd ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    MIN(discharge_started)   AS discharge_commenced,
+                    MAX(discharge_commenced) AS discharge_completed
+                FROM ldud_anchorage
+                WHERE ldud_id = lh.id
+            ) anch ON TRUE
             WHERE
-                la.discharge_commenced IS NOT NULL
-                AND DATE(la.discharge_commenced) BETWEEN %s AND %s
-            GROUP BY lh.id, lh.vessel_name, vh.load_port, vh.vcn_doc_num
-            ORDER BY MAX(la.discharge_commenced)
+                anch.discharge_completed IS NOT NULL
+                AND DATE(anch.discharge_completed) BETWEEN %s AND %s
+            ORDER BY anch.discharge_completed
         """, (month_start, report_date))
 
         completed_rows = [{
