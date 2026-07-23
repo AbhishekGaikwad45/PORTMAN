@@ -260,8 +260,8 @@ function renderBerths(layout) {
     const th = (b.angle || 0) * Math.PI / 180;
     const n = assets.length;
     const slot = (b.h || 60) / n;
-    const len  = Math.max(slot * 0.8, 16);   // vessel long axis, image px
-    const beam = Math.max(len * 0.45, 8);    // vessel short axis, image px
+    const len  = Math.min(Math.max(slot * 0.75, 14), 80); // vessel long axis, image px
+    const beam = Math.max(len * 0.3, 6);                  // vessel short axis, image px
     const ex = b.cx + (b.w / 2 - beam / 2) * Math.cos(th);
     const ey = b.cy + (b.w / 2 - beam / 2) * Math.sin(th);
 

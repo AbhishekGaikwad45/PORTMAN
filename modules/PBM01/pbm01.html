@@ -49,13 +49,18 @@
 .map-pin-btn:hover { background: #EFF6FF; }
 
 #img-modal-overlay .map-modal { width: auto; }
-#img-picker-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-#img-picker-wrap img { display: block; max-height: 65vh; width: auto; max-width: 100%; }
+#img-picker-viewport {
+    position: relative; width: 700px; max-width: 86vw; height: 65vh;
+    overflow: hidden; background: #1E293B; cursor: grab;
+}
+#img-picker-viewport.dragging { cursor: grabbing; }
+#img-picker-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; line-height: 0; }
+#img-picker-stage img { display: block; max-width: none; max-height: none; }
 #img-picker-overlay { position: absolute; inset: 0; }
 .img-picker-ref-box {
     position: absolute; border: 1px solid #94A3B8; background: rgba(148,163,184,.15);
     border-radius: 2px; pointer-events: none; display: flex; align-items: center;
-    justify-content: center; font-size: 7px; color: #64748B; text-align: center; overflow: hidden;
+    justify-content: center; font-size: 7px; color: #E2E8F0; text-align: center; overflow: hidden;
 }
 .img-picker-active-box {
     position: absolute; border: 2px solid #F59E0B; background: rgba(245,158,11,.3);
@@ -63,6 +68,10 @@
     font-size: 9px; font-weight: 700; color: #7C2D12;
 }
 .img-picker-active-box:active { cursor: grabbing; }
+/* Mooring face — the dashboard stacks vessels along this blue edge */
+.img-picker-active-box::after {
+    content: ''; position: absolute; top: 0; bottom: 0; right: -2px; width: 4px; background: #2563EB;
+}
 </style>
 {% endblock %}
 
@@ -119,15 +128,18 @@
       <span id="img-picker-berth-name" style="font-size:11px;color:#64748B;font-weight:500"></span>
       <button onclick="closeImagePicker()">✕</button>
     </div>
-    <div id="img-picker-wrap">
-      <img id="img-picker-img" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
-      <div id="img-picker-overlay"></div>
+    <div id="img-picker-viewport">
+      <div id="img-picker-stage">
+        <img id="img-picker-img" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
+        <div id="img-picker-overlay"></div>
+      </div>
     </div>
-    <p class="hint">Drag the amber box to position this berth. Other positioned berths are shown as grey outlines for reference.</p>
+    <p class="hint">Scroll to zoom, drag the background to pan, double-click to reset view. Drag the amber box to place the berth. Vessels render stacked along the <b style="color:#2563EB">blue edge</b> — use Flip if they'd sit on the wrong side.</p>
     <div class="map-modal-body">
       <div><label>Width (px)</label><input id="img-picker-w" type="number" min="4" style="width:80px"></div>
       <div><label>Height (px)</label><input id="img-picker-h" type="number" min="4" style="width:80px"></div>
       <div><label>Angle (°)</label><input id="img-picker-angle" type="number" step="1" style="width:70px"></div>
+      <div><label>&nbsp;</label><button onclick="flipMooring()" style="cursor:pointer">⇄ Flip mooring side</button></div>
     </div>
     <div class="map-modal-foot">
       <button onclick="clearImagePosition()" style="margin-right:auto;color:#DC2626">Clear Position</button>
@@ -291,14 +303,29 @@ function closeMapPicker() {
 }
 
 /* ── Image Position Picker ── */
-let imgPickerRow = null, imgPos = null, imgDragState = null;
+let imgPickerRow = null, imgPos = null, imgDragState = null, panState = null;
 let IMG_SIZE = [941, 1672]; // fallback; replaced by the image's real size once loaded
+let view = { s: 1, tx: 0, ty: 0 }; // zoom/pan of the stage inside the viewport
 
 (function captureImgSize() {
     const el = document.getElementById('img-picker-img');
     const set = () => { if (el.naturalWidth) IMG_SIZE = [el.naturalWidth, el.naturalHeight]; };
     if (el.complete) set(); else el.addEventListener('load', set);
 })();
+
+function applyView() {
+    document.getElementById('img-picker-stage').style.transform =
+        `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`;
+}
+
+function fitView() {
+    const vp = document.getElementById('img-picker-viewport');
+    const [iw, ih] = IMG_SIZE;
+    view.s = Math.min(vp.clientWidth / iw, vp.clientHeight / ih);
+    view.tx = (vp.clientWidth - iw * view.s) / 2;
+    view.ty = (vp.clientHeight - ih * view.s) / 2;
+    applyView();
+}
 
 function openImagePickerForRow(row) {
     imgPickerRow = row;
@@ -311,7 +338,42 @@ function openImagePickerForRow(row) {
     document.getElementById('img-picker-h').value = imgPos.h;
     document.getElementById('img-picker-angle').value = imgPos.angle || 0;
     document.getElementById('img-modal-overlay').classList.add('open');
+    const [iw, ih] = IMG_SIZE;
+    const stage = document.getElementById('img-picker-stage');
+    stage.style.width = iw + 'px';
+    stage.style.height = ih + 'px';
+    setTimeout(fitView, 50); // viewport has no size until the modal is visible
     renderImagePickerOverlay();
+}
+
+(function bindViewport() {
+    const vp = document.getElementById('img-picker-viewport');
+    vp.addEventListener('wheel', e => {
+        e.preventDefault();
+        const rect = vp.getBoundingClientRect();
+        const px = e.clientX - rect.left, py = e.clientY - rect.top;
+        const ns = Math.min(Math.max(view.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.05), 10);
+        const k = ns / view.s;
+        view.tx = px - (px - view.tx) * k;
+        view.ty = py - (py - view.ty) * k;
+        view.s = ns;
+        applyView();
+    }, { passive: false });
+    vp.addEventListener('mousedown', e => {
+        panState = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+        vp.classList.add('dragging');
+        e.preventDefault();
+    });
+    vp.addEventListener('dblclick', fitView);
+})();
+
+function flipMooring() {
+    if (!imgPos) return;
+    let a = ((imgPos.angle || 0) + 180) % 360;
+    if (a > 180) a -= 360;
+    imgPos.angle = a;
+    document.getElementById('img-picker-angle').value = a;
+    positionActiveBox();
 }
 
 function renderImagePickerOverlay() {
@@ -343,6 +405,7 @@ function renderImagePickerOverlay() {
     active.addEventListener('mousedown', e => {
         imgDragState = { startX: e.clientX, startY: e.clientY, startCx: imgPos.cx, startCy: imgPos.cy };
         e.preventDefault();
+        e.stopPropagation(); // don't start a viewport pan
     });
     overlay.appendChild(active);
     positionActiveBox();
@@ -360,15 +423,22 @@ function positionActiveBox() {
 }
 
 window.addEventListener('mousemove', e => {
-    if (!imgDragState || !imgPos) return;
-    const wrap = document.getElementById('img-picker-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const [iw, ih] = IMG_SIZE;
-    imgPos.cx = imgDragState.startCx + (e.clientX - imgDragState.startX) / rect.width * iw;
-    imgPos.cy = imgDragState.startCy + (e.clientY - imgDragState.startY) / rect.height * ih;
-    positionActiveBox();
+    if (imgDragState && imgPos) {
+        // stage is at natural image size, so screen delta / zoom = image px
+        imgPos.cx = imgDragState.startCx + (e.clientX - imgDragState.startX) / view.s;
+        imgPos.cy = imgDragState.startCy + (e.clientY - imgDragState.startY) / view.s;
+        positionActiveBox();
+    } else if (panState) {
+        view.tx = panState.tx + (e.clientX - panState.x);
+        view.ty = panState.ty + (e.clientY - panState.y);
+        applyView();
+    }
 });
-window.addEventListener('mouseup', () => { imgDragState = null; });
+window.addEventListener('mouseup', () => {
+    imgDragState = null;
+    panState = null;
+    document.getElementById('img-picker-viewport').classList.remove('dragging');
+});
 
 ['img-picker-w', 'img-picker-h', 'img-picker-angle'].forEach(id => {
     document.getElementById(id).addEventListener('input', () => {
