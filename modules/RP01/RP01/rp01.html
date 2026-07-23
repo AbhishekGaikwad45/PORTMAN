@@ -12,11 +12,13 @@
         padding-bottom: 14px;
         border-bottom: 2px solid var(--border-color);
     }
+
     .reports-header h2 {
         margin: 0;
         font-size: 20px;
         color: var(--text-primary);
     }
+
     .module-badge {
         background: #4a90d9;
         color: #fff;
@@ -26,12 +28,14 @@
         font-weight: 700;
         letter-spacing: 0.5px;
     }
+
     .report-cards {
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         gap: 20px;
         padding: 4px 0;
     }
+
     .report-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
@@ -43,13 +47,15 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
     }
+
     .report-card:hover {
         transform: translateY(-3px);
-        box-shadow: 0 6px 18px rgba(0,0,0,0.13);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.13);
         border-color: #4a90d9;
     }
+
     .report-card .card-icon {
         font-size: 32px;
         line-height: 1;
@@ -57,33 +63,39 @@
         display: flex;
         align-items: center;
     }
+
     .report-card .card-icon img {
         height: 44px;
         width: auto;
         object-fit: contain;
     }
+
     .report-card .card-title {
         font-size: 14px;
         font-weight: 700;
         color: var(--text-primary);
     }
+
     .report-card .card-desc {
         font-size: 11px;
         color: var(--text-secondary);
         line-height: 1.5;
     }
+
     .report-card .card-arrow {
         margin-top: auto;
         font-size: 11px;
         color: #4a90d9;
         font-weight: 600;
     }
+
     /* Placeholder cards */
     .report-card.coming-soon {
         opacity: 0.5;
         cursor: default;
         pointer-events: none;
     }
+
     .report-card.coming-soon .card-title::after {
         content: ' (Coming Soon)';
         font-size: 9px;
@@ -94,7 +106,8 @@
 {% endblock %}
 
 {% block content %}
-<div class="module-header" style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
+<div class="module-header"
+    style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid var(--border-color);">
     <h2 style="margin:0;font-size:20px;color:var(--text-primary);">Reports</h2>
     <span class="module-badge">RP01</span>
 </div>
@@ -109,15 +122,17 @@
     <a class="report-card" href="/module/RP01/port-map/" target="_blank" rel="noopener">
         <div class="card-icon">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="36" height="36" rx="6" fill="#EFF6FF"/>
-                <path d="M6 10l8-3 8 3 8-3v19l-8 3-8-3-8 3V10z" stroke="#2563EB" stroke-width="1.8" fill="#BFDBFE" fill-opacity=".4"/>
-                <circle cx="14" cy="17" r="3" fill="#2563EB" opacity=".7"/>
-                <path d="M14 14v-4M14 20v4" stroke="#2563EB" stroke-width="1.2"/>
+                <rect width="36" height="36" rx="6" fill="#EFF6FF" />
+                <path d="M6 10l8-3 8 3 8-3v19l-8 3-8-3-8 3V10z" stroke="#2563EB" stroke-width="1.8" fill="#BFDBFE"
+                    fill-opacity=".4" />
+                <circle cx="14" cy="17" r="3" fill="#2563EB" opacity=".7" />
+                <path d="M14 14v-4M14 20v4" stroke="#2563EB" stroke-width="1.2" />
             </svg>
         </div>
         <div class="card-title">Port Traffic Map</div>
         <div class="card-desc">
-            Live marine traffic map of Dharamtar Port. Real-time vessel positions at anchorage, barge and MBC movements, berth status, and transit tracking on an interactive Leaflet map.
+            Live marine traffic map of Dharamtar Port. Real-time vessel positions at anchorage, barge and MBC movements,
+            berth status, and transit tracking on an interactive Leaflet map.
         </div>
         <div class="card-arrow">Open Map &rarr;</div>
     </a>
@@ -129,7 +144,8 @@
         </div>
         <div class="card-title">Live Port Monitor</div>
         <div class="card-desc">
-            Real-time port operations dashboard. Berth status, live vessel progress, equipment assignments, route performance, tide levels, and shift data — all on one screen. Opens in a new window.
+            Real-time port operations dashboard. Berth status, live vessel progress, equipment assignments, route
+            performance, tide levels, and shift data — all on one screen. Opens in a new window.
         </div>
         <div class="card-arrow">Open Live &rarr;</div>
     </a>
@@ -155,16 +171,20 @@
     <a class="report-card" href="/module/RP01/mbc-tracking/" target="_blank" rel="noopener">
         <div class="card-icon">
             <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="36" height="36" rx="6" fill="#ECFDF5"/>
-                <path d="M7 24l4-2 4 2 4-2 4 2 4-2v4l-4 2-4-2-4 2-4-2-4 2v-4z" fill="#6EE7B7" fill-opacity=".5" stroke="#059669" stroke-width="1.4"/>
-                <path d="M12 20v-8h12l-2 4 2 4H12z" stroke="#059669" stroke-width="1.6" fill="#A7F3D0" fill-opacity=".5"/>
-                <circle cx="27" cy="10" r="4" stroke="#059669" stroke-width="1.4"/>
-                <path d="M27 8v2l1.5 1" stroke="#059669" stroke-width="1.4" stroke-linecap="round"/>
+                <rect width="36" height="36" rx="6" fill="#ECFDF5" />
+                <path d="M7 24l4-2 4 2 4-2 4 2 4-2v4l-4 2-4-2-4 2-4-2-4 2v-4z" fill="#6EE7B7" fill-opacity=".5"
+                    stroke="#059669" stroke-width="1.4" />
+                <path d="M12 20v-8h12l-2 4 2 4H12z" stroke="#059669" stroke-width="1.6" fill="#A7F3D0"
+                    fill-opacity=".5" />
+                <circle cx="27" cy="10" r="4" stroke="#059669" stroke-width="1.4" />
+                <path d="M27 8v2l1.5 1" stroke="#059669" stroke-width="1.4" stroke-linecap="round" />
             </svg>
         </div>
         <div class="card-title">MBC TAT Tracker</div>
         <div class="card-desc">
-            Live turnaround tracking for the JSW Jaigad MBC cycle. Vessel-wise stage status, days-in-stage vs SOP targets, RAG alerts, fleet status mix, and milestone matrix. Auto-refreshes every 10 minutes; exports to Excel.
+            Live turnaround tracking for the JSW Jaigad MBC cycle. Vessel-wise stage status, days-in-stage vs SOP
+            targets, RAG alerts, fleet status mix, and milestone matrix. Auto-refreshes every 10 minutes; exports to
+            Excel.
         </div>
         <div class="card-arrow">Open Live &rarr;</div>
     </a>
@@ -177,7 +197,8 @@
         </div>
         <div class="card-title">Historical Data (Admin)</div>
         <div class="card-desc">
-            Upload backdated LUEU data (CSV/Excel) for use in reports &amp; dashboards. Replaces the historical dataset; live data is untouched.
+            Upload backdated LUEU data (CSV/Excel) for use in reports &amp; dashboards. Replaces the historical dataset;
+            live data is untouched.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -190,7 +211,8 @@
         </div>
         <div class="card-title">Vessel Statement of Facts</div>
         <div class="card-desc">
-            Generate the official SOF document for any vessel call — arrival times, draft surveys, anchorage movements, discharge operations, idle delays, and hatch-wise cargo completion.
+            Generate the official SOF document for any vessel call — arrival times, draft surveys, anchorage movements,
+            discharge operations, idle delays, and hatch-wise cargo completion.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -202,7 +224,8 @@
         </div>
         <div class="card-title">Mother Vessel Discharged Report</div>
         <div class="card-desc">
-            Date-range filtered list of discharged vessels. Download a formatted Excel report per vessel — day-wise discharge, delay log, delay classification by account type, and performance block.
+            Date-range filtered list of discharged vessels. Download a formatted Excel report per vessel — day-wise
+            discharge, delay log, delay classification by account type, and performance block.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -214,7 +237,8 @@
         </div>
         <div class="card-title">MBC Statement of Facts</div>
         <div class="card-desc">
-            Generate SOF documents for MBC operations — load port and discharge port timings for import, or load port details for export.
+            Generate SOF documents for MBC operations — load port and discharge port timings for import, or load port
+            details for export.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -226,7 +250,8 @@
         </div>
         <div class="card-title">MBC TAT Report</div>
         <div class="card-desc">
-            Trip-wise master data and aggregated TAT summary for Import MBC operations. Download generates two sheets: Master Data and TAT averages (date, MTD, YTD).
+            Trip-wise master data and aggregated TAT summary for Import MBC operations. Download generates two sheets:
+            Master Data and TAT averages (date, MTD, YTD).
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -237,18 +262,20 @@
         </div>
         <div class="card-title">Barge Lines Report</div>
         <div class="card-desc">
-            View barge line details for Import or Export vessel calls. Select one or more vessels to see the full barge line dataframe with vessel header repeated per entry.
+            View barge line details for Import or Export vessel calls. Select one or more vessels to see the full barge
+            line dataframe with vessel header repeated per entry.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
-    
+
     <a class="report-card" href="/module/RP01/daily-ops/">
         <div class="card-icon">
             <img src="{{ url_for('static', filename='img/time.png') }}" alt="MBC Logo">
         </div>
         <div class="card-title">Daily Operations Report</div>
         <div class="card-desc">
-            Daily summary of vessel operations, including arrivals, departures, cargo operations, and idle times. Download a formatted Excel report with day-wise details and performance metrics.
+            Daily summary of vessel operations, including arrivals, departures, cargo operations, and idle times.
+            Download a formatted Excel report with day-wise details and performance metrics.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -259,81 +286,76 @@
         </div>
         <div class="card-title">Shift Report</div>
         <div class="card-desc">
-            Per-shift cargo quantities pivoted by equipment and route, with detailed delay breakdowns by type. Select date and shift to preview or download.
+            Per-shift cargo quantities pivoted by equipment and route, with detailed delay breakdowns by type. Select
+            date and shift to preview or download.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
 
-       <!-- Cargo Handling Report -->
-<a class="report-card" href="/module/RP01/cargo-report/">
+    <!-- Cargo Handling Report -->
+    <a class="report-card" href="/module/RP01/cargo-report/">
 
-    <div class="card-icon">
-        <img
-            src="{{ url_for('static', filename='img/cargo_report.png') }}"
-            alt="Cargo Handling Report Logo">
-    </div>
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/cargo_report.png') }}" alt="Cargo Handling Report Logo">
+        </div>
 
-    <div class="card-title">
-        Cargo Handling Report
-    </div>
+        <div class="card-title">
+            Cargo Handling Report
+        </div>
 
-    <div class="card-desc">
-        View and download cargo handling reports with date-wise filtering.
-        Analyze vessel discharge operations, cargo quantities, ports,
-        discharge timelines, and customer details through an interactive
-        report dashboard.
-    </div>
+        <div class="card-desc">
+            View and download cargo handling reports with date-wise filtering.
+            Analyze vessel discharge operations, cargo quantities, ports,
+            discharge timelines, and customer details through an interactive
+            report dashboard.
+        </div>
 
-    <div class="card-arrow">
-        Open &rarr;
-    </div>
+        <div class="card-arrow">
+            Open &rarr;
+        </div>
 
-</a>
-<!-- 24 Hours Report -->
-<a class="report-card" href="/module/RP01/report_24_hours/">
+    </a>
+    <!-- 24 Hours Report -->
+    <a class="report-card" href="/module/RP01/report_24_hours/">
 
-    <div class="card-icon">
-        <img
-            src="{{ url_for('static', filename='img/24_hours_report.png') }}"
-            alt="24 Hours Report Logo">
-    </div>
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/24_hours_report.png') }}" alt="24 Hours Report Logo">
+        </div>
 
-    <div class="card-title">
-        24 Hours Report
-    </div>
+        <div class="card-title">
+            24 Hours Report
+        </div>
 
-    <div class="card-desc">
-        View and download 24 Hours reports with date-wise filtering.
-    </div>
+        <div class="card-desc">
+            View and download 24 Hours reports with date-wise filtering.
+        </div>
 
-    <div class="card-arrow">
-        Open &rarr;
-    </div>
+        <div class="card-arrow">
+            Open &rarr;
+        </div>
 
-</a>
+    </a>
 
-<!-- DAILY PROGRESS REPORT -->
-<a class="report-card" href="/module/RP01/daily_progress_report/">
+    <!-- DAILY PROGRESS REPORT -->
+    <a class="report-card" href="/module/RP01/daily_progress_report/">
 
-    <div class="card-icon">
-        <img
-            src="{{ url_for('static', filename='img/DPR.png') }}"
-            alt="24 Hours Report Logo">
-    </div>
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/DPR.png') }}" alt="24 Hours Report Logo">
+        </div>
 
-    <div class="card-title">
-        DPR Report
-    </div>
+        <div class="card-title">
+            DPR Report
+        </div>
 
-    <div class="card-desc">
-        View and download DPR reports with date-wise filtering.
-    </div>
+        <div class="card-desc">
+            View and download DPR reports with date-wise filtering.
+        </div>
 
-    <div class="card-arrow">
-        Open &rarr;
-    </div>
+        <div class="card-arrow">
+            Open &rarr;
+        </div>
 
-</a>
+    </a>
 
 
     <!-- Custom Report Designer -->
@@ -343,7 +365,8 @@
         </div>
         <div class="card-title">Custom Report Designer</div>
         <div class="card-desc">
-            Build your own pivot reports with drag-and-drop fields. Choose any data source, arrange rows and columns, pick an aggregator or chart type, and save your configurations for reuse.
+            Build your own pivot reports with drag-and-drop fields. Choose any data source, arrange rows and columns,
+            pick an aggregator or chart type, and save your configurations for reuse.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
@@ -353,35 +376,47 @@
     <!--mv mbc monthly report-->
     <a class="report-card" href="/module/RP01/mv-monthly-report/">
         <div class="card-icon">
-           <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
+            <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
         </div>
         <div class="card-title">MV/MBC monthly Loading Unloading Report</div>
         <div class="card-desc">
-            Interactive dashboard widgets configuration with a pivot table and live charts.
+             Analyze monthly loading and unloading operations for mother vessels and MBCs, including cargo volumes, vessel movements, and operational performance.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
 
-         <!--mv barge report-->
+    <!--mv barge report-->
     <a class="report-card" href="/module/RP01/mv-barge-report/">
         <div class="card-icon">
-           <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
+            <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
         </div>
         <div class="card-title">MV Barge Report</div>
         <div class="card-desc">
-            Interactive dashboard widgets configuration with a pivot table and live charts.
+            View detailed mother vessel and barge operations, including cargo discharge, shift-wise progress, productivity, and vessel movement reports.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>
 
-             <!--barge position -->
+    <!--barge position -->
     <a class="report-card" href="/module/RP01/bargeposition/">
         <div class="card-icon">
-           <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
+            <img src="{{ url_for('static', filename='img/barge.png') }}" alt="MV Barge">
         </div>
         <div class="card-title">Barge Position</div>
         <div class="card-desc">
-            Interactive dashboard widgets configuration with a pivot table and live charts.
+             Monitor live barge positions, berth occupancy, waiting area status, vessel movements, and discharge progress in a single dashboard.
+        </div>
+        <div class="card-arrow">Open &rarr;</div>
+    </a>
+
+    <a class="report-card" href="/module/RP01/two-hour-report/">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/barge.png') }}" alt="2 HRS Report">
+        </div>
+        <div class="card-title">2 HRS Report</div>
+        <div class="card-desc">
+            View and manage the 2-hour operational report with real-time vessel status, cargo handling progress, berth
+            occupancy, and shift-wise updates.
         </div>
         <div class="card-arrow">Open &rarr;</div>
     </a>

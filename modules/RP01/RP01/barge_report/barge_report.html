@@ -14,7 +14,13 @@
         padding-bottom: 12px;
         border-bottom: 2px solid var(--border-color);
     }
-    .page-header h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
+
+    .page-header h2 {
+        margin: 0;
+        font-size: 18px;
+        color: var(--text-primary);
+    }
+
     .module-badge {
         background: #4a90d9;
         color: #fff;
@@ -24,13 +30,21 @@
         font-weight: 700;
         letter-spacing: 0.5px;
     }
+
     .breadcrumb {
         font-size: 11px;
         color: var(--text-secondary);
         margin-bottom: 14px;
     }
-    .breadcrumb a { color: #4a90d9; text-decoration: none; }
-    .breadcrumb a:hover { text-decoration: underline; }
+
+    .breadcrumb a {
+        color: #4a90d9;
+        text-decoration: none;
+    }
+
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
 
     /* ── Filter bar ─────────────────────────────────── */
     .filter-bar {
@@ -44,11 +58,13 @@
         border-radius: 6px;
         padding: 12px 14px;
     }
+
     .filter-group {
         display: flex;
         flex-direction: column;
         gap: 4px;
     }
+
     .filter-group label {
         font-size: 10px;
         font-weight: 600;
@@ -56,6 +72,7 @@
         text-transform: uppercase;
         letter-spacing: 0.4px;
     }
+
     .filter-group select,
     .filter-group input {
         padding: 5px 9px;
@@ -67,11 +84,13 @@
         height: 30px;
         min-width: 160px;
     }
+
     .filter-group select:focus,
     .filter-group input:focus {
         outline: none;
         border-color: #4a90d9;
     }
+
     .filter-btn {
         padding: 0 18px;
         height: 30px;
@@ -82,10 +101,25 @@
         cursor: pointer;
         align-self: flex-end;
     }
-    .filter-btn.primary { background: #4a90d9; color: #fff; }
-    .filter-btn.primary:hover { background: #357abd; }
-    .filter-btn.secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
-    .filter-btn.secondary:hover { border-color: #4a90d9; }
+
+    .filter-btn.primary {
+        background: #4a90d9;
+        color: #fff;
+    }
+
+    .filter-btn.primary:hover {
+        background: #357abd;
+    }
+
+    .filter-btn.secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+    }
+
+    .filter-btn.secondary:hover {
+        border-color: #4a90d9;
+    }
 
     /* ── Vessel multi-select ─────────────────────────── */
     .vessel-select-wrapper {
@@ -95,6 +129,7 @@
         min-width: 320px;
         max-width: 480px;
     }
+
     .vessel-select-wrapper label {
         font-size: 10px;
         font-weight: 600;
@@ -102,6 +137,7 @@
         text-transform: uppercase;
         letter-spacing: 0.4px;
     }
+
     .vessel-select-wrapper select {
         height: 100px;
         padding: 4px;
@@ -111,10 +147,12 @@
         background: var(--bg-primary);
         color: var(--text-primary);
     }
+
     .vessel-select-wrapper select:focus {
         outline: none;
         border-color: #4a90d9;
     }
+
     .select-hint {
         font-size: 10px;
         color: var(--text-secondary);
@@ -128,7 +166,11 @@
         margin-bottom: 10px;
         min-height: 20px;
     }
-    .status-bar .count { font-weight: 700; color: var(--text-primary); }
+
+    .status-bar .count {
+        font-weight: 700;
+        color: var(--text-primary);
+    }
 
     /* ── Tabulator group header ──────────────────────── */
     .tabulator-row.tabulator-group {
@@ -137,6 +179,7 @@
         color: #1a3a6b !important;
         font-size: 12px;
     }
+
     .vessel-group-header {
         display: flex;
         flex-wrap: wrap;
@@ -144,11 +187,13 @@
         align-items: center;
         width: 100%;
     }
+
     .vessel-group-header .gh-item {
         display: flex;
         flex-direction: column;
         gap: 1px;
     }
+
     .vessel-group-header .gh-label {
         font-size: 9px;
         font-weight: 600;
@@ -157,11 +202,13 @@
         color: #4a90d9;
         opacity: 0.8;
     }
+
     .vessel-group-header .gh-value {
         font-size: 12px;
         font-weight: 700;
         color: #1a3a6b;
     }
+
     .vessel-group-header img.barge-icon {
         height: 28px;
         width: auto;
@@ -181,6 +228,7 @@
         color: var(--text-secondary);
         font-size: 13px;
     }
+
     .empty-state img {
         height: 64px;
         opacity: 0.4;
@@ -216,6 +264,17 @@
         </select>
     </div>
 
+    <!-- Discharge Completed Date -->
+    <div class="filter-group">
+        <label>From</label>
+        <input type="date" id="disc-date-from-filter" onchange="loadVessels()">
+    </div>
+
+    <div class="filter-group">
+        <label>To</label>
+        <input type="date" id="disc-date-to-filter" onchange="loadVessels()">
+    </div>
+
     <!-- Vessel multi-select -->
     <div class="vessel-select-wrapper">
         <label>Vessels <span id="vessel-count-badge" style="color:#4a90d9;font-weight:700;"></span></label>
@@ -229,7 +288,7 @@
     <button class="filter-btn primary" onclick="loadData()">Load Report</button>
     <button class="filter-btn secondary" onclick="clearReport()">Clear</button>
     <button class="filter-btn" id="export-btn" onclick="exportExcel()"
-            style="background:#27ae60;color:#fff;display:none;">&#8595; Export Excel</button>
+        style="background:#27ae60;color:#fff;display:none;">&#8595; Export Excel</button>
 </div>
 
 <!-- Status -->
@@ -245,134 +304,187 @@
 </div>
 
 <script>
-let _table = null;
-let _allRows = [];
+    let _table = null;
+    let _allRows = [];
 
-/* ── Vessel list ─────────────────────────────────────────────────────── */
-function loadVessels() {
-    const opType = document.getElementById('op-type-sel').value;
-    const sel = document.getElementById('vessel-sel');
-    sel.innerHTML = '<option disabled>Loading…</option>';
-    document.getElementById('vessel-count-badge').textContent = '';
+    /* ── Vessel list ─────────────────────────────────────────────────────── */
+    function loadVessels() {
+        const opType = document.getElementById('op-type-sel').value;
+        const discDateFrom = document.getElementById('disc-date-from-filter').value;
+        const discDateTo = document.getElementById('disc-date-to-filter').value;
+        const sel = document.getElementById('vessel-sel');
+        sel.innerHTML = '<option disabled>Loading…</option>';
+        document.getElementById('vessel-count-badge').textContent = '';
 
-    fetch(`/api/module/RP01/barge-report/vessels?op_type=${encodeURIComponent(opType)}`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) { sel.innerHTML = '<option disabled>Error loading vessels</option>'; return; }
-            sel.innerHTML = '';
-            data.forEach(v => {
-                const o = document.createElement('option');
-                o.value = v.id;
-                o.textContent = v.label + (v.doc_status ? ` [${v.doc_status}]` : '');
-                sel.appendChild(o);
-            });
-            document.getElementById('vessel-count-badge').textContent = `(${data.length})`;
-        })
-        .catch(() => { sel.innerHTML = '<option disabled>Error</option>'; });
+        let url = `/api/module/RP01/barge-report/vessels?op_type=${encodeURIComponent(opType)}`;
+        if (discDateFrom) {
+            url += `&disc_date_from=${encodeURIComponent(discDateFrom)}`;
+        }
+        if (discDateTo) {
+            url += `&disc_date_to=${encodeURIComponent(discDateTo)}`;
+        }
+
+        fetch(url)
+
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { sel.innerHTML = '<option disabled>Error loading vessels</option>'; return; }
+                sel.innerHTML = '';
+                data.forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = v.id;
+                    o.textContent = v.label + (v.doc_status ? ` [${v.doc_status}]` : '');
+                    sel.appendChild(o);
+                });
+                document.getElementById('vessel-count-badge').textContent = `(${data.length})`;
+            })
+            .catch(() => { sel.innerHTML = '<option disabled>Error</option>'; });
+    }
+
+
+    function formatDateTime(value) {
+    if (!value) return "";
+
+    const d = new Date(value.replace(" ", "T"));
+    if (isNaN(d.getTime())) return value;
+
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+
+    return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
 }
+    /* ── Data load ───────────────────────────────────────────────────────── */
+    function loadData() {
+        const sel = document.getElementById('vessel-sel');
+        const chosen = Array.from(sel.selectedOptions).map(o => o.value);
+        if (!chosen.length) {
+            setStatus('Please select at least one vessel.', true);
+            return;
+        }
 
-/* ── Data load ───────────────────────────────────────────────────────── */
-function loadData() {
-    const sel = document.getElementById('vessel-sel');
-    const chosen = Array.from(sel.selectedOptions).map(o => o.value);
-    if (!chosen.length) {
-        setStatus('Please select at least one vessel.', true);
-        return;
+        setStatus('Loading…');
+        clearTable();
+
+        fetch(`/api/module/RP01/barge-report/data?ldud_ids=${chosen.join(',')}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { setStatus('Error: ' + data.error, true); return; }
+                _allRows = data;
+                renderTable(data);
+            })
+            .catch(err => setStatus('Network error: ' + err, true));
     }
 
-    setStatus('Loading…');
-    clearTable();
-
-    fetch(`/api/module/RP01/barge-report/data?ldud_ids=${chosen.join(',')}`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) { setStatus('Error: ' + data.error, true); return; }
-            _allRows = data;
-            renderTable(data);
-        })
-        .catch(err => setStatus('Network error: ' + err, true));
-}
-
-/* ── Table render ────────────────────────────────────────────────────── */
-function renderTable(rows) {
-    const area = document.getElementById('barge-table');
-    const empty = document.getElementById('empty-state');
-
-    if (!rows || !rows.length) {
-        empty.style.display = '';
-        area.style.display = 'none';
-        setStatus('No barge lines found for the selected vessels.');
-        return;
+    /* ── Duration helper ─────────────────────────────────────────────────── */
+    function parseDT(str) {
+        if (!str) return null;
+        // normalize "YYYY-MM-DD HH:MM:SS" and "YYYY-MM-DDTHH:MM" to a Date
+        const norm = str.replace(' ', 'T');
+        const d = new Date(norm);
+        return isNaN(d.getTime()) ? null : d;
     }
 
-    empty.style.display = 'none';
-    area.style.display = '';
-    document.getElementById('export-btn').style.display = '';
-
-    // Count barge lines (rows with a line_id)
-    const lineCount = rows.filter(r => r.line_id != null).length;
-    const vesselCount = new Set(rows.map(r => r.ldud_id)).size;
-    setStatus(`Showing <span class="count">${lineCount}</span> barge line(s) across <span class="count">${vesselCount}</span> vessel(s).`);
-
-    const colDef = (title, field, opts = {}) => ({
-        title, field,
-        headerSort: false,
-        ...opts,
-    });
-
-    const qtyFmt = cell => {
-        const v = cell.getValue();
-        return v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
-    };
-    const columns = [
-        colDef('Trip #',                   'trip_number',              { width: 55,  hozAlign: 'center' }),
-        colDef('Hold',                     'hold_name',                { width: 80 }),
-        colDef('Barge',                    'barge_name',               { width: 120 }),
-        colDef('Stevedore',                'contractor_name',          { width: 120 }),
-        colDef('Cargo',                    'cargo_name',               { width: 110 }),
-        colDef('MBPT/PLA',                 'bpt_bfl',                  { width: 75,  hozAlign: 'center' }),
-        colDef('Qty (MT)',                 'discharge_quantity',       { width: 85,  hozAlign: 'right', formatter: qtyFmt }),
-        colDef('Crane (MV)',               'crane_loaded_from',        { width: 100 }),
-        colDef('Port Crane',               'port_crane',               { width: 90 }),
-        colDef('Trip Start',               'trip_start',               { width: 130 }),
-        colDef('Anch. Gull Island',        'anchored_gull_island',     { width: 130 }),
-        colDef('Aweigh Gull Island',       'aweigh_gull_island',       { width: 130 }),
-        colDef('AMF at Port',              'amf_at_port',              { width: 130 }),
-        colDef('Alongside MV',             'along_side_vessel',        { width: 130 }),
-        colDef('Alongside Berth',          'along_side_berth',         { width: 130 }),
-        colDef('Loading Start',            'commenced_loading',        { width: 130 }),
-        colDef('Loading End',              'completed_loading',        { width: 130 }),
-        colDef('Cast Off MV',              'cast_off_mv',              { width: 130 }),
-        colDef('Cast Off Berth',           'cast_off_berth',           { width: 130 }),
-        colDef('Cast Off NT',              'cast_off_berth_nt',        { width: 130 }),
-        colDef('Cast Off Port',            'cast_off_port',            { width: 130 }),
-        colDef('Discharge Start (Berth)',  'commence_discharge_berth', { width: 150 }),
-        colDef('Discharge End (Berth)',    'completed_discharge_berth',{ width: 150 }),
-        colDef('Anch. Gull (Loaded)',      'anchored_gull_island_empty',{ width: 140 }),
-        colDef('Aweigh Gull (Loaded)',     'aweigh_gull_island_empty', { width: 140 }),
-    ];
-
-    if (_table) {
-        _table.destroy();
-        _table = null;
+    function formatDuration(startStr, endStr) {
+        const start = parseDT(startStr);
+        const end = parseDT(endStr);
+        if (!start || !end) return '';
+        let diffMs = end - start;
+        if (diffMs < 0) return '';
+        const totalMin = Math.round(diffMs / 60000);
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     }
 
-    _table = new Tabulator('#barge-table', {
-        data: rows,
-        layout: 'fitDataFill',
-        height: 'calc(100vh - 340px)',
-        columns: columns,
-        groupBy: 'ldud_id',
-        groupStartOpen: true,
-        groupHeader: function(value, count, data, group) {
-            // Find the first row for this group to get header fields
-            const r = data[0] || {};
-            const nor = r.nor_tendered ? r.nor_tendered.replace('T', ' ').substring(0, 16) : '—';
-            const dsc_start = r.discharge_commenced ? r.discharge_commenced.replace('T', ' ').substring(0, 16) : '—';
-            const dsc_end   = r.discharge_completed  ? r.discharge_completed.replace('T', ' ').substring(0, 16) : '—';
-            const qty = r.initial_draft_survey_quantity || '—';
+    /* ── Table render ────────────────────────────────────────────────────── */
+    function renderTable(rows) {
+        const area = document.getElementById('barge-table');
+        const empty = document.getElementById('empty-state');
 
-            return `
+        if (!rows || !rows.length) {
+            empty.style.display = '';
+            area.style.display = 'none';
+            setStatus('No barge lines found for the selected vessels.');
+            return;
+        }
+
+        empty.style.display = 'none';
+        area.style.display = '';
+        document.getElementById('export-btn').style.display = '';
+
+        // Count barge lines (rows with a line_id)
+        const lineCount = rows.filter(r => r.line_id != null).length;
+        const vesselCount = new Set(rows.map(r => r.ldud_id)).size;
+        setStatus(`Showing <span class="count">${lineCount}</span> barge line(s) across <span class="count">${vesselCount}</span> vessel(s).`);
+
+        const colDef = (title, field, opts = {}) => ({
+            title, field,
+            headerSort: false,
+            ...opts,
+        });
+
+        const qtyFmt = cell => {
+            const v = cell.getValue();
+            return v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+        };
+        const dateFmt = cell => formatDateTime(cell.getValue());
+        const columns = [
+            colDef('Trip #', 'trip_number', { width: 55, hozAlign: 'center' }),
+            colDef('Hold', 'hold_name', { width: 80 }),
+            colDef('Barge', 'barge_name', { width: 120 }),
+            colDef('Stevedore', 'contractor_name', { width: 120 }),
+            colDef('Cargo', 'cargo_name', { width: 110 }),
+            colDef('MBPT/PLA', 'bpt_bfl', { width: 75, hozAlign: 'center' }),
+            colDef('Qty (MT)', 'discharge_quantity', { width: 85, hozAlign: 'right', formatter: qtyFmt }),
+            colDef('Crane (MV)', 'crane_loaded_from', { width: 100 }),
+            colDef('Port Crane', 'port_crane', { width: 90 }),
+            colDef('Trip Start', 'trip_start', { width: 130 ,formatter: dateFmt}),
+            colDef('Anch. Gull Island', 'anchored_gull_island', { width: 130, formatter: dateFmt }),
+            colDef('Aweigh Gull Island', 'aweigh_gull_island', { width: 130 , formatter: dateFmt}),
+            colDef('AMF at Port', 'amf_at_port', { width: 130 }),
+            colDef('Alongside MV', 'along_side_vessel', { width: 130 , formatter: dateFmt}),
+            colDef('Alongside Berth', 'along_side_berth', { width: 130, formatter: dateFmt }),
+            colDef('Loading Start', 'commenced_loading', { width: 130, formatter: dateFmt }),
+            colDef('Loading End', 'completed_loading', { width: 130, formatter: dateFmt }),
+            colDef('Cast Off MV', 'cast_off_mv', { width: 130, formatter: dateFmt }),
+            colDef('Cast Off Berth', 'cast_off_berth', { width: 130 , formatter: dateFmt}),
+            colDef('Cast Off NT', 'cast_off_berth_nt', { width: 130, formatter: dateFmt }),
+            colDef('Cast Off Port', 'cast_off_port', { width: 130 }),
+            colDef('Discharge Start (Berth)', 'commence_discharge_berth', { width: 150 , formatter: dateFmt}),
+            colDef('Discharge End (Berth)', 'completed_discharge_berth', { width: 150, formatter: dateFmt }),
+            colDef('Anch. Gull (Loaded)', 'anchored_gull_island_empty', { width: 140, formatter: dateFmt }),
+            colDef('Aweigh Gull (Loaded)', 'aweigh_gull_island_empty', { width: 140, formatter: dateFmt }),
+            colDef('TAT', 'cast_off_berth', {
+                width: 110,
+                hozAlign: 'center',
+                formatter: cell => formatDuration(cell.getRow().getData().trip_start, cell.getValue()),
+            }),
+        ];
+
+        if (_table) {
+            _table.destroy();
+            _table = null;
+        }
+
+        _table = new Tabulator('#barge-table', {
+            data: rows,
+            layout: 'fitDataFill',
+            height: 'calc(100vh - 340px)',
+            columns: columns,
+            groupBy: 'ldud_id',
+            groupStartOpen: true,
+            groupHeader: function (value, count, data, group) {
+                // Find the first row for this group to get header fields
+                const r = data[0] || {};
+                const nor = r.nor_tendered ? r.nor_tendered.replace('T', ' ').substring(0, 16) : '—';
+                const dsc_start = r.discharge_commenced ? r.discharge_commenced.replace('T', ' ').substring(0, 16) : '—';
+                const dsc_end = r.discharge_completed ? r.discharge_completed.replace('T', ' ').substring(0, 16) : '—';
+                const qty = r.initial_draft_survey_quantity || '—';
+
+                return `
               <div class="vessel-group-header">
                 <img class="barge-icon" src="/static/img/barge.png" alt="barge">
                 <div class="gh-item">
@@ -415,54 +527,51 @@ function renderTable(rows) {
                   <span class="gh-label">Status</span>
                   <span class="gh-value">${r.doc_status || '—'}</span>
                 </div>
-                <div class="gh-item" style="margin-left:auto;">
-                  <span class="gh-label">Barge Lines</span>
-                  <span class="gh-value">${count}</span>
-                </div>
+
               </div>
             `;
-        },
-        rowFormatter: function(row) {
-            // Shade rows without a barge line (vessel has no lines)
-            const data = row.getData();
-            if (data.line_id == null) {
-                row.getElement().style.opacity = '0.45';
-                row.getElement().style.fontStyle = 'italic';
-            }
-        },
-    });
-}
+            },
+            rowFormatter: function (row) {
+                // Shade rows without a barge line (vessel has no lines)
+                const data = row.getData();
+                if (data.line_id == null) {
+                    row.getElement().style.opacity = '0.45';
+                    row.getElement().style.fontStyle = 'italic';
+                }
+            },
+        });
+    }
 
-/* ── Excel export ────────────────────────────────────────────────────── */
-function exportExcel() {
-    const sel = document.getElementById('vessel-sel');
-    const chosen = Array.from(sel.selectedOptions).map(o => o.value);
-    if (!chosen.length) return;
-    window.location.href = `/api/module/RP01/barge-report/download?ldud_ids=${chosen.join(',')}`;
-}
+    /* ── Excel export ────────────────────────────────────────────────────── */
+    function exportExcel() {
+        const sel = document.getElementById('vessel-sel');
+        const chosen = Array.from(sel.selectedOptions).map(o => o.value);
+        if (!chosen.length) return;
+        window.location.href = `/api/module/RP01/barge-report/download?ldud_ids=${chosen.join(',')}`;
+    }
 
-/* ── Helpers ─────────────────────────────────────────────────────────── */
-function clearReport() {
-    clearTable();
-    setStatus('');
-    document.getElementById('vessel-sel').selectedIndex = -1;
-    document.getElementById('export-btn').style.display = 'none';
-}
+    /* ── Helpers ─────────────────────────────────────────────────────────── */
+    function clearReport() {
+        clearTable();
+        setStatus('');
+        document.getElementById('vessel-sel').selectedIndex = -1;
+        document.getElementById('export-btn').style.display = 'none';
+    }
 
-function clearTable() {
-    if (_table) { _table.destroy(); _table = null; }
-    document.getElementById('barge-table').style.display = 'none';
-    document.getElementById('empty-state').style.display = '';
-    _allRows = [];
-}
+    function clearTable() {
+        if (_table) { _table.destroy(); _table = null; }
+        document.getElementById('barge-table').style.display = 'none';
+        document.getElementById('empty-state').style.display = '';
+        _allRows = [];
+    }
 
-function setStatus(msg, isError = false) {
-    const bar = document.getElementById('status-bar');
-    bar.innerHTML = msg;
-    bar.style.color = isError ? '#c0392b' : '';
-}
+    function setStatus(msg, isError = false) {
+        const bar = document.getElementById('status-bar');
+        bar.innerHTML = msg;
+        bar.style.color = isError ? '#c0392b' : '';
+    }
 
-/* ── Init ────────────────────────────────────────────────────────────── */
-loadVessels();
+    /* ── Init ────────────────────────────────────────────────────────────── */
+    loadVessels();
 </script>
 {% endblock %}

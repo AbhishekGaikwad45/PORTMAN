@@ -1,10 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/css/bootstrap-multiselect.min.css">
-<script
-    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-multiselect/1.1.2/js/bootstrap-multiselect.min.js"></script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
@@ -469,46 +466,79 @@
         color: #166534;
     }
 
-    .notes-log-list {
-        padding: 12px 16px 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-height: 320px;
-        overflow-y: auto;
-    }
 
     .note-entry-row {
         display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 8px 10px;
-        background: #f8fafc;
-        border: 1px solid var(--border-clr);
-        border-radius: 4px;
+        align-items: center;
+        gap: 12px;
+        background: #ffffff;
+        border: 1px solid #dbe3ee;
+        border-radius: 8px;
+        padding: 10px 14px;
+        transition: .2s;
     }
 
+
+
     .note-index {
-        flex-shrink: 0;
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
-        background: #e2e8f0;
-        color: #1e3a8a;
-        font-size: 11px;
-        font-weight: 800;
+        background: #e8efff;
+        color: #2563eb;
+        font-size: 12px;
+        font-weight: 700;
         display: flex;
         align-items: center;
         justify-content: center;
-        margin-top: 1px;
+        flex-shrink: 0;
     }
 
-    .note-text {
-        flex: 1;
-        font-size: 12.5px;
-        line-height: 1.5;
-        color: var(--text-primary);
+    .notes-log-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px;
+        background: #f8fafc;
     }
+
+
+
+    .note-entry-row:hover {
+        border-color: #93c5fd;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+    }
+
+
+
+
+    .note-text:hover {
+        border-color: #d1d5db;
+    }
+
+    .note-text:focus {
+        border: 1px solid #3b82f6;
+        background: #fff;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, .15);
+    }
+
+    .note-text:empty::before {
+        content: attr(data-placeholder);
+        color: #9ca3af;
+    }
+
+    .remove-row-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #94a3b8;
+        cursor: pointer;
+        font-size: 18px;
+        transition: .2s;
+    }
+
 
     .secondary-panels-stack {
         width: 100%;
@@ -959,6 +989,32 @@
             transform: rotate(360deg);
         }
     }
+
+    .note-text {
+        flex: 1;
+        min-height: 34px;
+        padding: 8px 12px;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        outline: none;
+        font-size: 13px;
+        line-height: 1.5;
+        transition: .2s;
+    }
+
+
+
+    .note-text:empty:before {
+        content: attr(data-placeholder);
+        color: #9ca3af;
+    }
+
+
+    .remove-row-btn:hover {
+        background: #fee2e2;
+        color: #dc2626;
+    }
 </style>
 
 <!-- ═══════════════════════════════ PAGE HEADER ═══════════════════════════════ -->
@@ -1354,21 +1410,21 @@
                     <td>A</td>
                     <td id="aDischarge">0</td>
                     <td><input type="number" id="aPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="aDiff">0</td>
                 </tr>
                 <tr>
                     <td>B</td>
                     <td id="bDischarge">0</td>
                     <td><input type="number" id="bPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="bDiff">0</td>
                 </tr>
                 <tr>
                     <td>C</td>
                     <td id="cDischarge">0</td>
                     <td><input type="number" id="cPlan" class="plan-input"
-                            oninput="calculateShiftDiff(); markUnsaved();""></td>
+                            oninput="calculateShiftDiff(); markUnsaved();"></td>
                     <td id="cDiff">0</td>
                 </tr>
                 <tr class="total-row">
@@ -1401,6 +1457,42 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Jetty Barges Position -->
+    <div class="shift-discharge-panel" style="margin-top:15px;">
+        <div class="panel-header"><span style="color:#1d4ed8;">Jetty Barges Position</span></div>
+        <div style="display:flex;gap:16px;padding:14px;flex-wrap:wrap;">
+            <table class="shift-discharge-table" style="flex:1;min-width:320px;">
+                <thead>
+                    <tr>
+                        <th>CARGO</th>
+                        <th>JETTY</th>
+                        <th>ETA</th>
+                    </tr>
+                </thead>
+                <tbody id="jettyWaitingBody">
+                    <tr>
+                        <td colspan="3" style="text-align:center;color:#94a3b8;">Select date and Preview</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <table class="shift-discharge-table" style="flex:1;min-width:320px;">
+                <thead>
+                    <tr>
+                        <th>CARGO</th>
+                        <th>BERTH</th>
+                        <th>CARGO BAL</th>
+                    </tr>
+                </thead>
+                <tbody id="berthDischargeBody">
+                    <tr>
+                        <td colspan="3" style="text-align:center;color:#94a3b8;">Select date and Preview</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- Movement Logs Modal -->
@@ -1411,10 +1503,41 @@
             <div style="display:flex;align-items:center;gap:10px;">
                 <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;"
                     onclick="downloadModalExcel()">↓ Download Excel</button>
+                <button class="filter-btn primary" style="height:28px;padding:0 12px;font-size:12px;background:#0f766e;"
+                    onclick="openLogsRangeDownloadPopup()">📅 Download by Date Range</button>
                 <button class="remove-row-btn" onclick="closeMovementLogs()">✕</button>
             </div>
         </div>
         <div id="logsModalBody" class="logs-modal-body"></div>
+    </div>
+</div>
+
+<!-- Movement Logs — Date Range Download Popup -->
+<div id="logsRangeModal" class="logs-modal" style="z-index:100000;">
+    <div class="logs-modal-content" style="width:420px;height:auto;">
+        <div class="logs-modal-header">
+            <span>Download Logs — Date Range</span>
+            <button class="remove-row-btn" onclick="closeLogsRangeDownloadPopup()">✕</button>
+        </div>
+        <div class="logs-modal-body" style="padding:20px;">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div class="filter-group">
+                    <label>FROM DATE</label>
+                    <input type="date" id="logsRangeFromDate"
+                        style="width:100%;height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;box-sizing:border-box;">
+                </div>
+                <div class="filter-group">
+                    <label>TO DATE</label>
+                    <input type="date" id="logsRangeToDate"
+                        style="width:100%;height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;box-sizing:border-box;">
+                </div>
+                <div id="logsRangeError" style="color:#dc2626;font-size:12px;display:none;"></div>
+                <button type="button" class="filter-btn primary" style="width:100%;height:36px;"
+                    onclick="downloadMovementLogsRangeExcel()">
+                    ↓ Download Excel for Range
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1521,62 +1644,121 @@
 
     function pad(n) { return String(n).padStart(2, '0'); }
 
+    async function loadJettyCargoReport() {
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
+        const jBody = document.getElementById('jettyWaitingBody');
+        const bBody = document.getElementById('berthDischargeBody');
+
+        if (!reportDate) return;
+
+        const params = new URLSearchParams({ date: reportDate, shift });
+        let res, data;
+        try {
+            res = await fetch(`/api/module/RP01/jetty-cargo-report-v2?${params}`);
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error('Jetty cargo report HTTP error:', res.status, errText);
+                jBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Error ${res.status}: ${errText.slice(0, 200)}</td></tr>`;
+                bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Error ${res.status}</td></tr>`;
+                return;
+            }
+            data = await res.json();
+            console.log('Jetty cargo report data:', data);
+        } catch (e) {
+            console.error('Jetty cargo report failed:', e);
+            jBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Fetch failed: ${e.message}</td></tr>`;
+            bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Fetch failed</td></tr>`;
+            return;
+        }
+
+        jBody.innerHTML = '';
+        if (!(data.jetty_waiting || []).length) {
+            jBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges waiting at jetty</td></tr>';
+        } else {
+            data.jetty_waiting.forEach(r => {
+                jBody.innerHTML += `<tr><td style="text-align:left;">${r.cargo}</td>
+                <td>${r.jetty}</td><td>${r.eta}</td></tr>`;
+            });
+        }
+        jBody.innerHTML += `<tr class="total-row"><td>TOTAL</td>
+        <td>${data.total_jetty || 0}</td><td>${data.total_eta || 0}</td></tr>`;
+
+        bBody.innerHTML = '';
+        if (!(data.berth_discharge || []).length) {
+            bBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges/MBC under discharge</td></tr>';
+        } else {
+            data.berth_discharge.forEach(r => {
+                bBody.innerHTML += `<tr><td style="text-align:left;">${r.cargo}</td>
+                <td>${r.berth}</td><td>${Number(r.balance).toLocaleString()}</td></tr>`;
+            });
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════
     //  MAIN PREVIEW
     // ══════════════════════════════════════════════════════════════════════════════
     async function applyDateRangeFilter() {
-    const range = getShiftDateRange();
-    if (!range) { alert("Please select a date."); return; }
+        const range = getShiftDateRange();
+        if (!range) { alert("Please select a date."); return; }
 
-    document.getElementById("previewLoader").style.display = "flex";
+        document.getElementById("previewLoader").style.display = "flex";
 
-    _movementLogs = [];
-    document.getElementById('logConsole').innerHTML = '';
-    document.getElementById('logCount').textContent = '0';
+        // Clear stale save-status badges from a previous shift/date view
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
 
-    try {
-        document.getElementById("reportContent").style.display = "block";
-        document.getElementById("saveReportBtn").disabled = false;
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
 
-        const reportDate = document.getElementById('report-date').value;
-        const shift = document.getElementById('report-shift').value;
-
-        // Run the board/summary loaders — if ANY of these fail, log it but
-        // don't let it block the saved-report fetch below.
-        const results = await Promise.allSettled([
-            loadBerthOccupancy(range.fromISO, range.toISO),
-            loadMotherVesselData(range.fromISO, range.toISO),
-            loadTideData(range.fromISO, range.toISO),
-            loadShiftWiseDischarge(),
-            loadShiftSummary(),
-        ]);
-        results.forEach((r, i) => {
-            if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
-        });
-
-        // Saved-report fetch is isolated so a failure elsewhere never
-        // prevents your saved data from being applied.
-        let savedData = null;
         try {
-            savedData = await loadSavedReport(reportDate, shift);
-            console.log('Saved report lookup:', reportDate, shift, savedData);
-        } catch (e) {
-            console.error('loadSavedReport failed:', e);
-        }
+            document.getElementById("reportContent").style.display = "block";
+            document.getElementById("saveReportBtn").disabled = false;
 
-        if (savedData && savedData.found) {
-            applySavedOverlay(savedData);
-        } else {
-            console.warn('No saved report found for', reportDate, shift);
-        }
+            const reportDate = document.getElementById('report-date').value;
+            const shift = document.getElementById('report-shift').value;
 
-    } catch (err) {
-        console.error('Preview failed:', err);
-        alert('Something went wrong loading the preview. Check console for details.');
-    } finally {
-        document.getElementById("previewLoader").style.display = "none";
+            const results = await Promise.allSettled([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary(),
+            ]);
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+            });
+            // loadJettyCargoReport();
+            let savedData = null;
+            try {
+                savedData = await loadSavedReport(reportDate, shift);
+                console.log('Saved report lookup:', reportDate, shift, savedData);
+            } catch (e) {
+                console.error('loadSavedReport failed:', e);
+            }
+
+            // ── Authoritative check: `found` (this shift was explicitly saved)
+            // or `carried` (backend resolved a valid forward-only carry-forward
+            // snapshot) are BOTH authoritative answers from the backend and
+            // must always overwrite whatever loadBerthOccupancy() painted from
+            // the live/current DB state — even if berth_layout ends up empty
+            // (that just means nothing was manually placed for this shift yet).
+            const hasOverlayData = savedData && (savedData.found || savedData.carried);
+
+            if (hasOverlayData) {
+                applySavedOverlay(savedData);
+            } else {
+                console.warn('No saved report found for', reportDate, shift);
+            }
+
+        } catch (err) {
+            console.error('Preview failed:', err);
+            alert('Something went wrong loading the preview. Check console for details.');
+        } finally {
+            document.getElementById("previewLoader").style.display = "none";
+        }
     }
-}
 
     // ══════════════════════════════════════════════════════════════════════════════
     //  SAVE REPORT  →  POST /api/module/RP01/shift-report/save
@@ -1715,6 +1897,71 @@
     }
 
     // ══════════════════════════════════════════════════════════════════════════════
+    //  MAIN PREVIEW
+    // ══════════════════════════════════════════════════════════════════════════════
+    async function applyDateRangeFilter() {
+        const range = getShiftDateRange();
+        if (!range) { alert("Please select a date."); return; }
+
+        document.getElementById("previewLoader").style.display = "flex";
+
+        // Clear stale save-status badges from a previous shift/date view
+        document.getElementById('saveStatusBadge').style.display = 'none';
+        document.getElementById('savedDateBadge').style.display = 'none';
+
+        _movementLogs = [];
+        document.getElementById('logConsole').innerHTML = '';
+        document.getElementById('logCount').textContent = '0';
+
+        try {
+            document.getElementById("reportContent").style.display = "block";
+            document.getElementById("saveReportBtn").disabled = false;
+
+            const reportDate = document.getElementById('report-date').value;
+            const shift = document.getElementById('report-shift').value;
+
+            const results = await Promise.allSettled([
+                loadBerthOccupancy(range.fromISO, range.toISO),
+                loadMotherVesselData(range.fromISO, range.toISO),
+                loadTideData(range.fromISO, range.toISO),
+                loadShiftWiseDischarge(),
+                loadShiftSummary(),
+            ]);
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') console.error(`Preview loader #${i} failed:`, r.reason);
+            });
+            loadJettyCargoReport();
+            let savedData = null;
+            try {
+                savedData = await loadSavedReport(reportDate, shift);
+                console.log('Saved report lookup:', reportDate, shift, savedData);
+            } catch (e) {
+                console.error('loadSavedReport failed:', e);
+            }
+
+            // ── Authoritative check: `found` (this shift was explicitly saved)
+            // or `carried` (backend resolved a valid forward-only carry-forward
+            // snapshot) are BOTH authoritative answers from the backend and
+            // must always overwrite whatever loadBerthOccupancy() painted from
+            // the live/current DB state — even if berth_layout ends up empty
+            // (that just means nothing was manually placed for this shift yet).
+            const hasOverlayData = savedData && (savedData.found || savedData.carried);
+
+            if (hasOverlayData) {
+                applySavedOverlay(savedData);
+            } else {
+                console.warn('No saved report found for', reportDate, shift);
+            }
+
+        } catch (err) {
+            console.error('Preview failed:', err);
+            alert('Something went wrong loading the preview. Check console for details.');
+        } finally {
+            document.getElementById("previewLoader").style.display = "none";
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
     //  APPLY SAVED OVERLAY
     // ══════════════════════════════════════════════════════════════════════════════
     function applySavedOverlay(savedData) {
@@ -1724,33 +1971,18 @@
         if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
         if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
 
-        // ── Berth layout ────────────────────────────────────────────────────────
-        if (savedData.berth_layout && savedData.berth_layout.length > 0) {
-            // Clear current board
-            document.querySelectorAll('.matrix-dropzone').forEach(z => {
-                z.classList.add('empty-slot');
-                z.innerHTML = '—';
-            });
-            document.getElementById('waitingAreaZone').innerHTML = '';
 
-            savedData.berth_layout.forEach(item => {
-                if (item.berth === 'WAITING') {
-                    // Restore to waiting area
-                    const pill = buildWaitingPill(item);
-                    document.getElementById('waitingAreaZone').appendChild(pill);
-                } else {
-                    // Restore to berth cell
-                    const zone = document.querySelector(
-                        `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
-                    );
-                    if (!zone) return;
-                    zone.classList.remove('empty-slot');
-                    zone.innerHTML = buildBerthCard(item, item.balance);
-                }
-            });
-
-            updateInterfaceMetrics();
+        // Backend now guarantees the waiting-area portion of berth_layout is
+        // ALWAYS live (fetched fresh from _fetch_all_barges() at request time),
+        // never taken from a saved or carried-forward DB row. So both the
+        // `found` and `carried` cases can be painted the same way — no
+        // separate live-rebuild step is needed for waiting area anymore.
+        if (savedData.found || savedData.carried) {
+            paintFullSnapshot(savedData.berth_layout || []);
         }
+        // else: no saved/carried snapshot at all → leave whatever loadBerthOccupancy() already painted live.
+
+
 
         // ── WT @ R19 ────────────────────────────────────────────────────────────
         if (savedData.wt_r19) {
@@ -1767,7 +1999,7 @@
                 if (val !== undefined) td.textContent = val;
             });
         }
-        //on the way to dharamtar
+        // on the way to dharamtar
         if (savedData.eta_to_dharamtar) {
             document.querySelectorAll('[data-field="eta_to_dharamtar"]').forEach(td => {
                 const val = savedData.eta_to_dharamtar[td.dataset.vessel];
@@ -1788,15 +2020,40 @@
         if (savedData.notes && savedData.notes.length > 0) {
             const list = document.getElementById('notesLogList');
             list.innerHTML = '';
-            savedData.notes.forEach((text, i) => {
-                const row = document.createElement('div');
-                row.className = 'note-entry-row';
-                row.innerHTML = `
-                <span class="note-index">${i + 1}</span>
-                <div class="note-text" contenteditable="true" oninput="markUnsaved()">${escHtml(text)}</div>
-                <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
-                list.appendChild(row);
-            });
+
+            if (savedData.notes && savedData.notes.length > 0) {
+
+                savedData.notes.forEach((text, i) => {
+                    const row = document.createElement('div');
+                    row.className = 'note-entry-row';
+                    row.innerHTML = `
+    <span class="note-index">${i + 1}</span>
+
+    <div class="note-text"
+         contenteditable="true"
+         spellcheck="false"
+         data-placeholder="Enter note..."
+         oninput="markUnsaved();togglePlaceholder(this)"
+         onfocus="togglePlaceholder(this)"
+         onblur="togglePlaceholder(this)">${escHtml(text || '')}</div>
+
+    <button class="remove-row-btn"
+            onclick="removeNoteRow(this)"
+            title="Remove Note">✕</button>
+`;
+                    list.appendChild(row);
+                });
+
+            } else {
+
+                list.innerHTML = `
+        <div class="note-entry-row">
+            <span class="note-index">1</span>
+            <div class="note-text" contenteditable="true" oninput="markUnsaved()"></div>
+            <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>
+        </div>
+    `;
+            }
         }
 
         // ── Movement Logs ────────────────────────────────────────────────────────
@@ -1809,10 +2066,10 @@
                 const item = document.createElement('div');
                 item.className = 'log-item';
                 item.innerHTML = `
-                    <strong>${log.name}</strong> — Moved<br>
-                    <span>${log.from} → ${log.to}</span><br>
-                    <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
-                    <span>Shift Incharge: ${log.shiftIncharge}</span>`;
+            <strong>${log.name}</strong> — Moved<br>
+            <span>${log.from} → ${log.to}</span><br>
+            <span>📅 ${log.reportDate} &nbsp;|&nbsp; 🕒 ${log.time} &nbsp;|&nbsp; Shift: ${log.shift}</span><br>
+            <span>Shift Incharge: ${log.shiftIncharge}</span>`;
                 logConsole.prepend(item);
             });
             document.getElementById('logCount').textContent = _movementLogs.length;
@@ -1837,7 +2094,101 @@
 
         // Mark as clean (no unsaved changes yet)
         _unsaved = false;
-        setSaveStatus('saved', '✓ Loaded from saved report');
+        setSaveStatus('saved', savedData.found
+            ? '✓ Loaded from saved report'
+            : '◐ Carried over from previous shift');
+    }
+
+    // ── Case 1 helper: paint the FULL frozen snapshot (berths + waiting area) ──
+    function paintFullSnapshot(layout) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+        document.getElementById('waitingAreaZone').innerHTML = '';
+
+        layout.forEach(item => {
+            if (item.berth === 'WAITING') {
+                const live = (_currentItems || []).find(x =>
+                    String(x.id) === String(item.id) &&
+                    String(x.type) === String(item.type)
+                );
+
+                if (live && Number(live.balance_qty) <= 0) {
+                    return;
+                }
+
+                document.getElementById('waitingAreaZone').appendChild(
+                    buildWaitingPill(live || item)
+                );
+            } else {
+                const zone = document.querySelector(
+                    `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+                );
+                if (!zone) return;
+                zone.classList.remove('empty-slot');
+                const live = (_currentItems || []).find(x =>
+                    String(x.id) === String(item.id) &&
+                    String(x.type) === String(item.type)
+                );
+
+                // If completed, don't display it
+                if (live && Number(live.balance_qty) <= 0) {
+                    return;
+                }
+
+                zone.innerHTML = buildBerthCard(
+                    live || item,
+                    live ? live.balance_qty : item.balance
+                );
+            }
+        });
+
+        updateInterfaceMetrics();
+    }
+
+    // ── Case 2 helper (part A): paint ONLY berth placements from carried-forward data ──
+    function paintBerthsOnly(berthItems) {
+        document.querySelectorAll('.matrix-dropzone').forEach(z => {
+            z.classList.add('empty-slot');
+            z.innerHTML = '—';
+        });
+
+        berthItems.forEach(item => {
+            const zone = document.querySelector(
+                `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
+            );
+            if (!zone) return;
+            zone.classList.remove('empty-slot');
+            zone.innerHTML = buildBerthCard(item, item.balance);
+        });
+    }
+
+    // ── Case 2 helper (part B): rebuild Waiting Area from LIVE data (_currentItems) ──
+    // Anything currently in "Waiting" or "Under Discharge" status that is NOT
+    // already placed on a berth (per the carried-forward berth layout) gets shown here.
+    function rebuildWaitingAreaFromLive(placedBerthItems) {
+        const placedNames = new Set(
+            placedBerthItems.map(i => (i.name || '').toUpperCase())
+        );
+
+        document.getElementById('waitingAreaZone').innerHTML = '';
+
+        (_currentItems || []).forEach(item => {
+            if (item.status === 'Completed') return;
+            if (item.status === 'Discharging') return;   // that belongs on a berth, not here
+
+            const key = (item.name || item.barge_name || '').toUpperCase();
+            if (placedNames.has(key)) return;
+
+            document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
+                ...item,
+                balance: item.balance_qty ?? item.balance,
+                total: item.total_qty ?? item.total ?? item.qty,
+            }));
+        });
+
+        updateInterfaceMetrics();
     }
 
     function escHtml(str) {
@@ -1873,15 +2224,19 @@
         <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal:</b> ${bal.toLocaleString()} MT</div>`;
         return pill;
     }
-
+    
     function buildBerthCard(item, balance) {
-        const bal = parseFloat(balance || 0);
-        const unloadStarted =
-            (item.unloading_commenced && String(item.unloading_commenced).trim() !== '') ||
-            (item.commence_discharge_berth && String(item.commence_discharge_berth).trim() !== '');
 
-        const cardClass = unloadStarted ? 'discharging' : 'waiting-discharge';
+        const bal = parseFloat(balance || 0);
         const bl = parseFloat(item.total || item.qty || 0);
+
+        let cardClass = "waiting-discharge";
+
+        if (item.status === "Under Discharge") {
+            cardClass = "discharging";
+        } else if (item.status === "Completed") {
+            cardClass = "completed-discharge";
+        }
 
         return `
     <div class="berth-allocated-card ${cardClass} draggable-node"
@@ -1892,17 +2247,18 @@
          data-qty="${bl}"
          data-total="${bl}"
          data-balance="${bal}"
+         data-status="${item.status || ''}"
          data-discharge="${item.discharge || 0}"
          data-type="${item.type || 'BARGE'}"
          data-unloading-commenced="${item.unloading_commenced || ''}"
          data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
+
         <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
         <div class="berth-card-cargo">${item.cargo || ''}</div>
         <div class="berth-card-metrics"><b>BL :</b> ${bl.toLocaleString()} MT</div>
         <div class="berth-card-metrics" style="color:#b45309;"><b>Bal :</b> ${bal.toLocaleString()} MT</div>
     </div>`;
     }
-
     // ══════════════════════════════════════════════════════════════════════════════
     //  MOTHER VESSEL  (live refresh)
     // ══════════════════════════════════════════════════════════════════════════════
@@ -2219,6 +2575,81 @@
 
     function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
 
+    function closeMovementLogs() { document.getElementById('logsModal').style.display = 'none'; }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    //  MOVEMENT LOGS — DATE RANGE DOWNLOAD
+    // ══════════════════════════════════════════════════════════════════════════════
+    function openLogsRangeDownloadPopup() {
+        const reportDate = document.getElementById('report-date').value;
+        document.getElementById('logsRangeFromDate').value = reportDate;
+        document.getElementById('logsRangeToDate').value = reportDate;
+        document.getElementById('logsRangeError').style.display = 'none';
+        document.getElementById('logsRangeModal').style.display = 'block';
+    }
+
+    function closeLogsRangeDownloadPopup() {
+        document.getElementById('logsRangeModal').style.display = 'none';
+    }
+
+    async function downloadMovementLogsRangeExcel() {
+        const fromDate = document.getElementById('logsRangeFromDate').value;
+        const toDate = document.getElementById('logsRangeToDate').value;
+        const errBox = document.getElementById('logsRangeError');
+        errBox.style.display = 'none';
+
+        if (!fromDate || !toDate) {
+            errBox.textContent = 'Please select both From Date and To Date.';
+            errBox.style.display = 'block';
+            return;
+        }
+        if (fromDate > toDate) {
+            errBox.textContent = 'From Date cannot be after To Date.';
+            errBox.style.display = 'block';
+            return;
+        }
+
+        document.getElementById("excelLoader").style.display = "flex";
+
+        try {
+            const params = new URLSearchParams({ from_date: fromDate, to_date: toDate });
+            const response = await fetch(`/api/module/RP01/download-movement-logs-range-excel?${params}`);
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = `Movement_Logs_${fromDate}_to_${toDate}.xlsx`;
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            closeLogsRangeDownloadPopup();
+
+        } catch (err) {
+            console.error('Range download failed:', err);
+            errBox.textContent = 'Download failed. Please try again.';
+            errBox.style.display = 'block';
+        } finally {
+            document.getElementById("excelLoader").style.display = "none";
+        }
+    }
+
+    window.addEventListener('click', e => {
+        const rm = document.getElementById('logsRangeModal');
+        if (e.target === rm) rm.style.display = 'none';
+    });
+
     window.addEventListener('click', e => {
         const m = document.getElementById('logsModal');
         if (e.target === m) m.style.display = 'none';
@@ -2230,13 +2661,26 @@
     function addNoteRow() {
         const list = document.getElementById('notesLogList');
         const row = document.createElement('div');
+
         row.className = 'note-entry-row';
         row.innerHTML = `
         <span class="note-index">${list.children.length + 1}</span>
-        <div class="note-text" contenteditable="true" oninput="markUnsaved()">New note…</div>
-        <button class="remove-row-btn" onclick="removeNoteRow(this)">✕</button>`;
+
+        <div class="note-text"
+             contenteditable="true"
+             spellcheck="false"
+             data-placeholder="Enter note..."
+             oninput="markUnsaved();togglePlaceholder(this)"
+             onfocus="togglePlaceholder(this)"
+             onblur="togglePlaceholder(this)"></div>
+
+        <button class="remove-row-btn"
+                onclick="removeNoteRow(this)"
+                title="Remove Note">✕</button>
+    `;
+
         list.appendChild(row);
-        markUnsaved();
+        togglePlaceholder(row.querySelector('.note-text'));
     }
 
     function removeNoteRow(btn) {
@@ -2653,13 +3097,20 @@
     // ══════════════════════════════════════════════════════════════════════════════
     //  INIT
     // ══════════════════════════════════════════════════════════════════════════════
+    function getCurrentShiftCode() {
+        const hour = new Date().getHours();
+        if (hour >= 6 && hour < 14) return 'A';
+        if (hour >= 14 && hour < 22) return 'B';
+        return 'C'; // 22:00–06:00
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
         loadShiftDetails();
 
         const dateInput = document.getElementById('report-date');
         const shiftInput = document.getElementById('report-shift');
         dateInput.value = new Date().toISOString().slice(0, 10);
-        shiftInput.value = 'ALL';
+        shiftInput.value = getCurrentShiftCode();
 
         // Warn before leaving with unsaved changes
         window.addEventListener('beforeunload', e => {
@@ -2673,50 +3124,50 @@
         bindDropzones();
     });
     async function downloadModalExcel() {
-    if (!_modalExcelMode) return;
-    const reportDate = document.getElementById('report-date').value;
-    const shift = document.getElementById('report-shift').value;
+        if (!_modalExcelMode) return;
+        const reportDate = document.getElementById('report-date').value;
+        const shift = document.getElementById('report-shift').value;
 
-    try {
-        let response;
-        if (_modalExcelMode === 'logs') {
-            response = await fetch('/api/module/RP01/download-movement-logs-excel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    movement_logs: _modalExcelData,
-                    report_date: reportDate,
-                    shift: shift
-                }),
-            });
-        } else {
-            const params = new URLSearchParams({ date: reportDate, shift });
-            response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+        try {
+            let response;
+            if (_modalExcelMode === 'logs') {
+                response = await fetch('/api/module/RP01/download-movement-logs-excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        movement_logs: _modalExcelData,
+                        report_date: reportDate,
+                        shift: shift
+                    }),
+                });
+            } else {
+                const params = new URLSearchParams({ date: reportDate, shift });
+                response = await fetch(`/api/module/RP01/download-completed-excel?${params}`);
+            }
+
+            if (!response.ok) throw new Error('Download failed');
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+
+            const disposition = response.headers.get('Content-Disposition');
+            let filename = 'export.xlsx';
+            if (disposition) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error(err);
+            alert('Excel download failed.');
         }
-
-        if (!response.ok) throw new Error('Download failed');
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-
-        const disposition = response.headers.get('Content-Disposition');
-        let filename = 'export.xlsx';
-        if (disposition) {
-            const match = disposition.match(/filename="?([^"]+)"?/);
-            if (match) filename = match[1];
-        }
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-    } catch (err) {
-        console.error(err);
-        alert('Excel download failed.');
     }
-}
 </script>
 {% endraw %}
 

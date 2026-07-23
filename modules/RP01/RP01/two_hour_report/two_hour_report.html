@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+
+{% block title %}Two-Hour Discharge Report - PORTMAN{% endblock %}
+
+{% block content %}
+<style>
+    .thr-filter-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 14px;
+        flex-wrap: wrap;
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 18px;
+    }
+
+    .dark-theme .thr-filter-bar {
+        background: #1e293b;
+        border-color: #334155;
+    }
+
+    .thr-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .thr-field label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #4a5568;
+        letter-spacing: .3px;
+        text-transform: uppercase;
+    }
+
+    .dark-theme .thr-field label {
+        color: #94a3b8;
+    }
+
+    .thr-field input {
+        padding: 7px 10px;
+        border: 1px solid #cbd5e0;
+        border-radius: 5px;
+        font-size: 13px;
+        background: #fff;
+        min-width: 150px;
+    }
+
+    .dark-theme .thr-field input {
+        background: #0f172a;
+        color: #e2e8f0;
+        border-color: #334155;
+    }
+
+    .thr-preview-btn {
+        background: #2b6cb0;
+        color: #fff;
+        border: none;
+        padding: 9px 22px;
+        border-radius: 5px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        letter-spacing: .3px;
+    }
+
+    .thr-preview-btn:hover {
+        background: #2c5282;
+    }
+
+    .thr-preview-btn:disabled {
+        background: #a0aec0;
+        cursor: default;
+    }
+
+    .thr-status {
+        font-size: 12px;
+        color: #718096;
+        margin-left: 4px;
+    }
+
+    .thr-report-title {
+        background: #f6c9b0;
+        color: #c0392b;
+        font-weight: 700;
+        font-size: 14px;
+        text-align: center;
+        padding: 8px;
+        border: 1px solid #d9822b;
+    }
+
+    table.thr-table {
+        border-collapse: collapse;
+        width: 100%;
+        max-width: 900px;
+        font-size: 13px;
+        margin-bottom: 26px;
+    }
+
+    table.thr-table th,
+    table.thr-table td {
+        border: 1px solid #d9822b;
+        padding: 6px 10px;
+        text-align: center;
+    }
+
+    .thr-col-header {
+        background: #2c6ba0;
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .thr-subheader {
+        background: #eaf2fb;
+        font-weight: 700;
+        color: #1a365d;
+    }
+
+    .thr-berth-cell {
+        background: #f9dcc4;
+        color: #c0392b;
+        font-weight: 700;
+    }
+
+    .thr-throughput-cell {
+        background: #d6e9f8;
+        font-weight: 700;
+    }
+
+    .thr-total-row td {
+        background: #cfe6fb;
+        font-weight: 700;
+    }
+
+    .thr-empty {
+        color: #a0aec0;
+        font-style: italic;
+        padding: 24px;
+        text-align: center;
+    }
+
+    .thr-shift-table {
+        border-collapse: collapse;
+        max-width: 320px;
+        font-size: 13px;
+    }
+
+    .thr-shift-table td,
+    .thr-shift-table th {
+        border: 1px solid #d9822b;
+        padding: 6px 10px;
+    }
+
+    .thr-shift-table th {
+        background: #eaf2fb;
+        text-align: left;
+    }
+
+    .thr-shift-table td:last-child {
+        text-align: right;
+        font-weight: 600;
+    }
+
+    .thr-shift-table .thr-total-row td {
+        background: #cfe6fb;
+        font-weight: 700;
+    }
+
+    .thr-section-label {
+        font-weight: 700;
+        font-size: 13px;
+        color: #1a365d;
+        margin: 6px 0 8px;
+    }
+
+    .page-header {
+        margin-bottom: 15px;
+    }
+
+    .page-header h2 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .breadcrumb-wrapper {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 15px;
+    }
+
+    .breadcrumb-wrapper a {
+        color: #3b82f6;
+        text-decoration: none;
+    }
+
+    .thr-field select {
+        padding: 7px 10px;
+        border: 1px solid #cbd5e0;
+        border-radius: 5px;
+        min-width: 180px;
+    }
+</style>
+
+<div class="page-header">
+    <h2>
+        Two-Hour Discharge Report
+        <span class="badge badge-primary">RP01</span>
+    </h2>
+    <hr>
+    <div class="breadcrumb-wrapper">
+        <a href="/module/RP01/">Reports</a> &rsaquo;
+        <span>Two-Hour Discharge Report</span>
+    </div>
+</div>
+
+<div class="thr-filter-bar">
+    <div class="thr-field">
+        <label for="thrDate">Date</label>
+        <input type="date" id="thrDate">
+    </div>
+    <div class="thr-field">
+        <label for="thrFrom">From Time</label>
+        <input type="text" id="thrFrom" placeholder="HH:MM" maxlength="5">
+    </div>
+    <div class="thr-field">
+        <label for="thrTo">To Time</label>
+        <input type="text" id="thrTo" placeholder="HH:MM" maxlength="5">
+    </div>
+    <div class="thr-field">
+        <label>Cargo</label>
+        <select id="thrCargo">
+            <option value="">All Cargo</option>
+        </select>
+    </div>
+    <button class="thr-preview-btn" id="thrPreviewBtn" onclick="loadTwoHourReport()">Preview</button>
+    <span class="thr-status" id="thrStatus"></span>
+</div>
+
+<div id="thrReportOutput"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Auto-insert colon after 2 digits, same UX as the LUEU01 time editor
+    function attachHHMMMask(input) {
+        input.addEventListener('input', function () {
+            var raw = input.value.replace(/[^\d]/g, '');
+            var out = '';
+            for (var i = 0; i < raw.length && i < 4; i++) {
+                if (i === 2) out += ':';
+                out += raw[i];
+            }
+            input.value = out;
+        });
+    }
+    attachHHMMMask(document.getElementById('thrFrom'));
+    attachHHMMMask(document.getElementById('thrTo'));
+
+    (function setDefaults() {
+        document.getElementById('thrDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('thrFrom').value = '06:00';
+        document.getElementById('thrTo').value = '08:00';
+    })();
+
+    function fmtQty(v) {
+        if (v === null || v === undefined || v === '') return '—';
+        return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
+    function renderTwoHourReport(data) {
+        const out = document.getElementById('thrReportOutput');
+
+        if (!data.berths || data.berths.length === 0) {
+            out.innerHTML = '<div class="thr-empty">No discharge found for this date / time window.</div>';
+            renderShiftTable(data.shift_totals, data.date_label);
+            return;
+        }
+
+        let rowsHtml = '';
+
+        data.berths.forEach(function (b) {
+
+            const lineCount = b.lines.length;
+
+            b.lines.forEach(function (line, idx) {
+
+                rowsHtml += '<tr>';
+
+                if (idx === 0) {
+                    rowsHtml += '<td class="thr-berth-cell" rowspan="' + lineCount + '">' + b.berth + '</td>';
+                    rowsHtml += '<td class="thr-throughput-cell" rowspan="' + lineCount + '">' + fmtQty(b.throughput) + '</td>';
+                }
+
+                rowsHtml += '<td>' + line.barge_name + '</td>';
+                rowsHtml += '<td>' + line.cargo_name + '</td>';
+                rowsHtml += '<td>' + fmtQty(line.disch_qty) + '</td>';
+                rowsHtml += '<td>' + fmtQty(line.bal_qty) + '</td>';
+                rowsHtml += '<td>' + (line.delay_name || '—') + '</td>';
+                rowsHtml += '</tr>';
+
+            });
+
+        });
+
+        const html = `
+            <table class="thr-table">
+                <tr><td class="thr-report-title" colspan="7">${data.title}${data.date_label ? ' — ' + data.date_label : ''}</td></tr>
+                <tr>
+                    <th class="thr-col-header" rowspan="2">Berth</th>
+                    <th class="thr-col-header" rowspan="2">Throughput</th>
+                    <th class="thr-col-header" colspan="5">Present Status</th>
+                </tr>
+                <tr>
+                    <th class="thr-subheader">Barge/MBC</th>
+                    <th class="thr-subheader">Cargo</th>
+                    <th class="thr-subheader">Disch Qty.</th>
+                    <th class="thr-subheader">Bal Qty.</th>
+                    <th class="thr-subheader">Delay</th>
+                </tr>
+                ${rowsHtml}
+                <tr class="thr-total-row">
+                    <td>Total</td>
+                    <td>${fmtQty(data.grand_total)} MT</td>
+                    <td colspan="5"></td>
+                </tr>
+            </table>
+        `;
+        out.innerHTML = html;
+        renderShiftTable(data.shift_totals, data.date_label);
+    }
+
+    function renderShiftTable(shiftTotals, dateLabel) {
+        const out = document.getElementById('thrReportOutput');
+        const selectedCargo = document.getElementById("thrCargo").value;
+        if (!shiftTotals) return;
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <div class="thr-section-label">Shift Wise Discharge${dateLabel ? ' — ' + dateLabel : ''}</div>
+            <table class="thr-shift-table">
+                <tr><th>A Shift</th><td>${fmtQty(shiftTotals.A)} MT</td></tr>
+                <tr><th>B Shift</th><td>${fmtQty(shiftTotals.B)} MT</td></tr>
+                <tr><th>C Shift</th><td>${fmtQty(shiftTotals.C)} MT</td></tr>
+                <tr class="thr-total-row"><th>Total Discharge</th><td>${fmtQty(shiftTotals.total)} MT</td></tr>
+            </table>
+        `;
+        out.appendChild(div);
+    }
+
+    async function loadTwoHourReport() {
+        const entryDate = document.getElementById('thrDate').value;
+        const fromTime = document.getElementById('thrFrom').value.trim();
+        const toTime = document.getElementById('thrTo').value.trim();
+        const status = document.getElementById('thrStatus');
+        const btn = document.getElementById('thrPreviewBtn');
+
+        if (!entryDate || !/^\d{2}:\d{2}$/.test(fromTime) || !/^\d{2}:\d{2}$/.test(toTime)) {
+            status.textContent = 'Please enter a date and both times in HH:MM format.';
+            return;
+        }
+
+        btn.disabled = true;
+        status.textContent = 'Loading...';
+        try {
+            const params = new URLSearchParams({
+                entry_date: entryDate,
+                from_time: fromTime,
+                to_time: toTime,
+                cargo: document.getElementById("thrCargo").value
+            });
+            const res = await fetch('/api/module/RP01/two-hour-report/preview?' + params.toString());
+            const data = await res.json();
+            const cargo = document.getElementById("thrCargo");
+
+
+
+            const selected = cargo.value;
+
+            cargo.innerHTML = '<option value="">All Cargo</option>';
+
+            (data.cargo_options || []).forEach(c => {
+                cargo.innerHTML += `<option value="${c}">${c}</option>`;
+            });
+
+            cargo.value = selected;
+            if (data.error) {
+                status.textContent = data.error;
+            } else {
+                status.textContent = '';
+                window.lastTwoHourData = data;
+                renderTwoHourReport(data);
+
+            }
+        } catch (e) {
+            status.textContent = 'Failed to load report.';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+
+    // Load once on page open with the default 06:00-08:00 window
+    loadTwoHourReport();
+</script>
+{% endblock %}
