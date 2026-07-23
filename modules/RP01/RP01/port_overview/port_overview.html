@@ -280,18 +280,20 @@ function renderBerths(layout) {
 
     const th = (b.angle || 0) * Math.PI / 180;
     const cos = Math.cos(th), sin = Math.sin(th);
-    const len  = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // long axis, image px
-    const beam = Math.max(len * 0.3, 6);                        // short axis, image px
+    const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
+    const MBC_LEN = 80;                                             // MBCs are one fixed size
 
     // Group by bank tier: A/S hugs the jetty face, D/B sits outboard of it, etc.
     const tiers = {};
     assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
 
     Object.entries(tiers).forEach(([t, list]) => {
-      const inset = b.w / 2 - beam / 2 - (+t) * (beam + 2);
-      const ex = b.cx + inset * cos, ey = b.cy + inset * sin;
       const slot = (b.h || 60) / list.length;
       list.forEach((a, i) => {
+        const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
+        const beam = Math.max(len * 0.3, 6);
+        const inset = b.w / 2 - beam / 2 - (+t) * (beam + 2);
+        const ex = b.cx + inset * cos, ey = b.cy + inset * sin;
         const s = (i - (list.length - 1) / 2) * slot; // along-edge offset
         const px = ex - s * sin, py = ey + s * cos;
 
