@@ -1481,6 +1481,14 @@ def api_shift_report_load():
 
                 item["cargo"] = live.get("cargo", item.get("cargo", ""))
                 item["status"] = live.get("status", item.get("status"))
+                # NEW — keep discharge-start signals live too, since the card's
+                # color is now driven by these fields instead of `status` alone.
+                item["commence_discharge_berth"] = live.get(
+                    "commence_discharge_berth", item.get("commence_discharge_berth", "")
+                )
+                item["unloading_commenced"] = live.get(
+                    "unloading_commenced", item.get("unloading_commenced", "")
+                )
 
         berth_layout_out.extend(waiting_area_out)
 

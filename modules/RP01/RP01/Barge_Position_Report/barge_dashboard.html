@@ -2114,12 +2114,20 @@
                     String(x.type) === String(item.type)
                 );
 
-                if (live && Number(live.balance_qty) <= 0) {
-                    return;
+                const effectiveBalance = live
+                    ? Number(live.balance_qty)
+                    : Number(item.balance ?? item.balance_qty ?? 0);
+
+                if (effectiveBalance <= 0) {
+                    return;   // now guaranteed, regardless of whether `live` matched
                 }
 
                 document.getElementById('waitingAreaZone').appendChild(
-                    buildWaitingPill(live || item)
+                    buildWaitingPill(live ? {
+                        ...live,
+                        balance: live.balance_qty,
+                        total: live.total_qty ?? live.qty,
+                    } : item)
                 );
             } else {
                 const zone = document.querySelector(
@@ -2224,18 +2232,23 @@
         <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal:</b> ${bal.toLocaleString()} MT</div>`;
         return pill;
     }
-    
-    function buildBerthCard(item, balance) {
 
+    function buildBerthCard(item, balance) {
         const bal = parseFloat(balance || 0);
         const bl = parseFloat(item.total || item.qty || 0);
 
-        let cardClass = "waiting-discharge";
+        const unloadingCommenced = String(item.unloading_commenced || '').trim();
+        const commenceDischargeBerth = String(item.commence_discharge_berth || '').trim();
+        const unloadStarted =
+            !!unloadingCommenced ||
+            !!commenceDischargeBerth ||
+            item.status === "Under Discharge";   // fallback for legacy/edge cases
 
-        if (item.status === "Under Discharge") {
-            cardClass = "discharging";
-        } else if (item.status === "Completed") {
+        let cardClass = "waiting-discharge";
+        if (item.status === "Completed") {
             cardClass = "completed-discharge";
+        } else if (unloadStarted) {
+            cardClass = "discharging";
         }
 
         return `
