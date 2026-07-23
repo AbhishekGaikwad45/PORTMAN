@@ -406,6 +406,12 @@ if (Number(data.cement_plant_delay_hours || 0) > 0) {
     );
 }
 
+if (Number(data.bad_weather_delay_hours || 0) > 0) {
+    lines.push(
+        `  ${delaySr++}. Bad Weather - ${Number(data.bad_weather_delay_hours).toFixed(2)} Hrs.`
+    );
+}
+
     return lines.join('\n');
 }
 
@@ -703,6 +709,15 @@ if (Number(data.cement_plant_delay_hours || 0) > 0) {
         <li>
             Non Availability of Cement Plant System -
             ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.
+        </li>
+    `;
+}
+
+if (Number(data.bad_weather_delay_hours || 0) > 0) {
+    html += `
+        <li>
+            Bad Weather -
+            ${Number(data.bad_weather_delay_hours).toFixed(2)} Hrs.
         </li>
     `;
 }
