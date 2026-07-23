@@ -9,7 +9,7 @@ from database import get_db, get_cursor
 from ..daily_ops.views import _compute_fy_throughput
 from ..daily_ops.model import fy_label
 from ..shift_report.views import _fetch_delays
-from ..Barge_Position_Report.views import _fetch_tide_data
+from ..Barge_Position_Report.views import _fetch_tide_data, _fetch_all_barges
 
 IMAGE_SIZE = (941, 1672)  # static/img/Clean_berths.png natural pixel size
 
@@ -67,39 +67,55 @@ def _load_berth_layout():
     return {'image': 'Clean_berths.png', 'image_size': list(IMAGE_SIZE), 'berths': berths}
 
 
+# Bank position -> tier outboard of the jetty face (A/S hugs the berth,
+# D/B is double-banked outboard of it, and so on).
+_TIER = {'A/S': 0, 'D/B': 1, 'T/B': 2, 'F/B': 3, 'S/B': 4}
+
+
 def _fetch_berth_occupancy():
-    """Today's active barges/MBCs per berth, from LUEU (today's entries)."""
-    today_s = date.today().strftime('%Y-%m-%d')
+    """Latest saved Barge Position berth layout, refreshed with live balances."""
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute("""
-        SELECT berth_name, source_type,
-               COALESCE(barge_name, '') AS barge_name,
-               MAX(source_display) AS source_display,
-               COALESCE(MAX(cargo_name), '') AS cargo_name
-        FROM lueu_lines
-        WHERE entry_date = %s AND is_deleted IS NOT TRUE
-          AND berth_name IS NOT NULL AND berth_name != ''
-          AND (
-              source_type = 'MBC'
-              OR (source_type = 'VCN' AND barge_name IS NOT NULL AND barge_name != '')
-          )
-        GROUP BY berth_name, source_type, barge_name
-        ORDER BY berth_name
-    """, (today_s,))
-    rows = cur.fetchall()
+        SELECT berth_layout FROM barge_position_report
+        ORDER BY report_date DESC, updated_at DESC
+        LIMIT 1
+    """)
+    row = cur.fetchone()
     conn.close()
+    layout = (row['berth_layout'] if row else []) or []
+    if isinstance(layout, str):
+        try:
+            layout = json.loads(layout)
+        except Exception:
+            layout = []
+
+    live_rows, _ = _fetch_all_barges()
+    live = {(b.get('name') or '').strip().upper(): b for b in live_rows}
 
     occupancy = {}
-    for r in rows:
-        berth = (r['berth_name'] or '').strip().upper()
-        name = (r['barge_name'] or r['source_display'] or '').strip()
-        if not berth or not name:
+    for item in layout:
+        berth = (item.get('berth') or '').strip().upper()
+        name = (item.get('name') or '').strip()
+        if not berth or berth == 'WAITING' or not name:
             continue
+        lv = live.get(name.upper())
+        if lv and float(lv.get('balance_qty') or 0) <= 0:
+            continue  # completed since the layout was saved
+        commenced = (item.get('unloading_commenced') or item.get('commence_discharge_berth') or '').strip()
+        if not commenced and lv:
+            commenced = (lv.get('unloading_commenced') or lv.get('commence_discharge_berth') or '').strip()
+        position = (item.get('position') or 'A/S').upper()
         occupancy.setdefault(berth, []).append({
-            'type':  r['source_type'],
-            'name':  name,
-            'cargo': r['cargo_name'] or '',
+            'name':        name,
+            'type':        (item.get('type') or 'BARGE').upper(),
+            'cargo':       (lv.get('cargo') if lv else None) or item.get('cargo') or '',
+            'position':    position,
+            'tier':        _TIER.get(position, 0),
+            'total_qty':   float((lv.get('total_qty') if lv else None) or item.get('total') or item.get('qty') or 0),
+            'balance_qty': float((lv.get('balance_qty') if lv else None) or item.get('balance') or 0),
+            'status':      'Discharging' if commenced else 'Waiting',
+            'commenced':   commenced,
         })
     return occupancy
 
