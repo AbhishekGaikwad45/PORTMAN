@@ -2101,6 +2101,10 @@
 
     // ── Case 1 helper: paint the FULL frozen snapshot (berths + waiting area) ──
     function paintFullSnapshot(layout) {
+        console.groupCollapsed('[BPR] paintFullSnapshot — saved layout vs live');
+        console.log('[BPR] live items from /berth-occupancy:', (_currentItems || []).map(x =>
+            ({ id: x.id, type: x.type, name: x.name, status: x.status, balance: x.balance_qty })));
+
         document.querySelectorAll('.matrix-dropzone').forEach(z => {
             z.classList.add('empty-slot');
             z.innerHTML = '—';
@@ -2119,9 +2123,11 @@
                     : Number(item.balance ?? item.balance_qty ?? 0);
 
                 if (effectiveBalance <= 0) {
+                    console.log(`[BPR] ${item.name} (WAITING): balance ${effectiveBalance} <= 0 — hidden`);
                     return;   // now guaranteed, regardless of whether `live` matched
                 }
 
+                console.log(`[BPR] ${item.name} (WAITING): live=${!!live}, balance ${effectiveBalance} — shown`);
                 document.getElementById('waitingAreaZone').appendChild(
                     buildWaitingPill(live ? {
                         ...live,
@@ -2142,7 +2148,14 @@
 
                 // If completed, don't display it
                 if (live && Number(live.balance_qty) <= 0) {
+                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live.balance_qty} <= 0 — hidden (completed)`);
                     return;
+                }
+
+                if (!live) {
+                    console.warn(`[BPR] ${item.name} @ ${item.berth}/${item.position}: NO live match for id=${item.id} type=${item.type} — painting STALE saved card (balance ${item.balance}). Completed/removed barges fall out of the live list, so if this one is done in LUEU01/LDUD, this is why it still shows.`);
+                } else {
+                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live.balance_qty} — painted`);
                 }
 
                 zone.innerHTML = buildBerthCard(
@@ -2152,6 +2165,7 @@
             }
         });
 
+        console.groupEnd();
         updateInterfaceMetrics();
     }
 
