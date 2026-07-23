@@ -2798,6 +2798,19 @@ def vessel_discharge_summary():
         print("WINDOW START:", window_start)
         print("WINDOW END:", window_end)
 
+        # ----------------------------------------------------------------
+        # FIX: vcn_cargo_declaration (cargo lines) and ldud_anchorage
+        # (anchorage/discharge legs) are BOTH one-to-many against
+        # ldud_header. Joining them directly in the same query and then
+        # SUM()-ing bl_quantity caused row fanout: if a vessel had 2
+        # ldud_anchorage rows, every cargo row got duplicated once per
+        # anchorage row, so SUM(bl_quantity) came out doubled (or worse).
+        #
+        # Fix: aggregate each side independently in its own LATERAL
+        # subquery (one row per ldud_header row), THEN join those
+        # pre-aggregated single rows together. No more fanout.
+        # ----------------------------------------------------------------
+
         query = """
 
         SELECT
@@ -2806,15 +2819,9 @@ def vessel_discharge_summary():
 
             lh.vessel_name,
 
-            STRING_AGG(
-                    DISTINCT TRIM(vcd.cargo_name),
-                    ', '
-                    ORDER BY TRIM(vcd.cargo_name)
-                ) AS cargo_name,
+            vcd.cargo_name,
 
-                SUM(
-                    COALESCE(vcd.bl_quantity, 0)
-                ) AS bl_quantity,
+            vcd.bl_quantity,
 
             ----------------------------------------------------------------
             -- VCN DOC NUMBER
@@ -2829,16 +2836,12 @@ def vessel_discharge_summary():
             ----------------------------------------------------------------
             -- DISCHARGE COMMENCED
             ----------------------------------------------------------------
-            MIN(
-                la.discharge_started
-            ) AS discharge_commenced,
+            anch.discharge_commenced,
 
             ----------------------------------------------------------------
             -- DISCHARGE COMPLETED
             ----------------------------------------------------------------
-            MAX(
-                la.discharge_commenced
-            ) AS discharge_completed,
+            anch.discharge_completed,
 
             ----------------------------------------------------------------
             -- TIME TAKEN IN HOURS
@@ -2848,9 +2851,9 @@ def vessel_discharge_summary():
                 EXTRACT(
                     EPOCH FROM
                     (
-                        MAX(la.discharge_commenced)
+                        anch.discharge_completed
                         -
-                        MIN(la.discharge_started)
+                        anch.discharge_commenced
                     )
                 ) / 3600,
 
@@ -2860,32 +2863,48 @@ def vessel_discharge_summary():
 
         FROM ldud_header lh
 
-        LEFT JOIN vcn_cargo_declaration vcd
-            ON lh.vcn_id = vcd.vcn_id
-
         LEFT JOIN vcn_header vh
             ON vh.id = lh.vcn_id
 
-        LEFT JOIN ldud_anchorage la
-            ON la.ldud_id = lh.id
+        LEFT JOIN LATERAL (
+
+            SELECT
+                STRING_AGG(
+                    DISTINCT TRIM(cargo_name),
+                    ', '
+                    ORDER BY TRIM(cargo_name)
+                ) AS cargo_name,
+
+                SUM(
+                    COALESCE(bl_quantity, 0)
+                ) AS bl_quantity
+
+            FROM vcn_cargo_declaration
+            WHERE vcn_id = lh.vcn_id
+
+        ) vcd ON TRUE
+
+        LEFT JOIN LATERAL (
+
+            SELECT
+                MIN(discharge_started)   AS discharge_commenced,
+                MAX(discharge_commenced) AS discharge_completed
+
+            FROM ldud_anchorage
+            WHERE ldud_id = lh.id
+
+        ) anch ON TRUE
 
         WHERE
 
-        la.discharge_commenced IS NOT NULL
+        anch.discharge_completed IS NOT NULL
 
-        AND la.discharge_commenced >= %s
-        AND la.discharge_commenced <  %s
-
-        GROUP BY
-
-            lh.id,
-            lh.vessel_name,
-            vh.load_port,
-            vh.vcn_doc_num
+        AND anch.discharge_completed >= %s
+        AND anch.discharge_completed <  %s
 
         ORDER BY
 
-            MAX(la.discharge_commenced)
+            anch.discharge_completed
 
         """
 
@@ -3039,7 +3058,6 @@ def vessel_discharge_summary():
         cur.close()
 
         conn.close()
-
 
 # =========================================================
 # FULL DAILY MIS REPORT EXCEL
