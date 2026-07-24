@@ -22,6 +22,7 @@
     <button class="tab-btn" onclick="showTab('mail')">Mail</button>
     <button class="tab-btn" onclick="showTab('logs')">Logs</button>
     <button class="tab-btn" onclick="showTab('cutover')">Cutover</button>
+    <button class="tab-btn" onclick="showTab('uninvoice')">Uninvoice</button>
 </div>
 
 <!-- User Management Tab -->
@@ -645,6 +646,37 @@
     </div>
 </div>
 
+<!-- Uninvoice Tab -->
+<div id="uninvoice-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Uninvoice — remove invoices with no SAP document</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            Lists invoices that were generated but have <strong>no SAP document number</strong> (never posted to SAP).
+            Uninvoicing <strong>deletes the invoice</strong> — freeing its number so the series continues with no gap —
+            and resets its bills from <em>Invoiced</em> back to <em>Approved</em> so they can be re-invoiced.
+            Cargo and bills are left intact. Invoices that already have a SAP document must be cancelled via FINV01 instead.
+        </p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadUninvoiceList()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="uninvoiceTable">
+            <thead>
+                <tr>
+                    <th>Invoice No</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th>Bills</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="uninvoiceBody"></tbody>
+        </table>
+    </div>
+</div>
+
 <style>
 .admin-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
 .tab-btn { padding: 8px 16px; border: none; background: #e2e8f0; cursor: pointer; border-radius: 4px 4px 0 0; }
@@ -843,6 +875,7 @@ function showTab(tab) {
     if (tab === 'logs') { loadLogs(); loadNginxConfig(); }
     if (tab === 'saptokens') loadSapTokens();
     if (tab === 'sapplay') { spgLoadSample(); }
+    if (tab === 'uninvoice') loadUninvoiceList();
 }
 
 let _newPwStrength = null;
@@ -1434,6 +1467,42 @@ async function resetMbcApproval(id, docNum) {
     const removed = data.docs_removed || 0;
     if (removed > 0) alert(`MBC reset to Draft. ${removed} proof document(s) deleted.`);
     loadMbcApprovals();
+}
+
+// ── Uninvoice Tab ────────────────────────────────────────────────────────────
+async function loadUninvoiceList() {
+    const res = await fetch('/admin/api/uninvoice/list');
+    const rows = await res.json();
+    const tbody = document.getElementById('uninvoiceBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">No invoices without a SAP document found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.invoice_number || ''}</td>
+            <td>${(r.invoice_date || '').toString().slice(0,10)}</td>
+            <td>${r.customer_name || ''}</td>
+            <td style="text-align:right;">${r.total_amount != null ? Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''}</td>
+            <td><span style="background:#fefcbf;color:#744210;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.invoice_status || ''}</span></td>
+            <td style="font-size:11px;">${r.bills || ''}</td>
+            <td>${r.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="doUninvoice(${r.id}, '${(r.invoice_number||'').replace(/'/g,"\\'")}')">Uninvoice</button></td>
+        </tr>
+    `).join('');
+}
+
+async function doUninvoice(id, num) {
+    if (!confirm(`Uninvoice "${num}"?\n\nThis permanently DELETES the invoice and resets its bills to Approved so they can be re-invoiced. The invoice number is freed for reuse.\n\nOnly do this for invoices that were NOT posted to SAP.`)) return;
+    const res = await fetch('/admin/api/uninvoice/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Invoice ${data.invoice_number} removed. Bills reset to Approved: ${(data.bills || []).join(', ') || '(none)'}`);
+    loadUninvoiceList();
 }
 
 // ── Mail Tab ─────────────────────────────────────────────────────────────────

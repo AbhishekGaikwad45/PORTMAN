@@ -714,6 +714,93 @@ def create_invoice_from_bills(bill_ids, invoice_data):
     return invoice_id, invoice_number
 
 
+def _can_uninvoice(invoice):
+    """Pure guard: may this invoice be removed via the admin Uninvoice tab?
+
+    Only invoices that never got a real SAP document (staging push only, or
+    not yet pushed) can be uninvoiced — a whitespace-only value counts as no
+    document. Anything already cancelled is refused. Returns (bool, reason)."""
+    if not invoice:
+        return False, 'Invoice not found'
+    if (invoice.get('sap_document_number') or '').strip():
+        return False, 'Invoice has a SAP document number — cancel it via FINV01 instead'
+    if invoice.get('invoice_status') == 'Cancelled':
+        return False, 'Invoice is already cancelled'
+    return True, ''
+
+
+def get_uninvoiceable_invoices():
+    """Invoices with no SAP document number, for the admin Uninvoice tab."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''
+        SELECT ih.id, ih.invoice_number, ih.invoice_date, ih.customer_name,
+               ih.total_amount, ih.invoice_status, ih.created_by,
+               COALESCE(string_agg(ibm.bill_number, ', ' ORDER BY ibm.id), '') AS bills
+        FROM invoice_header ih
+        LEFT JOIN invoice_bill_mapping ibm ON ibm.invoice_id = ih.id
+        WHERE COALESCE(ih.sap_document_number, '') = ''
+          AND ih.invoice_status <> 'Cancelled'
+        GROUP BY ih.id
+        ORDER BY ih.id DESC
+    ''')
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def uninvoice_invoice(invoice_id, username):
+    """Remove a mistakenly-generated invoice that was never posted to SAP.
+
+    Deletes the invoice (header + lines + mapping) so its doc_series_seq is
+    freed and the number can be reused with no gap, resets the linked bills
+    from 'Invoiced' back to 'Approved' so they can be re-invoiced, and drops any
+    non-sent SAP push job so the worker won't post it later. Cargo declarations
+    and service_records are left untouched — the bills stay valid and billed.
+    Refuses if a real SAP document exists (see _can_uninvoice).
+
+    Returns {'ok': bool, 'invoice_number', 'bills': [...], 'error'}."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT * FROM invoice_header WHERE id=%s FOR UPDATE', [invoice_id])
+        row = cur.fetchone()
+        invoice = dict(row) if row else None
+        ok, reason = _can_uninvoice(invoice)
+        if not ok:
+            conn.close()
+            return {'ok': False, 'error': reason}
+
+        cur.execute('SELECT bill_id, bill_number FROM invoice_bill_mapping WHERE invoice_id=%s',
+                    [invoice_id])
+        bills = [dict(r) for r in cur.fetchall()]
+
+        for b in bills:
+            cur.execute("UPDATE bill_header SET bill_status='Approved' WHERE id=%s", [b['bill_id']])
+
+        # Drop any queued/failed (or accepted-staging) SAP push for this invoice.
+        cur.execute('DELETE FROM sap_outbound_queue WHERE invoice_id=%s', [invoice_id])
+
+        cur.execute('DELETE FROM invoice_lines WHERE invoice_id=%s', [invoice_id])
+        cur.execute('DELETE FROM invoice_bill_mapping WHERE invoice_id=%s', [invoice_id])
+        cur.execute('DELETE FROM invoice_header WHERE id=%s', [invoice_id])
+
+        bill_nums = ', '.join(b['bill_number'] for b in bills) or '(none)'
+        comment = (f"Deleted invoice {invoice['invoice_number']} (no SAP doc); "
+                   f"bills reset to Approved: {bill_nums}")
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FINV01', %s, 'Uninvoiced by Admin', %s, %s)""",
+                    [invoice_id, comment, username])
+        conn.commit()
+        return {'ok': True, 'invoice_number': invoice['invoice_number'],
+                'bills': [b['bill_number'] for b in bills]}
+    except Exception as e:
+        conn.rollback()
+        return {'ok': False, 'error': str(e)}
+    finally:
+        conn.close()
+
+
 def get_invoice_lines(invoice_id):
     """Get all lines for an invoice"""
     conn = get_db()

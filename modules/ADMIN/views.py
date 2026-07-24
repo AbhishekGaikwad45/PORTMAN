@@ -1023,3 +1023,25 @@ def cutover_lock():
     d = request.json or {}
     cutover_mod.set_lock(bool(d.get('locked', True)), session.get('username'))
     return jsonify({'success': True, 'locked': cutover_mod.is_locked()})
+
+
+# ===== Uninvoice (remove invoices with no SAP document, reset bills) =====
+
+@bp.route('/api/uninvoice/list')
+@admin_required
+def uninvoice_list():
+    from modules.FIN01 import model as fin_model
+    return jsonify(fin_model.get_uninvoiceable_invoices())
+
+
+@bp.route('/api/uninvoice/do', methods=['POST'])
+@admin_required
+def uninvoice_do():
+    from modules.FIN01 import model as fin_model
+    invoice_id = (request.json or {}).get('id')
+    if not invoice_id:
+        return jsonify({'error': 'Missing id'}), 400
+    result = fin_model.uninvoice_invoice(invoice_id, session.get('username'))
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error', 'Uninvoice failed')}), 400
+    return jsonify({'success': True, **result})
