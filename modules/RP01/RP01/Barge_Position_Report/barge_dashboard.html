@@ -1480,6 +1480,7 @@
             <table class="shift-discharge-table" style="flex:1;min-width:320px;">
                 <thead>
                     <tr>
+                        <th>MBC NAME</th>
                         <th>CARGO</th>
                         <th>BERTH</th>
                         <th>CARGO BAL</th>
@@ -1487,7 +1488,7 @@
                 </thead>
                 <tbody id="berthDischargeBody">
                     <tr>
-                        <td colspan="3" style="text-align:center;color:#94a3b8;">Select date and Preview</td>
+                        <td colspan="4" style="text-align:center;color:#94a3b8;">Select date and Preview</td>
                     </tr>
                 </tbody>
             </table>
@@ -1689,7 +1690,9 @@
             bBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges/MBC under discharge</td></tr>';
         } else {
             data.berth_discharge.forEach(r => {
-                bBody.innerHTML += `<tr><td style="text-align:left;">${r.cargo}</td>
+                bBody.innerHTML += `<tr>
+                    <td style="text-align:left;">${r.mbc_name || ''}</td>
+                    <td style="text-align:left;">${r.cargo}</td>
                 <td>${r.berth}</td><td>${Number(r.balance).toLocaleString()}</td></tr>`;
             });
         }
@@ -1967,9 +1970,16 @@
     function applySavedOverlay(savedData) {
 
         // ── Meta fields ─────────────────────────────────────────────────────────
-        if (savedData.shift_incharge) document.getElementById('shiftInchargeName').value = savedData.shift_incharge;
-        if (savedData.bpo) document.getElementById('shiftBpoName').value = savedData.bpo;
-        if (savedData.crane_operator) document.getElementById('shiftIportName').value = savedData.crane_operator;
+        // Always set the values.
+        // If backend returns "", the fields become blank.
+        document.getElementById('shiftInchargeName').value =
+            savedData.shift_incharge || "";
+
+        document.getElementById('shiftBpoName').value =
+            savedData.bpo || "";
+
+        document.getElementById('shiftIportName').value =
+            savedData.crane_operator || "";
 
 
         // Backend now guarantees the waiting-area portion of berth_layout is
