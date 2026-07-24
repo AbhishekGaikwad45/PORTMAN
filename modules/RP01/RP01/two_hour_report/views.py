@@ -211,7 +211,7 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
           AND berth_name <> ''
           AND from_time >= %s
           AND from_time < %s
-          AND quantity > 0
+          AND quantity >= 0
           AND (%s = '' OR cargo_name = %s)
         GROUP BY
             berth_name,
@@ -253,7 +253,10 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
               AND COALESCE(l.cargo_name,'')=COALESCE(%s,'')
               AND l.is_deleted IS NOT TRUE
               AND l.delay_name IS NOT NULL
-              AND d.type IN ('RMHS Delays','Maintenance Delays')
+              AND (
+                d.type IN ('RMHS Delays', 'Maintenance Delays')
+                OR l.delay_name = 'No Dumper'
+            )
             ORDER BY d.type,l.from_time
         """, [
             entry_date,
