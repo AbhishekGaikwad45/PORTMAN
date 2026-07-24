@@ -297,10 +297,14 @@
 
     .berth-allocated-card.discharging {
         background: #32df6e;
+        border: 2px solid #15803d;
+        box-shadow: 0 4px 10px rgba(21, 128, 61, .25);
     }
 
     .berth-allocated-card.waiting-discharge {
         background: #43e6f1;
+        border: 2px solid #0891b2;
+        box-shadow: 0 4px 10px rgba(8, 145, 178, .25);
     }
 
     .berth-allocated-card.completed-discharge {
@@ -1014,6 +1018,19 @@
     .remove-row-btn:hover {
         background: #fee2e2;
         color: #dc2626;
+    }
+
+    .berth-allocated-card.discharge-completed {
+        background: linear-gradient(135deg, #facc15, #eab308);
+        border: 2px solid #ca8a04;
+        color: #111827;
+        box-shadow: 0 8px 18px rgba(234, 179, 8, 0.35);
+    }
+
+    .berth-allocated-card.discharge-completed .berth-card-title,
+    .berth-allocated-card.discharge-completed .berth-card-cargo,
+    .berth-allocated-card.discharge-completed .berth-card-metrics {
+        color: #111827;
     }
 </style>
 
@@ -1786,6 +1803,7 @@
                     id: card.dataset.id || '',
                     name: card.dataset.name || '',
                     cargo: card.dataset.cargo || '',
+                    status: card.dataset.status || '',
                     qty: parseFloat(card.dataset.qty || 0),
                     balance: parseFloat(card.dataset.balance || 0),
                     discharge: parseFloat(card.dataset.discharge || 0),
@@ -1805,6 +1823,7 @@
                     id: pill.dataset.id || '',
                     name: pill.dataset.name || '',
                     cargo: pill.dataset.cargo || '',
+                    status: pill.dataset.status || '',
                     qty: parseFloat(pill.dataset.qty || 0),
                     balance: parseFloat(pill.dataset.balance || 0),
                     total: parseFloat(pill.dataset.total || pill.dataset.qty || 0),
@@ -2124,24 +2143,47 @@
         // Saved layouts on prod carry empty ids (an old save dropped them and every
         // carry-forward re-saved ''), so match by id only when both sides have one,
         // otherwise by name + type.
-        const findLive = item => (_currentItems || []).find(x => {
-            if (String(x.type) !== String(item.type)) return false;
-            if (String(item.id || '') && String(x.id || '')) return String(x.id) === String(item.id);
-            return (x.name || '').trim().toUpperCase() === (item.name || '').trim().toUpperCase();
-        });
+        const findLive = item => {
+            const list = (_currentItems || []).filter(x => {
+                if (String(x.type) !== String(item.type)) return false;
+
+                if (String(item.id || '') && String(x.id || '')) {
+                    return String(x.id) === String(item.id);
+                }
+
+                return (x.name || '').trim().toUpperCase() ===
+                    (item.name || '').trim().toUpperCase();
+            });
+
+            if (!list.length) return null;
+
+            return (
+                list.find(x => x.status === "Under Discharge") ||
+                list.find(x => x.status === "Waiting") ||
+                list.find(x => x.status === "Discharge Completed") ||
+                list[0]
+            );
+        };
         const haveLive = (_currentItems || []).length > 0;
 
         layout.forEach(item => {
             if (item.berth === 'WAITING') {
+                console.log("Saved Item:", {
+                    id: item.id,
+                    type: item.type,
+                    name: item.name,
+                    berth: item.berth
+                });
+
                 const live = findLive(item);
+
+                console.log("Live Item:", live);
 
                 const effectiveBalance = live
                     ? Number(live.balance_qty)
                     : Number(item.balance ?? item.balance_qty ?? 0);
-
-                if (effectiveBalance <= 0) {
-                    console.log(`[BPR] ${item.name} (WAITING): balance ${effectiveBalance} <= 0 — hidden`);
-                    return;   // now guaranteed, regardless of whether `live` matched
+                if (live && live.cast_off_done) {
+                    return;
                 }
 
                 console.log(`[BPR] ${item.name} (WAITING): live=${!!live}, balance ${effectiveBalance} — shown`);
@@ -2160,15 +2202,23 @@
                 const live = findLive(item);
 
                 // If completed, don't display it
-                if (live && Number(live.balance_qty) <= 0) {
-                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live.balance_qty} <= 0 — hidden (completed)`);
-                    return;
-                }
+                // if (live && Number(live.balance_qty) <= 0) {
+                //     return;
+                // }
 
                 // Not in the live list at all = completed/removed in LUEU01/LDUD —
                 // hide it (skip this rule only if the live fetch returned nothing).
                 if (!live && haveLive) {
                     console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: not in live list — hidden (completed/removed)`);
+                    return;
+                }
+                // Removed only after Cast Off
+                if (
+                    live &&
+                    live.cast_off_port &&
+                    String(live.cast_off_port).trim() !== ""
+                ) {
+                    console.log(`[BPR] ${item.name}: Cast Off completed — hidden`);
                     return;
                 }
 
@@ -2252,6 +2302,7 @@
         pill.dataset.balance = item.balance || 0;
         pill.dataset.total = item.total || item.qty || 0;
         pill.dataset.type = item.type || 'BARGE';
+        pill.dataset.status = item.status || '';
         pill.dataset.unloadingCommenced = item.unloading_commenced || '';
         pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
 
@@ -2275,7 +2326,12 @@
             item.status === "Under Discharge";   // fallback for legacy/edge cases
 
         let cardClass = "waiting-discharge";
-        if (item.status === "Completed") {
+        if (item.status === "Discharge Completed") {
+            // NEW — discharge/unloading finished but barge/MBC hasn't cast
+            // off / sailed out of the berth yet, so it's still physically
+            // occupying the slot: shown orange instead of green.
+            cardClass = "discharge-completed";
+        } else if (item.status === "Completed") {
             cardClass = "completed-discharge";
         } else if (unloadStarted) {
             cardClass = "discharging";
@@ -2379,19 +2435,33 @@
         (items || []).forEach(item => {
             if (item.status === 'Completed') return;
 
-            if (item.status === 'Discharging' && item.berth) {
+            if (
+                (item.status === "Under Discharge" ||
+                    item.status === "Discharge Completed") &&
+                item.berth
+            ) {
                 const zone = document.querySelector(
-                    `.matrix-dropzone[data-berth="${item.berth.toUpperCase()}"][data-position="${(item.position || 'A/S').toUpperCase()}"]`
+                    `.matrix-dropzone[data-berth="${item.berth.toUpperCase()}"][data-position="${(item.position || "A/S").toUpperCase()}"]`
                 );
+
                 if (!zone) return;
-                zone.classList.remove('empty-slot');
+
+                zone.classList.remove("empty-slot");
+                console.log(
+                    item.name,
+                    item.status,
+                    item.unloading_commenced,
+                    item.commence_discharge_berth
+                );
                 zone.innerHTML = buildBerthCard(item, parseFloat(item.balance_qty || 0));
             } else {
-                document.getElementById('waitingAreaZone').appendChild(buildWaitingPill({
-                    ...item,
-                    balance: item.balance_qty || item.qty,
-                    total: item.total_qty || item.qty,
-                }));
+                document.getElementById("waitingAreaZone").appendChild(
+                    buildWaitingPill({
+                        ...item,
+                        balance: item.balance_qty || item.qty,
+                        total: item.total_qty || item.qty,
+                    })
+                );
             }
         });
 
