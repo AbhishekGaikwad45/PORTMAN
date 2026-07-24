@@ -196,6 +196,12 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
     cur = get_cursor(conn)
 
     # Main report query
+    # Removed the `OR (source_id IS NOT NULL)` branch from the previous
+    # fix — that condition matched generic "Idle" equipment rows that have
+    # a source_id but NO barge_name/cargo_name at all, which is why blank
+    # "—" / "—" rows were showing up. A row now only counts as a real
+    # "waiting on berth" entry if it has an actual discharge quantity, OR
+    # an identifiable barge_name, OR an identifiable cargo_name.
     cur.execute("""
         SELECT
             berth_name,
@@ -211,7 +217,11 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
           AND berth_name <> ''
           AND from_time >= %s
           AND from_time < %s
-          AND quantity >= 0
+          AND (
+                (quantity IS NOT NULL AND quantity >= 0)
+                OR (barge_name IS NOT NULL AND barge_name <> '')
+                OR (cargo_name IS NOT NULL AND cargo_name <> '')
+              )
           AND (%s = '' OR cargo_name = %s)
         GROUP BY
             berth_name,
@@ -310,7 +320,6 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
     conn.close()
     return rows
 
-
 def _fetch_shift_totals(entry_date):
     """Same-day A/B/C discharge totals, independent of the time-window filter —
     matches the 'A Shift / B Shift / C Shift / Total Discharge' block at the
@@ -378,10 +387,19 @@ def two_hour_report_preview():
     order.sort(key=_natural_sort_key)
     berth_rows = []
     grand_total = 0.0
+    # NEW: running total of Bal Qty across every line in the report, so the
+    # Total row at the bottom can show a Bal Qty total the same way it
+    # already shows a Disch Qty total. None values (no basis to compare
+    # against) are skipped rather than treated as 0, so they don't distort
+    # the sum.
+    grand_total_bal = 0.0
     for b in order:
         entry = berths[b]
         entry['throughput'] = round(entry['throughput'], 2)
         grand_total += entry['throughput']
+        for line in entry['lines']:
+            if line['bal_qty'] is not None:
+                grand_total_bal += float(line['bal_qty'])
         berth_rows.append(entry)
 
     shift_totals = _fetch_shift_totals(entry_date)
@@ -406,6 +424,7 @@ def two_hour_report_preview():
         'to_time': to_time,
         'berths': berth_rows,
         'grand_total': round(grand_total, 2),
+        'grand_total_bal': round(grand_total_bal, 2),  # NEW
         'shift_totals': shift_totals,
         'cargo_options': cargo_options
     })
