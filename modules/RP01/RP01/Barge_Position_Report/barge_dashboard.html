@@ -2111,27 +2111,40 @@
 
     // ── Case 1 helper: paint the FULL frozen snapshot (berths + waiting area) ──
     function paintFullSnapshot(layout) {
+        console.groupCollapsed('[BPR] paintFullSnapshot — saved layout vs live');
+        console.log('[BPR] live items from /berth-occupancy:', (_currentItems || []).map(x =>
+            ({ id: x.id, type: x.type, name: x.name, status: x.status, balance: x.balance_qty })));
+
         document.querySelectorAll('.matrix-dropzone').forEach(z => {
             z.classList.add('empty-slot');
             z.innerHTML = '—';
         });
         document.getElementById('waitingAreaZone').innerHTML = '';
 
+        // Saved layouts on prod carry empty ids (an old save dropped them and every
+        // carry-forward re-saved ''), so match by id only when both sides have one,
+        // otherwise by name + type.
+        const findLive = item => (_currentItems || []).find(x => {
+            if (String(x.type) !== String(item.type)) return false;
+            if (String(item.id || '') && String(x.id || '')) return String(x.id) === String(item.id);
+            return (x.name || '').trim().toUpperCase() === (item.name || '').trim().toUpperCase();
+        });
+        const haveLive = (_currentItems || []).length > 0;
+
         layout.forEach(item => {
             if (item.berth === 'WAITING') {
-                const live = (_currentItems || []).find(x =>
-                    String(x.id) === String(item.id) &&
-                    String(x.type) === String(item.type)
-                );
+                const live = findLive(item);
 
                 const effectiveBalance = live
                     ? Number(live.balance_qty)
                     : Number(item.balance ?? item.balance_qty ?? 0);
 
                 if (effectiveBalance <= 0) {
+                    console.log(`[BPR] ${item.name} (WAITING): balance ${effectiveBalance} <= 0 — hidden`);
                     return;   // now guaranteed, regardless of whether `live` matched
                 }
 
+                console.log(`[BPR] ${item.name} (WAITING): live=${!!live}, balance ${effectiveBalance} — shown`);
                 document.getElementById('waitingAreaZone').appendChild(
                     buildWaitingPill(live ? {
                         ...live,
@@ -2144,17 +2157,23 @@
                     `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
                 );
                 if (!zone) return;
-                zone.classList.remove('empty-slot');
-                const live = (_currentItems || []).find(x =>
-                    String(x.id) === String(item.id) &&
-                    String(x.type) === String(item.type)
-                );
+                const live = findLive(item);
 
                 // If completed, don't display it
                 if (live && Number(live.balance_qty) <= 0) {
+                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live.balance_qty} <= 0 — hidden (completed)`);
                     return;
                 }
 
+                // Not in the live list at all = completed/removed in LUEU01/LDUD —
+                // hide it (skip this rule only if the live fetch returned nothing).
+                if (!live && haveLive) {
+                    console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: not in live list — hidden (completed/removed)`);
+                    return;
+                }
+
+                console.log(`[BPR] ${item.name} @ ${item.berth}/${item.position}: live balance ${live ? live.balance_qty : item.balance} — painted`);
+                zone.classList.remove('empty-slot');
                 zone.innerHTML = buildBerthCard(
                     live || item,
                     live ? live.balance_qty : item.balance
@@ -2162,6 +2181,7 @@
             }
         });
 
+        console.groupEnd();
         updateInterfaceMetrics();
     }
 

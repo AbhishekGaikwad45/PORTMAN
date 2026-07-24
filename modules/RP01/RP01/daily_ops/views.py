@@ -196,16 +196,17 @@ def _compute_fy_throughput(cutoff_date, editable_fy_values=None):
         WITH throughput AS (
             SELECT
                 COALESCE(vc.cargo_type, 'OTHERS') AS cargo_type,
-                (EXTRACT(YEAR FROM TO_DATE(l.entry_date, 'YYYY-MM-DD'))::int
-                    - CASE WHEN EXTRACT(MONTH FROM TO_DATE(l.entry_date, 'YYYY-MM-DD')) < 4
+                (EXTRACT(YEAR FROM TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD'))::int
+                    - CASE WHEN EXTRACT(MONTH FROM TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD')) < 4
                            THEN 1 ELSE 0 END) AS fy_start,
                 COALESCE(l.quantity, 0) AS quantity
             FROM lueu_lines l
             LEFT JOIN vessel_cargo vc
                 ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
-            WHERE l.is_deleted = false
+            WHERE l.is_deleted IS NOT TRUE
               AND l.cargo_name IS NOT NULL
-              AND TO_DATE(l.entry_date, 'YYYY-MM-DD') <= %s::date
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') <= %s::date
 
             UNION ALL
 

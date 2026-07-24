@@ -739,12 +739,12 @@ def get_24_hours_report():
                     delay_window_end
                 ))
 
-                delay_rows = cur.fetchall()
+                delay_rows_for_vessel = cur.fetchall()
 
                 print("\n========== RAW DELAY ROWS ==========")
                 print(f"VESSEL: {row['vessel_name']} | LDUD: {ldud_id}")
                 print(f"WINDOW: {delay_window_start} TO {delay_window_end}")
-                print(f"Total delay rows: {len(delay_rows)}")
+                print(f"Total delay rows: {len(delay_rows_for_vessel)}")
 
                 excluded_delays = {
                     'crane idle due to hold completion',
@@ -753,7 +753,7 @@ def get_24_hours_report():
 
                 delay_totals = {}
 
-                for d in delay_rows:
+                for d in delay_rows_for_vessel:
 
                     delay_name_mapping = {
                         'Different Type of Cargo': 'DTC',
@@ -1503,7 +1503,9 @@ def get_24_hours_report():
         print("JETTY CARGO LIST:", jetty_cargo_list)
 
         # =================================================
-        # RHMS, NO CARGO, MAINTENANCE & CEMENT PLANT DELAYS
+        # RHMS, NO CARGO, MAINTENANCE, CEMENT PLANT
+        # & BAD WEATHER DELAYS
+        # (source: lueu_lines - jetty-level delay entries)
         # =================================================
 
         delay_rows = []
@@ -1512,6 +1514,7 @@ def get_24_hours_report():
         no_cargo_hours = 0
         maintenance_delay_hours = 0
         cement_plant_delay_hours = 0
+        bad_weather_delay_hours = 0
 
         try:
 
@@ -1562,6 +1565,8 @@ def get_24_hours_report():
                 print(
                     "TYPE =", delay_type,
                     "| NAME =", delay_name,
+                    "| FROM =", from_t,
+                    "| TO =", to_t,
                     "| HOURS =", hours
                 )
 
@@ -1576,6 +1581,14 @@ def get_24_hours_report():
 
                     cement_plant_delay_hours += hours
 
+                elif (
+                    delay_type.upper() == 'BAD WEATHER DELAYS'
+                    or 'WEATHER' in delay_name
+                    or 'RAIN' in delay_name
+                ):
+
+                    bad_weather_delay_hours += hours
+
                 elif delay_type == 'RMHS Delays':
 
                     rhms_delay_hours += hours
@@ -1588,8 +1601,7 @@ def get_24_hours_report():
             no_cargo_hours = round(no_cargo_hours, 2)
             maintenance_delay_hours = round(maintenance_delay_hours, 2)
             cement_plant_delay_hours = round(cement_plant_delay_hours, 2)
-
-            delay_rows = []
+            bad_weather_delay_hours = round(bad_weather_delay_hours, 2)
 
             if rhms_delay_hours > 0:
                 delay_rows.append({
@@ -1615,10 +1627,17 @@ def get_24_hours_report():
                     'total_hours': cement_plant_delay_hours
                 })
 
+            if bad_weather_delay_hours > 0:
+                delay_rows.append({
+                    'delay_name': 'Bad Weather',
+                    'total_hours': bad_weather_delay_hours
+                })
+
             print("RHMS DELAYS:", rhms_delay_hours)
             print("NO CARGO:", no_cargo_hours)
             print("MAINTENANCE DELAYS:", maintenance_delay_hours)
             print("CEMENT PLANT DELAYS:", cement_plant_delay_hours)
+            print("BAD WEATHER DELAYS:", bad_weather_delay_hours)
             print("DELAY ROWS:", delay_rows)
 
 
@@ -1632,6 +1651,7 @@ def get_24_hours_report():
             no_cargo_hours = 0
             maintenance_delay_hours = 0
             cement_plant_delay_hours = 0
+            bad_weather_delay_hours = 0
 
         response = {
         'success': True,
@@ -1667,6 +1687,7 @@ def get_24_hours_report():
         'maintenance_delay_hours': maintenance_delay_hours if maintenance_delay_hours > 0 else None,
         'no_cargo_hours': no_cargo_hours if no_cargo_hours > 0 else None,
         'cement_plant_delay_hours': cement_plant_delay_hours if cement_plant_delay_hours > 0 else None,
+        'bad_weather_delay_hours': bad_weather_delay_hours if bad_weather_delay_hours > 0 else None,
 
         'delay_rows': delay_rows
 
