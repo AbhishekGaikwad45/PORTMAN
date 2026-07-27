@@ -100,14 +100,15 @@ def _fetch_berth_occupancy():
         if not berth or berth == 'WAITING' or not name:
             continue
         lv = live.get(name.upper())
-        if lv and float(lv.get('balance_qty') or 0) <= 0:
-            continue  # completed since the layout was saved
+        # A zero balance means discharge is done, NOT that the berth is free —
+        # _fetch_all_barges() drops a vessel only at cast off, so trust that list.
         if lv is None and live:
-            continue  # dropped from the live list = completed/removed in LUEU01/LDUD
+            continue  # dropped from the live list = cast off / removed in LUEU01/LDUD
         commenced = (item.get('unloading_commenced') or item.get('commence_discharge_berth') or '').strip()
         if not commenced and lv:
             commenced = (lv.get('unloading_commenced') or lv.get('commence_discharge_berth') or '').strip()
         position = (item.get('position') or 'A/S').upper()
+        balance = float((lv.get('balance_qty') if lv else None) or item.get('balance') or 0)
         occupancy.setdefault(berth, []).append({
             'name':        name,
             'type':        (item.get('type') or 'BARGE').upper(),
@@ -115,8 +116,8 @@ def _fetch_berth_occupancy():
             'position':    position,
             'tier':        _TIER.get(position, 0),
             'total_qty':   float((lv.get('total_qty') if lv else None) or item.get('total') or item.get('qty') or 0),
-            'balance_qty': float((lv.get('balance_qty') if lv else None) or item.get('balance') or 0),
-            'status':      'Discharging' if commenced else 'Waiting',
+            'balance_qty': balance,
+            'status':      ('Completed' if balance <= 0 else 'Discharging') if commenced else 'Waiting',
             'commenced':   commenced,
         })
     return occupancy
