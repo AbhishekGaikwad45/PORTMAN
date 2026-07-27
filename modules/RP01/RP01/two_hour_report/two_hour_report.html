@@ -325,10 +325,16 @@
                 <tr class="thr-total-row">
                     <td>Total</td>
                     <td>${fmtQty(data.grand_total)} MT</td>
-                    <td colspan="5"></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>${fmtQty(data.grand_total_bal)} MT</td>
+                    <td></td>
                 </tr>
             </table>
         `;
+
+        
         out.innerHTML = html;
         renderShiftTable(data.shift_totals, data.date_label);
     }

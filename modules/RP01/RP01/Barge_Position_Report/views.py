@@ -363,51 +363,50 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         if arrival_dt and arrival_dt < cutoff_dt:
             continue
 
-        # Skip completed
+        # Remove only after Cast Off
         if row.get("cast_off_port") and str(row.get("cast_off_port")).strip():
             continue
-        if balance_qty <= 0:
-           continue
 
-        if row.get("completed_discharge_berth") and str(row.get("completed_discharge_berth")).strip():
-            continue
 
-        # Waiting — alongside berth set, discharge not started
-        if (
-            row.get("along_side_berth")
-            and str(row.get("along_side_berth")).strip()
-            and (
-                row.get("commence_discharge_berth") is None
-                or str(row.get("commence_discharge_berth")).strip() == ""
-            )
-        ):
-            status = "Waiting"
+        completed = bool(
+            row.get("completed_discharge_berth")
+            and str(row.get("completed_discharge_berth")).strip()
+        )
 
-        # Under Discharge — discharge started, not completed
-        elif (
+        started = bool(
             row.get("commence_discharge_berth")
             and str(row.get("commence_discharge_berth")).strip()
-            and (
-                row.get("completed_discharge_berth") is None
-                or str(row.get("completed_discharge_berth")).strip() == ""
-            )
-        ):
-            status = "Under Discharge"
+        )
 
-        # ── FIX: neither condition matched (e.g. barge hasn't reached
-        #    berth yet, or both fields blank/whitespace) — skip it
-        #    instead of crashing with UnboundLocalError.
+        alongside = bool(
+            row.get("along_side_berth")
+            and str(row.get("along_side_berth")).strip()
+        )
+
+        if completed:
+            status = "Discharge Completed"      # Orange
+        elif started:
+            status = "Under Discharge"          # Green
+        elif alongside:
+            status = "Waiting"
         else:
             continue
 
-        completed_date = _fmt_dt(row.get("cast_off_port")) if row.get("cast_off_port") else None
-        berth = (row.get("commence_discharge_berth") or row.get("along_side_berth") or "")
+        
+
+        berth = (
+            row.get("commence_discharge_berth")
+            or row.get("along_side_berth")
+            or ""
+        )
 
         barges.append({
             "id":             row["id"],
             "type":           "BARGE",
-            "completed_date": completed_date,
+            
             "barge_name":     row["barge_name"],
+            "completed_date": _fmt_dt(row.get("completed_discharge_berth")),
+            "cast_off_port": _fmt_dt(row.get("cast_off_port")),
             "name":           row["barge_name"],
             "cargo": row.get("cargo_name") or row.get("cargo_type") or "",
             "qty":            row["discharge_qty"],
@@ -458,21 +457,18 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         AND m.arrival_port IS NOT NULL
         AND TRIM(COALESCE(m.arrival_port,'')) <> ''
         AND (
-                m.unloading_completed IS NULL
-                OR TRIM(COALESCE(m.unloading_completed,'')) = ''
+            m.mbc_cast_off IS NULL
+            OR TRIM(COALESCE(m.mbc_cast_off,'')) = ''
         )
-        AND (
-                m.mbc_cast_off IS NULL
-                OR TRIM(COALESCE(m.mbc_cast_off,'')) = ''
-        )
-        ORDER BY m.mbc_name
-    """)
+                ORDER BY m.mbc_name
+            """)
 
     for row in cur.fetchall():
+       
         cutoff_dt = datetime(2026, 5, 1)
         
 
-        arrival_dt = _parse_dt(row.get("along_side_berth"))
+        arrival_dt = _parse_dt(row.get("arrival_port"))
 
         # Skip barges arrived before 1 May 2026
         if arrival_dt and arrival_dt < cutoff_dt:
@@ -490,18 +486,39 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         bl_qty = float(row["bl_qty"] or 0)
         actual_qty = float(row["actual_qty"] or 0)
         balance_qty = max(bl_qty - actual_qty, 0)
-        # Automatically hide completed MBC
-        if balance_qty <= 0:
+        # Remove only after Cast Off
+        if row.get("mbc_cast_off") and str(row.get("mbc_cast_off")).strip():
             continue
 
-        # ---------------------------------------------------------
-        # IMPORTANT:
-        # Always send active MBCs to WAITING.
-        # Saved berth_layout will decide whether they appear on a berth.
-        # ---------------------------------------------------------
+        bl_qty = float(row["bl_qty"] or 0)
+        actual_qty = float(row["actual_qty"] or 0)
+        balance_qty = max(bl_qty - actual_qty, 0)
 
-        status = "Waiting"
-        berth = ""
+        completed = bool(
+            row.get("unloading_completed")
+            and str(row.get("unloading_completed")).strip()
+        )
+
+        started = bool(
+            row.get("unloading_commenced")
+            and str(row.get("unloading_commenced")).strip()
+        )
+
+        arrival = bool(
+            row.get("arrival_port")
+            and str(row.get("arrival_port")).strip()
+        )
+
+        if completed:
+            status = "Discharge Completed"      # Orange
+        elif started:
+            status = "Under Discharge"          # Green
+        elif arrival:
+            status = "Waiting"
+        else:
+            continue
+
+        berth = (row.get("berth") or "").upper()
 
         print(
             row["mbc_name"],
@@ -512,14 +529,14 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
         )
         
 
-        # Automatically hide completed barges
-        if balance_qty <= 0:
-            continue
+
                 
         barges.append({
             "id": row["id"],
             "type": "MBC",
             "completed_date": _fmt_dt(row.get("unloading_completed")),
+            "cast_off_port": _fmt_dt(row.get("mbc_cast_off")),
+            
             "barge_name": row["mbc_name"],
             "name": row["mbc_name"],
             "cargo": row.get("cargo_name") or "",
@@ -533,7 +550,7 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "commence_discharge_berth": "",
         })
 
-        if status == "Discharging" and berth:
+        if berth:
             occupied_berth_set.add(berth)
 
     # Sort alphabetically by name regardless of type
@@ -1413,7 +1430,7 @@ def api_shift_report_load():
                 ON p.mbc_id = h.id
                 WHERE p.vessel_arrival_port IS NOT NULL
                 AND TRIM(COALESCE(p.vessel_arrival_port,'')) <> ''
-                AND (p.unloading_completed IS NULL OR TRIM(p.unloading_completed)='')
+                
                 AND (p.vessel_cast_off IS NULL OR TRIM(p.vessel_cast_off)='')
             """)
             for r in cur.fetchall():
