@@ -37,9 +37,10 @@ def test_zero_balance_still_holds_the_berth(monkeypatch):
     assert 'BERTH 9' in occ
     assert occ['BERTH 9'][0]['name'] == 'FALCON HIGH'
     assert occ['BERTH 9'][0]['balance_qty'] == 0
-    assert occ['BERTH 9'][0]['status'] == 'Completed'
-    # Berths that were already working keep working.
-    assert occ['BERTH 8'][0]['status'] == 'Discharging'
+    # Statuses use the Barge Position vocabulary so both screens colour alike:
+    # amber = discharged but still moored, green = working, cyan = waiting.
+    assert occ['BERTH 9'][0]['status'] == 'Discharge Completed'
+    assert occ['BERTH 8'][0]['status'] == 'Under Discharge'
     assert occ['BERTH 10'][0]['status'] == 'Waiting'  # alongside, not commenced
 
 

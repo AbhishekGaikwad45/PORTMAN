@@ -117,7 +117,9 @@ def _fetch_berth_occupancy():
             'tier':        _TIER.get(position, 0),
             'total_qty':   float((lv.get('total_qty') if lv else None) or item.get('total') or item.get('qty') or 0),
             'balance_qty': balance,
-            'status':      ('Completed' if balance <= 0 else 'Discharging') if commenced else 'Waiting',
+            # Same vocabulary as the Barge Position berth cards, so the map
+            # colours and the dashboard colours can't drift apart.
+            'status':      ('Discharge Completed' if balance <= 0 else 'Under Discharge') if commenced else 'Waiting',
             'commenced':   commenced,
         })
     return occupancy

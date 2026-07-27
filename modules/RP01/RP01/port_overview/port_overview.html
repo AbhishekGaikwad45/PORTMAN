@@ -121,14 +121,17 @@ html, body {
 .image-inner { position:relative; width:100%; flex:1; min-height:0; }
 .image-inner img { width:100%; height:100%; object-fit:contain; display:block; }
 .overlay { position:absolute; inset:0; }
+/* Status colours mirror the Barge Position berth cards:
+   green = under discharge, cyan = waiting, amber = discharged but not cast off. */
 .vessel {
-  position:absolute; background:linear-gradient(160deg,#34E28F,#0FAE68); cursor:pointer;
+  position:absolute; background:linear-gradient(160deg,#32df6e,#15803d); cursor:pointer;
   clip-path:polygon(50% 0, 100% 15%, 100% 100%, 0 100%, 0 15%);
-  filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(15,174,104,.55));
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(21,128,61,.55));
   transition:filter .15s, transform .15s;
 }
 .vessel:hover { filter:drop-shadow(0 0 7px rgba(25,85,224,.9)); transform:scale(1.12); }
-.vessel.waiting { background:linear-gradient(160deg,#4FD6EE,#149FBE); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(20,159,190,.5)); }
+.vessel.waiting { background:linear-gradient(160deg,#43e6f1,#0891b2); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(8,145,178,.5)); }
+.vessel.completed { background:linear-gradient(160deg,#facc15,#ca8a04); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(234,179,8,.55)); }
 .vessel-name {
   position:absolute; transform:translate(4px,-50%);
   font-family:'Inter',sans-serif; font-size:8.5px; font-weight:700; color:#0F1A2B; background:rgba(255,255,255,.94);
@@ -389,25 +392,25 @@ function renderBerths(layout) {
 
     const th = (b.angle || 0) * Math.PI / 180;
     const cos = Math.cos(th), sin = Math.sin(th);
-    const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
-    const MBC_LEN = 80;                                             // MBCs are one fixed size
+    const bw = b.w || 60, bh = b.h || 60;
 
-    // Group by bank tier: A/S hugs the jetty face, D/B sits outboard of it, etc.
+    // The PBM01 box IS the water slot, so an A/S vessel fills it exactly as drawn.
+    // Local +x is the jetty face, so extra banks step outboard along -x.
     const tiers = {};
     assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
 
     Object.entries(tiers).forEach(([t, list]) => {
-      const slot = (b.h || 60) / list.length;
+      const slot = bh / list.length;
       list.forEach((a, i) => {
-        const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
-        const beam = Math.max(len * 0.3, 6);
-        const inset = b.w / 2 - beam / 2 - (+t) * (beam + 2);
+        const len   = slot * 0.94;   // along the jetty: this vessel's share of the box
+        const beam  = bw * 0.94;     // across the jetty: the full drawn width
+        const inset = -(+t) * bw;    // A/S on the box, each further bank one width out
         const ex = b.cx + inset * cos, ey = b.cy + inset * sin;
         const s = (i - (list.length - 1) / 2) * slot; // along-edge offset
         const px = ex - s * sin, py = ey + s * cos;
 
         const v = document.createElement('div');
-        v.className = 'vessel' + (a.commenced ? '' : ' waiting');
+        v.className = 'vessel' + (a.status === 'Discharge Completed' ? ' completed' : a.commenced ? '' : ' waiting');
         v.style.left   = (px / iw * 100) + '%';
         v.style.top    = (py / ih * 100) + '%';
         v.style.width  = (beam / iw * 100) + '%';
