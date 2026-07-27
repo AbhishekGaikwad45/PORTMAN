@@ -392,19 +392,21 @@ function renderBerths(layout) {
 
     const th = (b.angle || 0) * Math.PI / 180;
     const cos = Math.cos(th), sin = Math.sin(th);
-    const bw = b.w || 60, bh = b.h || 60;
+    const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
+    const MBC_LEN = 80;                                             // MBCs are one fixed size
 
-    // The PBM01 box IS the water slot, so an A/S vessel fills it exactly as drawn.
-    // Local +x is the jetty face, so extra banks step outboard along -x.
+    // Group by bank tier. The PBM01 box is the berth's water area, not the hull:
+    // A/S floats in the middle of it, and each extra bank steps outboard (-x,
+    // away from the jetty face) by one beam.
     const tiers = {};
     assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
 
     Object.entries(tiers).forEach(([t, list]) => {
-      const slot = bh / list.length;
+      const slot = (b.h || 60) / list.length;
       list.forEach((a, i) => {
-        const len   = slot * 0.94;   // along the jetty: this vessel's share of the box
-        const beam  = bw * 0.94;     // across the jetty: the full drawn width
-        const inset = -(+t) * bw;    // A/S on the box, each further bank one width out
+        const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
+        const beam = Math.max(len * 0.3, 6);
+        const inset = -(+t) * (beam + 2);
         const ex = b.cx + inset * cos, ey = b.cy + inset * sin;
         const s = (i - (list.length - 1) / 2) * slot; // along-edge offset
         const px = ex - s * sin, py = ey + s * cos;
