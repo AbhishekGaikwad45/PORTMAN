@@ -4,6 +4,14 @@ from datetime import datetime
 
 # ===== CUTOVER SEED HELPERS =====
 
+def would_overbill(billed_qty, add_qty, total_qty):
+    """True if billing add_qty on top of billed_qty exceeds the source's total
+    billable quantity (small tolerance absorbs float noise). Used to block a
+    stale page / double-submit from billing the same cargo twice while still
+    allowing legitimate partial billing up to the full quantity."""
+    return float(billed_qty or 0) + float(add_qty or 0) > float(total_qty or 0) + 0.001
+
+
 def next_from_seed(existing_max, start_seq):
     """Next sequence number given the highest already-used number and an
     optional cutover floor. The seed is a floor only: once real documents
@@ -308,6 +316,129 @@ def save_bill_header(data):
     conn.commit()
     conn.close()
     return row_id, data.get('bill_number')
+
+
+def _other_active_bill_for_cargo(cur, cargo_source_type, cargo_source_id, exclude_bill_id):
+    """A surviving (non-cancelled) bill other than exclude_bill_id that still
+    bills this cargo source, or None."""
+    cur.execute('''SELECT bl.bill_id FROM bill_lines bl
+                   JOIN bill_header bh ON bh.id = bl.bill_id
+                   WHERE bl.cargo_source_type=%s AND bl.cargo_source_id=%s
+                     AND bl.bill_id <> %s AND bh.bill_status <> 'Cancelled'
+                   ORDER BY bl.bill_id LIMIT 1''',
+                [cargo_source_type, cargo_source_id, exclude_bill_id])
+    r = cur.fetchone()
+    return r['bill_id'] if r else None
+
+
+def _other_active_bill_for_service(cur, service_record_id, exclude_bill_id):
+    """A surviving (non-cancelled) bill other than exclude_bill_id that still
+    bills this service record, or None."""
+    cur.execute('''SELECT bl.bill_id FROM bill_lines bl
+                   JOIN bill_header bh ON bh.id = bl.bill_id
+                   WHERE bl.service_record_id=%s AND bl.bill_id <> %s
+                     AND bh.bill_status <> 'Cancelled'
+                   ORDER BY bl.bill_id LIMIT 1''',
+                [service_record_id, exclude_bill_id])
+    r = cur.fetchone()
+    return r['bill_id'] if r else None
+
+
+def _release_bill_for_delete(cur, bill_id):
+    """Release the billed tracking a bill holds when DELETING it — share-aware.
+
+    Undoes only THIS bill's contribution. If another active (non-cancelled)
+    bill also bills the same source (e.g. a duplicate of an already-invoiced
+    bill), that source keeps its billed state and ownership is handed to the
+    surviving bill — so removing the duplicate never un-bills items the other
+    bill still owns. Runs inside the caller's transaction; does NOT commit."""
+    cur.execute('''SELECT cargo_source_type, cargo_source_id, quantity
+                   FROM bill_lines
+                   WHERE bill_id=%s AND cargo_source_type IS NOT NULL
+                     AND cargo_source_id IS NOT NULL''', [bill_id])
+    for row in [dict(r) for r in cur.fetchall()]:
+        cstype, csid = row['cargo_source_type'], row['cargo_source_id']
+        entry = _CARGO_TABLES.get(cstype)
+        if not entry:
+            continue
+        table = entry[0]
+        # Undo this bill's quantity contribution (recomputes billed_quantity + is_billed).
+        _unmark_cargo_source_billed(cur, cstype, csid, float(row['quantity'] or 0))
+        # Hand the declaration's bill_id to a surviving bill, else clear it.
+        other = _other_active_bill_for_cargo(cur, cstype, csid, bill_id)
+        cur.execute(f'UPDATE {table} SET bill_id=%s WHERE id=%s', [other, csid])
+
+    cur.execute('''SELECT DISTINCT service_record_id FROM bill_lines
+                   WHERE bill_id=%s AND service_record_id IS NOT NULL''', [bill_id])
+    for row in cur.fetchall():
+        srid = row['service_record_id']
+        other = _other_active_bill_for_service(cur, srid, bill_id)
+        if other:
+            cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s', [other, srid])
+        else:
+            cur.execute('UPDATE service_records SET is_billed=0, bill_id=NULL WHERE id=%s', [srid])
+
+
+def get_removable_bills():
+    """Bills eligible for admin removal: not invoiced, not linked to an invoice."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''
+        SELECT b.id, b.bill_number, b.bill_date, b.customer_name, b.source_display,
+               b.total_amount, b.bill_status, b.created_by
+        FROM bill_header b
+        WHERE b.bill_status NOT IN ('Invoiced', 'Cancelled')
+          AND NOT EXISTS (SELECT 1 FROM invoice_bill_mapping ibm WHERE ibm.bill_id = b.id)
+        ORDER BY b.id DESC
+    ''')
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def delete_bill(bill_id, username):
+    """Remove a bill entirely (admin duplicate cleanup) and free its number.
+
+    Releases the cargo/service billed tracking the bill held (share-aware, see
+    _release_bill_for_delete — a source another active bill still owns is left
+    billed), deletes its lines + header so the BILL number is freed and the
+    series continues with no gap, and writes an approval_log row. Refuses
+    invoiced or invoice-linked bills — uninvoice those first.
+
+    Returns {'ok': bool, 'bill_number', 'error'}."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT * FROM bill_header WHERE id=%s FOR UPDATE', [bill_id])
+        row = cur.fetchone()
+        bill = dict(row) if row else None
+        if not bill:
+            conn.close()
+            return {'ok': False, 'error': 'Bill not found'}
+        if bill.get('bill_status') == 'Invoiced':
+            conn.close()
+            return {'ok': False, 'error': 'Bill is invoiced — uninvoice it first'}
+        cur.execute('SELECT 1 FROM invoice_bill_mapping WHERE bill_id=%s LIMIT 1', [bill_id])
+        if cur.fetchone():
+            conn.close()
+            return {'ok': False, 'error': 'Bill is linked to an invoice — uninvoice it first'}
+
+        _release_bill_for_delete(cur, bill_id)
+        cur.execute('DELETE FROM bill_lines WHERE bill_id=%s', [bill_id])
+        cur.execute('DELETE FROM bill_header WHERE id=%s', [bill_id])
+
+        comment = (f"Deleted bill {bill['bill_number']} (was {bill.get('bill_status')}); "
+                   f"billed tracking released (share-aware)")
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FIN01', %s, 'Bill removed by Admin', %s, %s)""",
+                    [bill_id, comment, username])
+        conn.commit()
+        return {'ok': True, 'bill_number': bill['bill_number']}
+    except Exception as e:
+        conn.rollback()
+        return {'ok': False, 'error': str(e)}
+    finally:
+        conn.close()
 
 
 def get_bill_by_id(bill_id):

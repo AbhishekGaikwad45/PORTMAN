@@ -23,6 +23,7 @@
     <button class="tab-btn" onclick="showTab('logs')">Logs</button>
     <button class="tab-btn" onclick="showTab('cutover')">Cutover</button>
     <button class="tab-btn" onclick="showTab('uninvoice')">Uninvoice</button>
+    <button class="tab-btn" onclick="showTab('billremove')">Remove Bill</button>
 </div>
 
 <!-- User Management Tab -->
@@ -677,6 +678,37 @@
     </div>
 </div>
 
+<!-- Remove Bill Tab -->
+<div id="billremove-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Remove Bill — delete duplicate / unwanted bills</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            Lists bills that are <strong>not invoiced</strong>. Removing a bill <strong>deletes it</strong> —
+            freeing its number so the series continues with no gap — and releases the cargo/service billed
+            tracking it held, so those items become billable again. Invoiced bills are not shown; uninvoice
+            them first (Uninvoice tab), which returns them here as removable.
+        </p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadBillRemoveList()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="billRemoveTable">
+            <thead>
+                <tr>
+                    <th>Bill No</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Source</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="billRemoveBody"></tbody>
+        </table>
+    </div>
+</div>
+
 <style>
 .admin-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
 .tab-btn { padding: 8px 16px; border: none; background: #e2e8f0; cursor: pointer; border-radius: 4px 4px 0 0; }
@@ -876,6 +908,7 @@ function showTab(tab) {
     if (tab === 'saptokens') loadSapTokens();
     if (tab === 'sapplay') { spgLoadSample(); }
     if (tab === 'uninvoice') loadUninvoiceList();
+    if (tab === 'billremove') loadBillRemoveList();
 }
 
 let _newPwStrength = null;
@@ -1503,6 +1536,42 @@ async function doUninvoice(id, num) {
     if (data.error) { alert(data.error); return; }
     alert(`Invoice ${data.invoice_number} removed. Bills reset to Approved: ${(data.bills || []).join(', ') || '(none)'}`);
     loadUninvoiceList();
+}
+
+// ── Remove Bill Tab ──────────────────────────────────────────────────────────
+async function loadBillRemoveList() {
+    const res = await fetch('/admin/api/bill-remove/list');
+    const rows = await res.json();
+    const tbody = document.getElementById('billRemoveBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">No removable bills found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.bill_number || ''}</td>
+            <td>${(r.bill_date || '').toString().slice(0,10)}</td>
+            <td>${r.customer_name || ''}</td>
+            <td style="font-size:11px;">${r.source_display || ''}</td>
+            <td style="text-align:right;">${r.total_amount != null ? Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''}</td>
+            <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.bill_status || ''}</span></td>
+            <td>${r.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="doBillRemove(${r.id}, '${(r.bill_number||'').replace(/'/g,"\\'")}')">Remove</button></td>
+        </tr>
+    `).join('');
+}
+
+async function doBillRemove(id, num) {
+    if (!confirm(`Remove bill "${num}"?\n\nThis permanently DELETES the bill and makes its cargo/service items billable again. The bill number is freed for reuse.\n\nOnly do this for duplicate or unwanted bills.`)) return;
+    const res = await fetch('/admin/api/bill-remove/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Bill ${data.bill_number} removed. Its items are billable again.`);
+    loadBillRemoveList();
 }
 
 // ── Mail Tab ─────────────────────────────────────────────────────────────────

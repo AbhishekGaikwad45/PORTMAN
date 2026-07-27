@@ -30,6 +30,36 @@ def _queue_bill_approval_request(bill_id, bill_number, customer_name, total_amou
         ),
     )
 
+def _find_already_billed(lines):
+    """Return a label for the first selected line whose source is already
+    (fully) billed, else None. Mirrors the billables query server-side so a
+    stale page or a double-submit can't bill the same cargo/service twice."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        for line in lines:
+            if line.get('line_type') == 'service_record' and line.get('service_record_id'):
+                cur.execute('SELECT is_billed FROM service_records WHERE id=%s',
+                            [line['service_record_id']])
+                r = cur.fetchone()
+                if r and r['is_billed']:
+                    return line.get('description') or f"service #{line['service_record_id']}"
+            cstype, csid = line.get('cargo_source_type'), line.get('cargo_source_id')
+            if cstype and csid:
+                entry = model._CARGO_TABLES.get(cstype)
+                if not entry:
+                    continue
+                table, qty_col = entry
+                cur.execute(f'SELECT COALESCE(billed_quantity,0) AS bq, {qty_col} AS tot '
+                            f'FROM {table} WHERE id=%s', [csid])
+                r = cur.fetchone()
+                if r and model.would_overbill(r['bq'], line.get('quantity'), r['tot']):
+                    return line.get('description') or f"{cstype} #{csid}"
+        return None
+    finally:
+        conn.close()
+
+
 @bp.route('/module/FIN01/')
 def index():
     """Main FIN01 index - redirect to bills"""
@@ -247,6 +277,19 @@ def save_bill():
 
     # Extract lines from data before saving header (lines belong to bill_lines table, not bill_header)
     lines = data.pop('lines', [])
+
+    # Guard against duplicate billing: reject a NEW bill if any selected source
+    # is already billed. Catches "went back and re-billed the same items" and
+    # most double-submits (the Generate button is also disabled client-side).
+    # ponytail: a truly simultaneous double-POST can still slip through the
+    # read-before-write window; atomic FOR UPDATE locking on the declaration
+    # rows is the upgrade path if that ever shows up in practice.
+    if not data.get('id'):
+        dup = _find_already_billed(lines)
+        if dup:
+            return jsonify({'success': False,
+                            'error': f'"{dup}" is already billed. Refresh the page to see '
+                                     f'the current billable items before generating a bill.'})
 
     data['created_by'] = session.get('username')
     data['created_date'] = __import__('datetime').datetime.now().strftime('%Y-%m-%d')

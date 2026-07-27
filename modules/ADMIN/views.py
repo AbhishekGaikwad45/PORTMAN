@@ -1045,3 +1045,25 @@ def uninvoice_do():
     if not result.get('ok'):
         return jsonify({'error': result.get('error', 'Uninvoice failed')}), 400
     return jsonify({'success': True, **result})
+
+
+# ===== Remove Bill (delete duplicate/unwanted bills, reset series) =====
+
+@bp.route('/api/bill-remove/list')
+@admin_required
+def bill_remove_list():
+    from modules.FIN01 import model as fin_model
+    return jsonify(fin_model.get_removable_bills())
+
+
+@bp.route('/api/bill-remove/do', methods=['POST'])
+@admin_required
+def bill_remove_do():
+    from modules.FIN01 import model as fin_model
+    bill_id = (request.json or {}).get('id')
+    if not bill_id:
+        return jsonify({'error': 'Missing id'}), 400
+    result = fin_model.delete_bill(bill_id, session.get('username'))
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error', 'Bill removal failed')}), 400
+    return jsonify({'success': True, **result})

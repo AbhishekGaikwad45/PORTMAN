@@ -597,6 +597,8 @@ function recalcTotals() {
 }
 
 async function generateBill() {
+    const btn = document.getElementById('generateBtn');
+    if (btn.disabled) return;   // already submitting — block double-click
     const ct = document.getElementById('customerType').value;
     const cid = document.getElementById('customerId').value;
     const billDate = document.getElementById('billDate').value;
@@ -689,18 +691,28 @@ async function generateBill() {
         lines: lines
     };
 
-    const resp = await fetch('/api/module/FIN01/bill/save', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-    });
-    const result = await resp.json();
+    btn.disabled = true;
+    const _origLabel = btn.textContent;
+    btn.textContent = 'Generating…';
+    try {
+        const resp = await fetch('/api/module/FIN01/bill/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
 
-    if (result.success) {
-        alert('Bill generated: ' + result.bill_number);
-        window.location.href = `/module/FIN01/bill/${result.id}`;
-    } else {
+        if (result.success) {
+            alert('Bill generated: ' + result.bill_number);
+            window.location.href = `/module/FIN01/bill/${result.id}`;
+            return;   // navigating away — leave the button disabled
+        }
         alert('Error: ' + result.error);
+    } catch (e) {
+        alert('Error: ' + e);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = _origLabel;
     }
 }
 

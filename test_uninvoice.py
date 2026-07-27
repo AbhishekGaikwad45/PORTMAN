@@ -1,5 +1,5 @@
-"""Guard check for the admin Uninvoice tab — the pure decision, no DB."""
-from modules.FIN01.model import _can_uninvoice
+"""Pure guard checks for the admin Uninvoice / Remove-Bill tabs — no DB."""
+from modules.FIN01.model import _can_uninvoice, would_overbill
 
 
 def test_can_uninvoice():
@@ -16,8 +16,25 @@ def test_can_uninvoice():
                            'invoice_status': 'Posted to SAP'})[0] is True
     assert _can_uninvoice({'sap_document_number': '   ',
                            'invoice_status': 'Generated'})[0] is True
-    print('ok')
+
+
+def test_would_overbill():
+    # Exact duplicate: source already fully billed, second full bill → blocked
+    assert would_overbill(100, 100, 100) is True
+    # First full bill on an unbilled source → allowed
+    assert would_overbill(0, 100, 100) is False
+    # Legitimate partial billing up to the full quantity → allowed
+    assert would_overbill(50, 50, 100) is False
+    assert would_overbill(0, 50, 100) is False
+    # Over the remaining balance → blocked
+    assert would_overbill(60, 50, 100) is True
+    # Float noise within tolerance on a full bill → allowed
+    assert would_overbill(0, 100.0000001, 100) is False
+    # None-safe
+    assert would_overbill(None, None, None) is False
 
 
 if __name__ == '__main__':
     test_can_uninvoice()
+    test_would_overbill()
+    print('ok')
