@@ -1416,7 +1416,7 @@ def api_shift_report_load():
                 FROM ldud_barge_lines
                 WHERE COALESCE(TRIM(barge_name),'') <> ''
                 AND (cast_off_port IS NULL OR TRIM(cast_off_port)='')
-                AND (completed_discharge_berth IS NULL OR TRIM(completed_discharge_berth)='')
+                
             """)
             for r in cur.fetchall():
                 r = dict(r)
@@ -2883,8 +2883,6 @@ def _fetch_mbc_asof_v2(to_dt, report_date_str, shift='ALL'):
 @bp.route('/api/module/RP01/jetty-cargo-report-v2')
 @login_required
 def api_jetty_cargo_report_v2():
-    """New, separate endpoint — date/shift-wise version.
-    Does not affect /api/module/RP01/jetty-cargo-report."""
     report_date = request.args.get('date', '')
     shift = request.args.get('shift', 'ALL')
     if not report_date:
@@ -2896,22 +2894,25 @@ def api_jetty_cargo_report_v2():
 
     jetty_counts = defaultdict(int)
     eta_counts = defaultdict(int)
+    discharge_counts = defaultdict(int)   # ✅ NEW — Under Discharge cargo count
     berth_rows = []
 
-    # ── Barges still feed JETTY (Waiting) and ETA (Loaded/Transit) counts ──
+    # ── Barges still feed JETTY (Waiting), ETA (Loaded/Transit),
+    #    ani ata UNDER DISCHARGE counts ──
     for b in barges:
         cargo = (b.get('cargo') or 'UNKNOWN').strip().upper() or 'UNKNOWN'
         if b['status'] == 'Waiting':
             jetty_counts[cargo] += 1
         if b.get('eta_active'):
             eta_counts[cargo] += 1
-        # NOTE: barges no longer added to berth_rows — that table is MBC-only now.
+        # ✅ NEW — status Under Discharge 
+        
+        if b['status'] in ('Under Discharge', 'Discharge Completed'):
+            discharge_counts[cargo] += 1
+        # NOTE: barges STILL not added to berth_rows — that table is
+        # MBC-only, 
 
-    # ── CARGO / BERTH / CARGO BAL table — MBC only ──────────────────────────
-    # Two cargoes can't physically occupy the same berth at once, so if more
-    # than one MBC maps to the same berth, keep only the one that actually
-    # started discharging most recently — everything else is stale/carried
-    # data pointing at a berth that MBC no longer occupies.
+    # ── CARGO / BERTH / CARGO BAL table — MBC only (UNCHANGED) ─────────────
     for m in mbcs:
         if (
             m['status'] == 'Under Discharge'
@@ -2939,9 +2940,15 @@ def api_jetty_cargo_report_v2():
     for row in berth_rows:
         row.pop('_commence_dt', None)
 
-    all_cargos = sorted(set(jetty_counts) | set(eta_counts))
+    # ✅ CHANGED — discharge_counts 
+    all_cargos = sorted(set(jetty_counts) | set(eta_counts) | set(discharge_counts))
     jetty_waiting = [
-        {'cargo': c, 'jetty': jetty_counts.get(c, 0), 'eta': eta_counts.get(c, 0)}
+        {
+            'cargo': c,
+            'jetty': jetty_counts.get(c, 0),
+            'eta': eta_counts.get(c, 0),
+            'discharge': discharge_counts.get(c, 0),   # ✅ NEW field
+        }
         for c in all_cargos
     ]
 
@@ -2949,9 +2956,9 @@ def api_jetty_cargo_report_v2():
         'jetty_waiting': jetty_waiting,
         'total_jetty': sum(jetty_counts.values()),
         'total_eta': sum(eta_counts.values()),
+        'total_discharge': sum(discharge_counts.values()),   # ✅ NEW
         'berth_discharge': berth_rows,
     })
-
     
 @bp.route('/api/module/RP01/jetty-cargo-report')
 @login_required
