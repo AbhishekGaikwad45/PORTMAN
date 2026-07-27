@@ -723,6 +723,122 @@ def get_invoice_data(page=1, size=20, status_filter=None):
     return [dict(r) for r in rows], total
 
 
+def compute_aggregate_gst(lines):
+    """Compute GST on the aggregated taxable **per rate group**, rounded once
+    (the GST-compliant method), and redistribute each group's tax across its
+    lines so the per-line amounts still sum exactly to the group total.
+
+    This is what makes SAP auto-post: SAP re-derives tax as round(base x rate)
+    on the aggregated line, so summing per-line-rounded tax (which drifts a
+    paisa or two) never matches. Rounding once on the aggregate does.
+
+    `lines`: dicts with keys id, line_amount, cgst_rate, sgst_rate, igst_rate.
+    Returns (line_gst, totals):
+      line_gst = {id: {cgst_amount, sgst_amount, igst_amount, line_total}}
+      totals   = {subtotal, cgst_amount, sgst_amount, igst_amount}
+    """
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for ln in lines:
+        key = (round(float(ln.get('cgst_rate') or 0), 4),
+               round(float(ln.get('sgst_rate') or 0), 4),
+               round(float(ln.get('igst_rate') or 0), 4))
+        groups[key].append(ln)
+
+    line_gst = {ln['id']: {'cgst_amount': 0.0, 'sgst_amount': 0.0, 'igst_amount': 0.0}
+                for ln in lines}
+
+    for (cr, sr, ir), glines in groups.items():
+        taxable = sum(float(l.get('line_amount') or 0) for l in glines)
+        for col, rate in (('cgst_amount', cr), ('sgst_amount', sr), ('igst_amount', ir)):
+            if rate <= 0:
+                continue
+            target   = round(taxable * rate / 100, 2)
+            per_line = [round(float(l.get('line_amount') or 0) * rate / 100, 2) for l in glines]
+            residual = round(target - sum(per_line), 2)
+            if residual:
+                # Push the leftover paisa onto the largest line — least visible,
+                # deterministic, and keeps the group sum exact.
+                idx = max(range(len(glines)),
+                          key=lambda i: float(glines[i].get('line_amount') or 0))
+                per_line[idx] = round(per_line[idx] + residual, 2)
+            for l, val in zip(glines, per_line):
+                line_gst[l['id']][col] = val
+
+    subtotal = cg = sg = ig = 0.0
+    for ln in lines:
+        amt = float(ln.get('line_amount') or 0)
+        g = line_gst[ln['id']]
+        g['line_total'] = round(amt + g['cgst_amount'] + g['sgst_amount'] + g['igst_amount'], 2)
+        subtotal += amt
+        cg += g['cgst_amount']; sg += g['sgst_amount']; ig += g['igst_amount']
+    totals = {'subtotal': round(subtotal, 2), 'cgst_amount': round(cg, 2),
+              'sgst_amount': round(sg, 2), 'igst_amount': round(ig, 2)}
+    return line_gst, totals
+
+
+def _amount_in_words(amount):
+    """Indian-format rupee words, mirroring the FINV01 frontend so a
+    server-recomputed total keeps a matching 'Amount in Words'."""
+    ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight',
+            'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen',
+            'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+    tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy',
+            'Eighty', 'Ninety']
+
+    def to_words(n):
+        if n == 0:
+            return ''
+        if n < 20:
+            return ones[n] + ' '
+        if n < 100:
+            return tens[n // 10] + ' ' + (ones[n % 10] + ' ' if n % 10 else '')
+        if n < 1000:
+            return ones[n // 100] + ' Hundred ' + to_words(n % 100)
+        if n < 100000:
+            return to_words(n // 1000) + 'Thousand ' + to_words(n % 1000)
+        if n < 10000000:
+            return to_words(n // 100000) + 'Lakh ' + to_words(n % 100000)
+        return to_words(n // 10000000) + 'Crore ' + to_words(n % 10000000)
+
+    rounded = int(round(float(amount or 0) * 100))
+    rupees, paise = divmod(rounded, 100)
+    words = 'Rupees ' + to_words(rupees).strip()
+    if paise > 0:
+        words += ' and ' + to_words(paise).strip() + ' Paise'
+    return words + ' Only'
+
+
+def _reconcile_invoice_gst(cur, invoice_id):
+    """Rewrite an invoice's GST to the aggregate-per-rate figures (see
+    compute_aggregate_gst) across its lines, header totals and amount-in-words,
+    so the print, SAC summary and SAP payload all agree with SAP's own
+    round(base x rate). Runs inside the caller's transaction; does NOT commit."""
+    cur.execute('''SELECT id, line_amount, cgst_rate, sgst_rate, igst_rate
+                   FROM invoice_lines WHERE invoice_id=%s ORDER BY id''', [invoice_id])
+    lines = [dict(r) for r in cur.fetchall()]
+    if not lines:
+        return
+    line_gst, totals = compute_aggregate_gst(lines)
+    for lid, g in line_gst.items():
+        cur.execute('''UPDATE invoice_lines
+            SET cgst_amount=%s, sgst_amount=%s, igst_amount=%s, line_total=%s
+            WHERE id=%s''',
+            [g['cgst_amount'], g['sgst_amount'], g['igst_amount'], g['line_total'], lid])
+
+    cur.execute('SELECT round_off FROM invoice_header WHERE id=%s', [invoice_id])
+    r = cur.fetchone()
+    round_off = float((r['round_off'] if r else 0) or 0)
+    total = round(totals['subtotal'] + totals['cgst_amount'] + totals['sgst_amount']
+                  + totals['igst_amount'] + round_off, 2)
+    cur.execute('''UPDATE invoice_header
+        SET subtotal=%s, cgst_amount=%s, sgst_amount=%s, igst_amount=%s,
+            total_amount=%s, amount_in_words=%s
+        WHERE id=%s''',
+        [totals['subtotal'], totals['cgst_amount'], totals['sgst_amount'],
+         totals['igst_amount'], total, _amount_in_words(total), invoice_id])
+
+
 def create_invoice_from_bills(bill_ids, invoice_data):
     """Create invoice from approved bills"""
     conn = get_db()
@@ -813,6 +929,11 @@ def create_invoice_from_bills(bill_ids, invoice_data):
             'UPDATE invoice_header SET tds_amount = %s, tcs_amount = %s WHERE id = %s',
             [total_tds, total_tcs, invoice_id]
         )
+
+    # Recompute GST on the aggregated taxable per rate so the invoice and the
+    # SAP payload match SAP's own round(base x rate) — fixes the paisa mismatch
+    # that blocked auto-posting.
+    _reconcile_invoice_gst(cur, invoice_id)
 
     conn.commit()
     conn.close()
