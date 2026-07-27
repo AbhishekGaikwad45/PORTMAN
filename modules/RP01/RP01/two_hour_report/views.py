@@ -281,8 +281,20 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
         from collections import defaultdict
 
         delay_totals = defaultdict(int)
+        # Rows whose to_time (or from_time) came back NULL — an open /
+        # not-yet-closed delay. We can't compute a duration for these, so
+        # they're tracked separately and flagged in the label instead of
+        # crashing strptime() or being silently dropped.
+        open_delay_flags = set()
 
         for d in cur.fetchall():
+
+            key = (d["delay_type"], d["delay_name"])
+
+            if not d["from_time"] or not d["to_time"]:
+                delay_totals.setdefault(key, 0)
+                open_delay_flags.add(key)
+                continue
 
             start = datetime.strptime(d["from_time"], "%H:%M")
             end = datetime.strptime(d["to_time"], "%H:%M")
@@ -291,7 +303,6 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             if mins < 0:
                 mins += 24 * 60
 
-            key = (d["delay_type"], d["delay_name"])
             delay_totals[key] += mins
 
         delay_list = []
@@ -302,6 +313,8 @@ def _fetch_two_hour_rows(entry_date, from_time, to_time, cargo=''):
             mins = total_mins % 60
 
             duration = f"{hrs:02d}:{mins:02d}"
+            if (delay_type, delay_name) in open_delay_flags:
+                duration += "+ (ongoing)"
 
             delay_list.append(
                 f"{delay_type}: {delay_name} ({duration})"
