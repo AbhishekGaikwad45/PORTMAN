@@ -672,32 +672,6 @@ def delete_bill_line(row_id):
     conn.close()
 
 
-def delete_bill(bill_id):
-    """Delete bill header and all lines"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    # Reverse billed tracking on cargo declaration tables
-    cur.execute('''
-        SELECT cargo_source_type, cargo_source_id, quantity
-        FROM bill_lines
-        WHERE bill_id = %s AND cargo_source_type IS NOT NULL AND cargo_source_id IS NOT NULL
-    ''', (bill_id,))
-    for row in cur.fetchall():
-        _unmark_cargo_source_billed(
-            cur,
-            row['cargo_source_type'],
-            row['cargo_source_id'],
-            float(row['quantity'] or 0)
-        )
-    # Unmark service records as billed
-    cur.execute('''UPDATE service_records SET is_billed=0, bill_id=NULL
-        WHERE bill_id IN (SELECT id FROM bill_header WHERE id=%s)''', (bill_id,))
-    # Delete bill (cascades to lines)
-    cur.execute('DELETE FROM bill_header WHERE id=%s', (bill_id,))
-    conn.commit()
-    conn.close()
-
-
 # ===== INVOICE FUNCTIONS =====
 
 def get_next_invoice_number(series='INV'):
