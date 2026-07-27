@@ -1485,6 +1485,7 @@
                         <th>CARGO</th>
                         <th>JETTY</th>
                         <th>ETA</th>
+                        <th>UNDER DISCHARGE</th>
                     </tr>
                 </thead>
                 <tbody id="jettyWaitingBody">
@@ -1663,57 +1664,58 @@
     function pad(n) { return String(n).padStart(2, '0'); }
 
     async function loadJettyCargoReport() {
-        const reportDate = document.getElementById('report-date').value;
-        const shift = document.getElementById('report-shift').value;
-        const jBody = document.getElementById('jettyWaitingBody');
-        const bBody = document.getElementById('berthDischargeBody');
+    const reportDate = document.getElementById('report-date').value;
+    const shift = document.getElementById('report-shift').value;
+    const jBody = document.getElementById('jettyWaitingBody');
+    const bBody = document.getElementById('berthDischargeBody');
 
-        if (!reportDate) return;
+    if (!reportDate) return;
 
-        const params = new URLSearchParams({ date: reportDate, shift });
-        let res, data;
-        try {
-            res = await fetch(`/api/module/RP01/jetty-cargo-report-v2?${params}`);
-            if (!res.ok) {
-                const errText = await res.text();
-                console.error('Jetty cargo report HTTP error:', res.status, errText);
-                jBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Error ${res.status}: ${errText.slice(0, 200)}</td></tr>`;
-                bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Error ${res.status}</td></tr>`;
-                return;
-            }
-            data = await res.json();
-            console.log('Jetty cargo report data:', data);
-        } catch (e) {
-            console.error('Jetty cargo report failed:', e);
-            jBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Fetch failed: ${e.message}</td></tr>`;
-            bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Fetch failed</td></tr>`;
+    const params = new URLSearchParams({ date: reportDate, shift });
+    let res, data;
+    try {
+        res = await fetch(`/api/module/RP01/jetty-cargo-report-v2?${params}`);
+        if (!res.ok) {
+            const errText = await res.text();
+            console.error('Jetty cargo report HTTP error:', res.status, errText);
+            jBody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#dc2626;">Error ${res.status}: ${errText.slice(0, 200)}</td></tr>`;
+            bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Error ${res.status}</td></tr>`;
             return;
         }
-
-        jBody.innerHTML = '';
-        if (!(data.jetty_waiting || []).length) {
-            jBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges waiting at jetty</td></tr>';
-        } else {
-            data.jetty_waiting.forEach(r => {
-                jBody.innerHTML += `<tr><td style="text-align:left;">${r.cargo}</td>
-                <td>${r.jetty}</td><td>${r.eta}</td></tr>`;
-            });
-        }
-        jBody.innerHTML += `<tr class="total-row"><td>TOTAL</td>
-        <td>${data.total_jetty || 0}</td><td>${data.total_eta || 0}</td></tr>`;
-
-        bBody.innerHTML = '';
-        if (!(data.berth_discharge || []).length) {
-            bBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges/MBC under discharge</td></tr>';
-        } else {
-            data.berth_discharge.forEach(r => {
-                bBody.innerHTML += `<tr>
-                    <td style="text-align:left;">${r.mbc_name || ''}</td>
-                    <td style="text-align:left;">${r.cargo}</td>
-                <td>${r.berth}</td><td>${Number(r.balance).toLocaleString()}</td></tr>`;
-            });
-        }
+        data = await res.json();
+        console.log('Jetty cargo report data:', data);
+    } catch (e) {
+        console.error('Jetty cargo report failed:', e);
+        jBody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#dc2626;">Fetch failed: ${e.message}</td></tr>`;
+        bBody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:#dc2626;">Fetch failed</td></tr>`;
+        return;
     }
+
+    jBody.innerHTML = '';
+    if (!(data.jetty_waiting || []).length) {
+        jBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">No barges waiting at jetty</td></tr>';
+    } else {
+        data.jetty_waiting.forEach(r => {
+            jBody.innerHTML += `<tr><td style="text-align:left;">${r.cargo}</td>
+            <td>${r.jetty}</td><td>${r.eta}</td><td>${r.discharge || 0}</td></tr>`;
+        });
+    }
+    jBody.innerHTML += `<tr class="total-row"><td>TOTAL</td>
+    <td>${data.total_jetty || 0}</td><td>${data.total_eta || 0}</td><td>${data.total_discharge || 0}</td></tr>`;
+
+    // ── उजवा table — काहीही बदल नाही ──
+    bBody.innerHTML = '';
+    if (!(data.berth_discharge || []).length) {
+        bBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No barges/MBC under discharge</td></tr>';
+    } else {
+        data.berth_discharge.forEach(r => {
+            bBody.innerHTML += `<tr>
+                <td style="text-align:left;">${r.mbc_name || ''}</td>
+                <td style="text-align:left;">${r.cargo}</td>
+            <td>${r.berth}</td><td>${Number(r.balance).toLocaleString()}</td></tr>`;
+        });
+    }
+}
 
     // ══════════════════════════════════════════════════════════════════════════════
     //  MAIN PREVIEW
