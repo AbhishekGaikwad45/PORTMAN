@@ -772,8 +772,9 @@ $(document).ready(function () {
 
         const vesselName = cells.eq(1).text().trim();
         const vesselType = cells.eq(2).text().trim();
+        const cargoName  = cells.eq(5).text().trim();
 
-        const key = vesselName + '|' + vesselType;
+        const key = vesselName + '|' + vesselType + '|' + cargoName;
 
         const actualCell = cells.eq(7);
 
@@ -797,49 +798,6 @@ $(document).ready(function () {
         'vertical-align': 'middle',
     });
 }
-    $(document).on('change', '.material-po-input', async function () {
-
-        const materialPo = $(this).val();
-        const id = $(this).data('id');
-        const customerDetailId = $(this).data('customer-detail-id');
-        const vesselType = $(this).data('vessel-type');
-        console.log({
-            id: id,
-            customer_detail_id: customerDetailId,
-            vessel_type: vesselType,
-            material_po: materialPo
-        });
-
-        try {
-
-            const response = await fetch('/api/update-material-po', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                id: id,
-                customer_detail_id: customerDetailId,
-                vessel_type: vesselType,
-                material_po: materialPo
-            })
-            });
-
-            const result = await response.json();
-
-            if (!result.success) {
-                throw new Error(result.message);
-            }
-
-            alert('Material PO updated successfully');
-
-        } catch (err) {
-
-            console.error(err);
-            alert(err.message || 'Failed to update Material PO');
-
-        }
-    });
     function validateDates(fromDate, toDate) {
 
         const cutoffDate = '2026-05-01';
