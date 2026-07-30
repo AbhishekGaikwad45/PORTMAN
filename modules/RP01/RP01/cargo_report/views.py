@@ -258,11 +258,7 @@ LEFT JOIN (
         LOWER(TRIM(cargo_name)) AS match_cargo,
 
         SUM(
-            CASE
-                WHEN TRIM(COALESCE(quantity::text, '')) != ''
-                THEN quantity::numeric
-                ELSE 0
-            END
+            COALESCE(quantity, split_quantity, 0)
         ) AS actual_discharge
 
     FROM lueu_lines
@@ -681,11 +677,7 @@ LEFT JOIN (
         LOWER(TRIM(cargo_name)) AS match_cargo,
 
         SUM(
-            CASE
-                WHEN TRIM(COALESCE(quantity::text, '')) != ''
-                THEN quantity::numeric
-                ELSE 0
-            END
+            COALESCE(quantity, split_quantity, 0)
         ) AS actual_discharge
 
     FROM lueu_lines
