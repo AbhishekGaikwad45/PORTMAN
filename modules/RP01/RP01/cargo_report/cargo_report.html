@@ -756,13 +756,14 @@ $(document).ready(function () {
 
 
     }
-    function mergeActualDischargeCells() {
+function mergeActualDischargeCells() {
 
     const rows = $('#cargo-report-table tbody tr');
 
     let prevKey = '';
     let firstCell = null;
     let rowspan = 1;
+    let sum = 0;
 
     rows.each(function () {
 
@@ -772,17 +773,19 @@ $(document).ready(function () {
 
         const vesselName = cells.eq(1).text().trim();
         const vesselType = cells.eq(2).text().trim();
-        const cargoName  = cells.eq(5).text().trim();
 
-        const key = vesselName + '|' + vesselType + '|' + cargoName;
+        const key = vesselName + '|' + vesselType;
 
         const actualCell = cells.eq(7);
+        const actualValue = parseFloat(actualCell.text().replace(/,/g, '')) || 0;
 
         if (key === prevKey) {
 
             rowspan++;
+            sum += actualValue;
 
             firstCell.attr('rowspan', rowspan);
+            firstCell.text(sum);
 
             actualCell.remove();
 
@@ -791,6 +794,9 @@ $(document).ready(function () {
             prevKey = key;
             firstCell = actualCell;
             rowspan = 1;
+            sum = actualValue;
+
+            firstCell.text(sum);
         }
     });
 
