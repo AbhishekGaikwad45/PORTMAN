@@ -756,54 +756,100 @@ $(document).ready(function () {
 
 
     }
-function mergeActualDischargeCells() {
 
-    const rows = $('#cargo-report-table tbody tr');
+    function mergeActualDischargeCells() {
 
-    let prevKey = '';
-    let firstCell = null;
-    let rowspan = 1;
-    let sum = 0;
+        const rows = $('#cargo-report-table tbody tr');
 
-    rows.each(function () {
+        let prevKey = '';
+        let firstCell = null;
+        let rowspan = 1;
+        let sum = 0;
 
-        const cells = $(this).find('td');
+        rows.each(function () {
 
-        if (cells.length < 13) return;
+            const cells = $(this).find('td');
 
-        const vesselName = cells.eq(1).text().trim();
-        const vesselType = cells.eq(2).text().trim();
+            if (cells.length < 13) return;
 
-        const key = vesselName + '|' + vesselType;
+            const vesselName = cells.eq(1).text().trim();
+            const vesselType = cells.eq(2).text().trim();
 
-        const actualCell = cells.eq(7);
-        const actualValue = parseFloat(actualCell.text().replace(/,/g, '')) || 0;
+            const key = vesselName + '|' + vesselType;
 
-        if (key === prevKey) {
+            const actualCell = cells.eq(7);
+            const actualValue = parseFloat(actualCell.text().replace(/,/g, '')) || 0;
 
-            rowspan++;
-            sum += actualValue;
+            if (key === prevKey) {
 
-            firstCell.attr('rowspan', rowspan);
-            firstCell.text(sum);
+                rowspan++;
+                sum += actualValue;
 
-            actualCell.remove();
+                firstCell.attr('rowspan', rowspan);
+                firstCell.text(sum);
 
-        } else {
+                actualCell.remove();
 
-            prevKey = key;
-            firstCell = actualCell;
-            rowspan = 1;
-            sum = actualValue;
+            } else {
 
-            firstCell.text(sum);
+                prevKey = key;
+                firstCell = actualCell;
+                rowspan = 1;
+                sum = actualValue;
+
+                firstCell.text(sum);
+            }
+        });
+
+        $('#cargo-report-table td[rowspan]').css({
+            'vertical-align': 'middle',
+        });
+    }
+
+    $(document).on('change', '.material-po-input', async function () {
+
+        const materialPo = $(this).val();
+        const id = $(this).data('id');
+        const customerDetailId = $(this).data('customer-detail-id');
+        const vesselType = $(this).data('vessel-type');
+        console.log({
+            id: id,
+            customer_detail_id: customerDetailId,
+            vessel_type: vesselType,
+            material_po: materialPo
+        });
+
+        try {
+
+            const response = await fetch('/api/update-material-po', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                id: id,
+                customer_detail_id: customerDetailId,
+                vessel_type: vesselType,
+                material_po: materialPo
+            })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.message);
+            }
+
+            alert('Material PO updated successfully');
+
+        } catch (err) {
+
+            console.error(err);
+            alert(err.message || 'Failed to update Material PO');
+
         }
     });
 
-    $('#cargo-report-table td[rowspan]').css({
-        'vertical-align': 'middle',
-    });
-}
     function validateDates(fromDate, toDate) {
 
         const cutoffDate = '2026-05-01';
