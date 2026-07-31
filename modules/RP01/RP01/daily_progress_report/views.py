@@ -1735,16 +1735,14 @@ def barge_discharge_report():
         historic_rows = cur.fetchall()
 
         # 2b) Live total (lueu_lines): month_total (calendar month -> data_date),
-        #     live_fy_total (live_start -> data_date), live_cumulative_total (live_start -> data_date)
+        #     live_fy_total (live_start -> data_date)
         cur.execute("""
             SELECT
                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
                 COALESCE(vc.cargo_category, 'Others') AS cargo_category,
                 SUM(COALESCE(lbl.quantity, 0)) AS live_fy_total,
                 SUM(CASE WHEN lbl.entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
-                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total,
-                SUM(CASE WHEN lbl.entry_date::date <= %(data_date)s::date
-                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS live_cumulative_total
+                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total
             FROM lueu_lines lbl
             LEFT JOIN vessel_cargo vc
                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
@@ -1754,6 +1752,48 @@ def barge_discharge_report():
             GROUP BY vc.cargo_type, vc.cargo_category
         """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
         live_rows = cur.fetchall()
+
+        # 2c) ALL-TIME CUMULATIVE — matches port_overview's _compute_fy_throughput
+        # "all_time" logic exactly: union live (lueu_lines) + historic
+        # (rp01_historical_lueu) with NO fiscal-year restriction at all, just
+        # entry_date <= data_date on each side, then group. This is summed at
+        # (cargo_type, cargo_category) grain instead of (fy_start, cargo_type)
+        # since that's this report's granularity, but the underlying set of
+        # rows being summed is identical to what feeds the "All Time" card.
+        cur.execute("""
+            WITH cumulative AS (
+                SELECT
+                    COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                    COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                    COALESCE(l.quantity, 0) AS quantity
+                FROM lueu_lines l
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+                WHERE l.is_deleted IS NOT TRUE
+                  AND l.quantity IS NOT NULL
+                  AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+                  AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') <= %(data_date)s::date
+
+                UNION ALL
+
+                SELECT
+                    COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                    COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                    COALESCE(h.quantity, 0) AS quantity
+                FROM rp01_historical_lueu h
+                LEFT JOIN vessel_cargo vc
+                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(h.cargo_name))
+                WHERE h.quantity IS NOT NULL
+                  AND h.entry_date <= %(data_date)s::date
+            )
+            SELECT
+                cargo_type,
+                cargo_category,
+                SUM(quantity) AS cumulative_total
+            FROM cumulative
+            GROUP BY cargo_type, cargo_category
+        """, {"data_date": data_date})
+        cumulative_rows = cur.fetchall()
 
         # 3) Per-equipment totals: day total (live only) and month total (live only)
         cur.execute(f"""
@@ -1797,25 +1837,29 @@ def barge_discharge_report():
             key = cat_key(row['cargo_type'], row['cargo_category'])
             historic_totals[key] = int(row['historic_total'] or 0)
 
-        # ---- Live totals (May onward) merged with historic to form FY / cumulative ----
+        # ---- Live totals (May onward) merged with historic to form FY ----
         month_totals = {}
         fy_totals = {}
-        cumulative_totals = {}
         for row in live_rows:
             key = cat_key(row['cargo_type'], row['cargo_category'])
             month_totals[key] = int(row['month_total'] or 0)
             live_fy = int(row['live_fy_total'] or 0)
-            live_cum = int(row['live_cumulative_total'] or 0)
             hist = historic_totals.get(key, 0)
             fy_totals[key] = hist + live_fy
-            cumulative_totals[key] = hist + live_cum
 
         # Categories that ONLY had historic (April) activity, with nothing live yet
         for key, hist_val in historic_totals.items():
             if key not in fy_totals:
                 fy_totals[key] = hist_val
-                cumulative_totals[key] = hist_val
                 month_totals.setdefault(key, 0)
+
+        # ---- Cumulative totals: all-time, sourced from query 2c above ----
+        # (Same union-of-live-and-historic-with-no-FY-cutoff logic used to
+        # build the "All Time" card in port_overview_data().)
+        cumulative_totals = {}
+        for row in cumulative_rows:
+            key = cat_key(row['cargo_type'], row['cargo_category'])
+            cumulative_totals[key] = int(row['cumulative_total'] or 0)
 
         # ---- Seed equipment_totals with full equipment list too ----
         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
@@ -1844,7 +1888,6 @@ def barge_discharge_report():
     finally:
         cur.close()
         conn.close()
-
 # from flask import request, jsonify
 # from datetime import datetime, timedelta
 # # from your_app import bp, login_required, get_db, get_cursor  # keep your existing imports
