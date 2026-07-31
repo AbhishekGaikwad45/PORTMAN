@@ -113,7 +113,31 @@ LEFT JOIN vessels v
     ON LOWER(TRIM(v.vessel_name)) =
        LOWER(TRIM(h.mbc_name))
 
-LEFT JOIN mbc_discharge_port_lines dp
+-- FIX: pre-aggregate discharge port lines to ONE row per mbc header
+-- (previously joined raw, causing a cross-join fan-out with cd below,
+-- which duplicated actual_discharge N times per header)
+LEFT JOIN (
+    SELECT
+        mbc_id,
+
+        MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS unloading_commenced,
+
+        CASE
+            WHEN SUM(
+                CASE
+                    WHEN NULLIF(TRIM(unloading_commenced), '') IS NOT NULL
+                     AND NULLIF(TRIM(unloading_completed), '') IS NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ) > 0
+            THEN NULL
+            ELSE MAX(NULLIF(TRIM(unloading_completed), '')::timestamp)
+        END AS unloading_completed
+
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+) dp
     ON dp.mbc_id = h.id
 
 LEFT JOIN mbc_customer_details cd
@@ -130,10 +154,10 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
-WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
-        dp.unloading_commenced::timestamp BETWEEN
+        dp.unloading_commenced BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -142,12 +166,12 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        dp.unloading_completed IS NOT NULL
         AND
-        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+        dp.unloading_completed BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -156,10 +180,10 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+        dp.unloading_completed IS NULL
     )
 )
 
@@ -363,7 +387,23 @@ ORDER BY discharge_commenced DESC;
 )
         rows = cur.fetchall()
         data = []
+
+        # A header (vessel) can have multiple Material PO rows (from cd fan-out).
+        # actual_discharge is a HEADER-level total, so it must only be attached
+        # to ONE row per header — otherwise any downstream code that groups/merges
+        # these rows and sums the column ends up multiplying it by the PO count.
+        seen_actual_keys = set()
+
         for row in rows:
+            header_key = (row['id'], row['vessel_type'])
+            raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
+
+            if header_key in seen_actual_keys:
+                actual_val = 0
+            else:
+                actual_val = raw_actual
+                seen_actual_keys.add(header_key)
+
             data.append({
     'id': row['id'],
     'vessel_name': row['vessel_name'] or '-',
@@ -372,7 +412,7 @@ ORDER BY discharge_commenced DESC;
     'cargo_type': row['cargo_type'] or '-',
     'cargo_name': row['cargo_name'] or '-',
     'bl_qty_mt': float(row['bl_qty_mt']) if row['bl_qty_mt'] else 0,
-    'actual_discharge': float(row['actual_discharge']) if row['actual_discharge'] else 0,
+    'actual_discharge': actual_val,
     'load_port': row['load_port'] or '-',
     'consignee': row['consignee'] or '-',
     'customer_detail_id': row['customer_detail_id'] or '-',
@@ -534,7 +574,31 @@ LEFT JOIN vessels v
     ON LOWER(TRIM(v.vessel_name)) =
        LOWER(TRIM(h.mbc_name))
 
-LEFT JOIN mbc_discharge_port_lines dp
+-- FIX: pre-aggregate discharge port lines to ONE row per mbc header
+-- (previously joined raw, causing a cross-join fan-out with cd below,
+-- which duplicated actual_discharge N times per header)
+LEFT JOIN (
+    SELECT
+        mbc_id,
+
+        MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS unloading_commenced,
+
+        CASE
+            WHEN SUM(
+                CASE
+                    WHEN NULLIF(TRIM(unloading_commenced), '') IS NOT NULL
+                     AND NULLIF(TRIM(unloading_completed), '') IS NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ) > 0
+            THEN NULL
+            ELSE MAX(NULLIF(TRIM(unloading_completed), '')::timestamp)
+        END AS unloading_completed
+
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+) dp
     ON dp.mbc_id = h.id
 
 LEFT JOIN mbc_customer_details cd
@@ -551,10 +615,10 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
-WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
-        dp.unloading_commenced::timestamp BETWEEN
+        dp.unloading_commenced BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -563,12 +627,12 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        dp.unloading_completed IS NOT NULL
         AND
-        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+        dp.unloading_completed BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -577,10 +641,10 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+        dp.unloading_completed IS NULL
     )
 )
 
@@ -839,10 +903,27 @@ ORDER BY discharge_commenced DESC;
         total_actual = 0
         data_start   = 3
 
+        # A header (vessel) can have multiple Material PO rows (from cd fan-out).
+        # actual_discharge is a HEADER-level total, so it must only be written
+        # once per header — otherwise the merged cell + running total below
+        # end up multiplying it by the number of PO rows for that header.
+        seen_actual_keys = set()
+        header_keys = []  # parallel list, one entry per data row, used for merging
+
         for idx, row in enumerate(rows, start=1):
             r      = data_start + idx - 1
             qty    = float(row['bl_qty_mt'])        if row['bl_qty_mt']        else 0
-            actual = float(row['actual_discharge'])  if row['actual_discharge']  else 0
+            raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
+
+            header_key = (row['id'], row['vessel_type'])
+            header_keys.append(header_key)
+
+            if header_key in seen_actual_keys:
+                actual = 0
+            else:
+                actual = raw_actual
+                seen_actual_keys.add(header_key)
+
             total_qty    += qty
             total_actual += actual
             fill = fill_even if idx % 2 == 0 else fill_odd
@@ -885,17 +966,17 @@ else '',
             ws.row_dimensions[r].height = 20
 
         # ── Merge Actual Discharge column (H) ────────────────
+        # Grouped by header_key (id + vessel_type), NOT by comparing cell
+        # values — the real actual_discharge now lives on only the first
+        # row of each group, with 0 on the rest, so values legitimately differ.
         merge_start = data_start
 
         for row_no in range(data_start + 1, data_start + len(rows) + 1):
 
-            prev_vessel = ws.cell(row=row_no - 1, column=2).value
-            curr_vessel = ws.cell(row=row_no, column=2).value
+            prev_key = header_keys[row_no - 1 - data_start]
+            curr_key = header_keys[row_no - data_start]
 
-            prev_actual = ws.cell(row=row_no - 1, column=8).value
-            curr_actual = ws.cell(row=row_no, column=8).value
-
-            if prev_vessel != curr_vessel or prev_actual != curr_actual:
+            if prev_key != curr_key:
 
                 if row_no - merge_start > 1:
 
