@@ -5,6 +5,10 @@ import io
 from flask import request, jsonify
 from openpyxl.styles import PatternFill
 
+import json
+from ..daily_ops.views import _compute_fy_throughput
+from ..daily_ops.model import fy_label
+
 from flask import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1634,6 +1638,25 @@ def barge_status_report():
         cur.close()
         conn.close()
 
+def _get_cutoff_editable_fy_values():
+    """Admin-set historical FY overrides (see daily_ops_cutoff) — the exact
+    same source port_overview's 'All Time' card reads from."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute("SELECT cutoff_values FROM daily_ops_cutoff ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    values = row['cutoff_values']
+    if isinstance(values, str):
+        values = json.loads(values)
+    return (values or {}).get('fy_throughput', {})
+
+
 @bp.route(
     '/api/module/RP01/barge_discharge_report',
     methods=['GET']
@@ -1753,13 +1776,10 @@ def barge_discharge_report():
         """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
         live_rows = cur.fetchall()
 
-        # 2c) ALL-TIME CUMULATIVE — matches port_overview's _compute_fy_throughput
-        # "all_time" logic exactly: union live (lueu_lines) + historic
-        # (rp01_historical_lueu) with NO fiscal-year restriction at all, just
-        # entry_date <= data_date on each side, then group. This is summed at
-        # (cargo_type, cargo_category) grain instead of (fy_start, cargo_type)
-        # since that's this report's granularity, but the underlying set of
-        # rows being summed is identical to what feeds the "All Time" card.
+        # 2c) Raw category-level breakdown — same union-of-live-and-historic
+        # rows _compute_fy_throughput sums (no FY bound, entry_date <= data_date),
+        # grouped down to cargo_category. Used to split each cargo_type's
+        # all-time total across its categories.
         cur.execute("""
             WITH cumulative AS (
                 SELECT
@@ -1853,13 +1873,92 @@ def barge_discharge_report():
                 fy_totals[key] = hist_val
                 month_totals.setdefault(key, 0)
 
-        # ---- Cumulative totals: all-time, sourced from query 2c above ----
-        # (Same union-of-live-and-historic-with-no-FY-cutoff logic used to
-        # build the "All Time" card in port_overview_data().)
-        cumulative_totals = {}
+        # ---- Raw category-level all-time totals (always available; this
+        # alone reproduces the pre-override union total) ----
+        raw_category_totals = {}   # cat_key -> qty
+        raw_type_totals = {}       # cargo_type -> qty (sum of its categories)
         for row in cumulative_rows:
-            key = cat_key(row['cargo_type'], row['cargo_category'])
-            cumulative_totals[key] = int(row['cumulative_total'] or 0)
+            ctype = row['cargo_type']
+            key = cat_key(ctype, row['cargo_category'])
+            qty = float(row['cumulative_total'] or 0)
+            raw_category_totals[key] = qty
+            raw_type_totals[ctype] = raw_type_totals.get(ctype, 0) + qty
+
+        # ---- Cumulative totals: try to pull the authoritative per-type
+        # total from _compute_fy_throughput (same function port_overview's
+        # "All Time" card uses, admin overrides included) and scale each
+        # category to match it. If that call fails for ANY reason (missing
+        # table, import issue, bad override data, etc.) fall back to the
+        # plain raw union total so the report never comes back empty. ----
+        cumulative_totals = {}
+        try:
+            current_fy_label = fy_label(fy_start_year)
+            editable_fy = _get_cutoff_editable_fy_values()
+            editable_fy.pop(current_fy_label, None)
+            fy_throughput = _compute_fy_throughput(data_date, editable_fy)
+
+            cumulative_by_type = {}
+            for fy_dict in fy_throughput.values():
+                for ctype, qty in fy_dict.items():
+                    cumulative_by_type[ctype] = cumulative_by_type.get(ctype, 0) + qty
+
+            # Case-insensitive index, since this report defaults missing
+            # cargo_type to 'Others' while _compute_fy_throughput defaults
+            # to 'OTHERS' — a straight dict lookup can miss a real match.
+            cumulative_by_type_ci = {k.upper(): v for k, v in cumulative_by_type.items()}
+
+            # Iterate the FULL cargo hierarchy (every type/category the
+            # master list knows about), not just whatever raw_category_totals
+            # happened to find. A cargo_type can have zero matching rows in
+            # the raw union query (e.g. its vessel_cargo.cargo_name doesn't
+            # line up with lueu_lines/rp01_historical_lueu cargo_name for
+            # that entry) while still having real data via _compute_fy_
+            # throughput — looping only over raw rows silently drops that
+            # type from the response entirely instead of showing it as 0.
+            for ctype, ccats in cargo_hierarchy.items():
+                authoritative_type_total = cumulative_by_type_ci.get(ctype.upper())
+                raw_type_total = raw_type_totals.get(ctype, 0)
+
+                if authoritative_type_total and raw_type_total > 0:
+                    # Have both a trustworthy type total AND a raw category
+                    # breakdown to scale it across — proportional split.
+                    scale = authoritative_type_total / raw_type_total
+                    for ccat in ccats:
+                        key = cat_key(ctype, ccat)
+                        raw_qty = raw_category_totals.get(key, 0)
+                        cumulative_totals[key] = int(round(raw_qty * scale))
+
+                elif authoritative_type_total:
+                    # Authoritative total exists but raw data has NO rows
+                    # for this type at all (or sums to 0) — we have no
+                    # category-level breakdown to scale, so split evenly
+                    # across the type's categories rather than lose the
+                    # number entirely. Single-category types get it whole.
+                    share = authoritative_type_total / len(ccats) if ccats else 0
+                    for ccat in ccats:
+                        key = cat_key(ctype, ccat)
+                        cumulative_totals[key] = int(round(share))
+
+                else:
+                    # No authoritative data either — use whatever raw
+                    # totals exist (0 if none).
+                    for ccat in ccats:
+                        key = cat_key(ctype, ccat)
+                        cumulative_totals[key] = int(round(raw_category_totals.get(key, 0)))
+
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            # Fallback: plain raw union total, no override weighting.
+            cumulative_totals = {
+                key: int(round(qty)) for key, qty in raw_category_totals.items()
+            }
+
+        # Categories with historic-only activity that never showed up in
+        # cumulative_rows (shouldn't normally happen since 2c also scans
+        # rp01_historical_lueu, but keep this as a safety net).
+        for key, hist_val in historic_totals.items():
+            cumulative_totals.setdefault(key, hist_val)
 
         # ---- Seed equipment_totals with full equipment list too ----
         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
@@ -1888,6 +1987,7 @@ def barge_discharge_report():
     finally:
         cur.close()
         conn.close()
+
 # from flask import request, jsonify
 # from datetime import datetime, timedelta
 # # from your_app import bp, login_required, get_db, get_cursor  # keep your existing imports
