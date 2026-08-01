@@ -54,46 +54,85 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
 
     cur.execute("""
         SELECT
-            h.id,
-            h.vcn_id,
-            h.vessel_name,
-            h.operation_type,
-            h.nor_tendered,
+            lh.id,
+            lh.vcn_id,
+            lh.vessel_name,
+            lh.operation_type,
+            lh.nor_tendered,
 
-            (
-                SELECT MIN(a.discharge_started)
-                FROM ldud_anchorage a
-                WHERE a.ldud_id = h.id
-            ) AS discharge_commenced,
+            first_anchor.discharge_started AS discharge_commenced,
+            last_anchor.discharge_completed AS discharge_completed
 
-            (
-                SELECT MAX(a.discharge_commenced)
-                FROM ldud_anchorage a
-                WHERE a.ldud_id = h.id
-            ) AS discharge_completed
+        FROM ldud_header lh
 
-        FROM ldud_header h
-        WHERE h.nor_tendered IS NOT NULL
-        ORDER BY h.nor_tendered
-    """)
+        LEFT JOIN LATERAL (
 
-    all_vessels = [dict(r) for r in cur.fetchall()]
+            SELECT
+                MIN(discharge_started) AS discharge_started
 
-    vessels = []
-    for v in all_vessels:
-        commenced = _parse_dt(v.get("discharge_commenced"))
-        completed = _parse_dt(v.get("discharge_completed"))
+            FROM ldud_anchorage
+            WHERE ldud_id = lh.id
 
-        if not commenced:
-            continue
+        ) first_anchor ON TRUE
 
-        if commenced > to_datetime:
-            continue
+        LEFT JOIN LATERAL (
 
-        if completed and completed < from_datetime:
-            continue
+            SELECT
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM ldud_anchorage x
+                        WHERE x.ldud_id = lh.id
+                        AND x.discharge_started IS NOT NULL
+                        AND x.discharge_commenced IS NULL
+                    )
+                    THEN NULL
+                    ELSE MAX(discharge_commenced)
+                END AS discharge_completed
 
-        vessels.append(v)
+            FROM ldud_anchorage
+            WHERE ldud_id = lh.id
+
+        ) last_anchor ON TRUE
+
+        WHERE
+            lh.nor_tendered IS NOT NULL
+
+            AND first_anchor.discharge_started IS NOT NULL
+            AND first_anchor.discharge_started < %s
+
+            AND (
+                last_anchor.discharge_completed IS NULL
+
+                OR last_anchor.discharge_completed >= %s
+
+                OR EXISTS (
+                    SELECT 1
+                    FROM ldud_barge_lines b
+                    WHERE b.ldud_id = lh.id
+                    AND (
+                            b.completed_discharge_berth IS NULL
+                        OR b.cast_off_berth IS NULL
+                    )
+                )
+            )
+
+        ORDER BY
+            first_anchor.discharge_started,
+            lh.vessel_name
+    """, (to_datetime, from_datetime))
+
+    vessels = [dict(r) for r in cur.fetchall()]
+        # ── Window-gate discharge_completed, same rule as the Daily Progress
+    #    Report: only show the completion timestamp if it actually falls
+    #    inside THIS report's window (from_datetime -> to_datetime).
+    #    A vessel that finished discharging weeks ago should show blank
+    #    here unless you're viewing the report for the day it completed —
+    #    otherwise every later day keeps re-showing stale "completed" data.
+    for v in vessels:
+        dc = _parse_dt(v.get('discharge_completed'))
+        if dc and not (from_datetime <= dc < to_datetime):
+            v['discharge_completed'] = None
 
     ldud_ids = [v['id'] for v in vessels]
     vcn_ids  = [v['vcn_id'] for v in vessels if v.get('vcn_id')]
@@ -133,26 +172,47 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         for r in cur.fetchall():
             ops_till[r['ldud_id']] = float(r['qty'])
 
-    if vcn_ids:
-        cur.execute("""
-            SELECT vcn_id, COALESCE(SUM(bl_quantity),0) total
-            FROM vcn_cargo_declaration
-            WHERE vcn_id = ANY(%s) GROUP BY vcn_id
-        """, (vcn_ids,))
-        bl_import = {r['vcn_id']: float(r['total']) for r in cur.fetchall()}
+        cargo_import = {}
+        cargo_export = {}
 
-        cur.execute("""
-            SELECT vcn_id, COALESCE(SUM(bl_quantity),0) total
-            FROM vcn_export_cargo_declaration
-            WHERE vcn_id = ANY(%s) GROUP BY vcn_id
-        """, (vcn_ids,))
-        bl_export = {r['vcn_id']: float(r['total']) for r in cur.fetchall()}
+        if vcn_ids:
+            cur.execute("""
+                SELECT vcn_id, COALESCE(SUM(bl_quantity),0) total
+                FROM vcn_cargo_declaration
+                WHERE vcn_id = ANY(%s) GROUP BY vcn_id
+            """, (vcn_ids,))
+            bl_import = {r['vcn_id']: float(r['total']) for r in cur.fetchall()}
 
-        cur.execute("""
-            SELECT id, importer_exporter_name
-            FROM vcn_header WHERE id = ANY(%s)
-        """, (vcn_ids,))
-        vcn_meta = {r['id']: r['importer_exporter_name'] or '' for r in cur.fetchall()}
+            cur.execute("""
+                SELECT vcn_id, STRING_AGG(DISTINCT TRIM(cargo_name), ', ') AS cargo_name
+                FROM vcn_cargo_declaration
+                WHERE vcn_id = ANY(%s)
+                AND cargo_name IS NOT NULL AND TRIM(cargo_name) <> ''
+                GROUP BY vcn_id
+            """, (vcn_ids,))
+            cargo_import = {r['vcn_id']: r['cargo_name'] or '' for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT vcn_id, COALESCE(SUM(bl_quantity),0) total
+                FROM vcn_export_cargo_declaration
+                WHERE vcn_id = ANY(%s) GROUP BY vcn_id
+            """, (vcn_ids,))
+            bl_export = {r['vcn_id']: float(r['total']) for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT vcn_id, STRING_AGG(DISTINCT TRIM(cargo_name), ', ') AS cargo_name
+                FROM vcn_export_cargo_declaration
+                WHERE vcn_id = ANY(%s)
+                AND cargo_name IS NOT NULL AND TRIM(cargo_name) <> ''
+                GROUP BY vcn_id
+            """, (vcn_ids,))
+            cargo_export = {r['vcn_id']: r['cargo_name'] or '' for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT id, importer_exporter_name
+                FROM vcn_header WHERE id = ANY(%s)
+            """, (vcn_ids,))
+            vcn_meta = {r['id']: r['importer_exporter_name'] or '' for r in cur.fetchall()}
 
     if ldud_ids:
         cur.execute("""
@@ -223,6 +283,9 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         vid    = v.get('vcn_id')
         op     = v.get('operation_type', '')
         bl_qty = (bl_export.get(vid, 0) if op == 'Export' else bl_import.get(vid, 0))
+
+        v['cargo_name']       = (cargo_export.get(vid, '') if op == 'Export' else cargo_import.get(vid, ''))
+        v['stevedore_group']  = vcn_meta.get(vid, '')
 
         v['stevedore_group']  = vcn_meta.get(vid, '')
         v['bl_qty']           = bl_qty
@@ -580,25 +643,32 @@ def bargeposition():
     ]
     occupied_berths = len(occupied_berth_set)
 
-    today         = date.today()
-    today_str     = today.strftime('%Y-%m-%d')
+    today = date.today()
+    today_str = today.strftime("%Y-%m-%d")
 
-    from_date_str = request.args.get('from_date', today_str)
-    from_time_str = request.args.get('from_time', '00:00')
-    to_date_str   = request.args.get('to_date',   today_str)
-    to_time_str   = request.args.get('to_time',   '23:59')
+    # Keep these for the page filters
+    from_date_str = request.args.get("from_date", today_str)
+    from_time_str = request.args.get("from_time", "08:00")
+    to_date_str = request.args.get("to_date", today_str)
+    to_time_str = request.args.get("to_time", "08:00")
 
-    to_datetime   = datetime.strptime(f"{to_date_str} {to_time_str}", '%Y-%m-%d %H:%M')
+    # Mother Vessel report uses 08:00 -> 08:00 window
+    report_dt = datetime.strptime(to_date_str, "%Y-%m-%d")
 
-    # Widen window: start from previous day 00:00 so vessels that
-    # completed early on the selected date are still included
-    from_datetime = datetime.strptime(from_date_str, '%Y-%m-%d') - timedelta(days=1)
-    from_datetime = from_datetime.replace(hour=0, minute=0, second=0)
+    to_datetime = report_dt.replace(
+        hour=8,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    from_datetime = to_datetime - timedelta(hours=24)
 
     mother_vessels_raw = _fetch_mother_vessels(from_datetime, to_datetime)
 
     mother_vessels = [{
         'vessel_name':         v.get('vessel_name') or '',
+        'cargo_name':          v.get('cargo_name') or '',
         'stevedore_group':     v.get('stevedore_group') or '',
         'bl_qty':              v.get('bl_qty') or 0,
         'ops_24h':             v.get('ops_24h') or 0,
@@ -829,6 +899,7 @@ def api_mother_vessel_data():
     vessels_raw = _fetch_mother_vessels(from_datetime, to_datetime)
     vessels = [{
         'vessel_name':         v.get('vessel_name') or '',
+        'cargo_name':          v.get('cargo_name') or '',
         'discharge_commenced': _fmt_dt(v.get('discharge_commenced')),
         'discharge_completed': _fmt_dt(v.get('discharge_completed')),
         'under_loading':       v.get('under_loading') or '',
@@ -870,7 +941,7 @@ def get_shift_details():
 @bp.route('/api/module/RP01/shift-wise-discharge')
 @login_required
 def shift_wise_discharge():
-    import traceback
+
     try:
         return _shift_wise_discharge_inner()
     except Exception as e:
