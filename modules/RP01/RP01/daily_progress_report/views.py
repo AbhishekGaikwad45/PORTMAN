@@ -863,7 +863,15 @@ def monthly_cargo_report():
                 )
                 gross_hours = min(gross_hours, 24)
                 # ---------------- Total Delay Hours ----------------
-                deduction_hours = 0.0
+                # FIX: delays were previously summed one-by-one, so two
+                # OVERLAPPING delay records (e.g. logged separately but
+                # covering the same real downtime) got double-counted,
+                # pushing deduction_hours above gross_hours and clamping
+                # W/W hours down to 0 even though the real downtime never
+                # exceeded the day. Overlapping intervals are now merged
+                # per crane_count bucket before their duration is measured,
+                # so the same minute of downtime is never counted twice.
+                crane_buckets = {}
 
                 for delay_start, delay_end, crane_count in vessel_delays:
 
@@ -876,22 +884,55 @@ def monthly_cargo_report():
                     if overlap_end <= overlap_start:
                         continue
 
-                    overlap_hours = (
-                        overlap_end - overlap_start
-                    ).total_seconds() / 3600
+                    crane_buckets.setdefault(crane_count, []).append(
+                        (overlap_start, overlap_end)
+                    )
+
+                deduction_hours = 0.0
+
+                for crane_count, intervals in crane_buckets.items():
+
+                    intervals.sort(key=lambda iv: iv[0])
+                    merged = [intervals[0]]
+
+                    for start, end in intervals[1:]:
+                        last_start, last_end = merged[-1]
+                        if start <= last_end:  # overlapping or touching
+                            merged[-1] = (last_start, max(last_end, end))
+                        else:
+                            merged.append((start, end))
+
+                    bucket_hours = sum(
+                        (end - start).total_seconds() / 3600
+                        for start, end in merged
+                    )
 
                     # Crane-wise adjustment
                     if crane_count == 1:
-                        adjusted_hours = overlap_hours / 4
+                        adjusted_hours = bucket_hours / 4
 
                     elif crane_count == 2:
-                        adjusted_hours = overlap_hours / 2
+                        adjusted_hours = bucket_hours / 2
 
                     elif crane_count == 3:
-                        adjusted_hours = overlap_hours * 3 / 4
+                        adjusted_hours = bucket_hours * 3 / 4
 
-                    else:       # 4 cranes
-                        adjusted_hours = overlap_hours
+                    elif crane_count == 4:
+                        adjusted_hours = bucket_hours
+
+                    else:
+                        # Unexpected crane_count (0, missing, negative, >4).
+                        # Previously silently treated the same as 4 cranes
+                        # (full deduction) with no visibility. Logging this
+                        # so we can confirm whether it's what's inflating
+                        # deduction_hours for specific vessels.
+                        print(
+                            f"WARNING: unexpected crane_count={crane_count} "
+                            f"for ldud_id={vessel_id} on {day['date_day']} "
+                            f"-> treating as full (4-crane) deduction, "
+                            f"bucket_hours={bucket_hours:.2f}"
+                        )
+                        adjusted_hours = bucket_hours
 
                     deduction_hours += adjusted_hours
 
