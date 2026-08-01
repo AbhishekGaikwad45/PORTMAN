@@ -676,17 +676,9 @@ def monthly_cargo_report():
         #   MOTHER VESSEL ACCOUNT -> "Mother Vessel Agent"
         #   FORCE MAJEURE         -> "Force Majeure"
         #   MbPT                  -> "MBP"
-        #
-        # FIX: vessel_delay_types is not guaranteed unique on TRIM(LOWER(name)).
-        # If two rows in that lookup table share the same (trimmed/lowercased)
-        # name, the plain JOIN below duplicates every matching ldud_delays row
-        # once per duplicate -> deduction_hours gets summed twice for that
-        # delay -> some days get over-deducted down to 0 W/W hours.
-        # DISTINCT ON collapses vessel_delay_types to one row per name before
-        # the join, so each delay can only match once.
         ldud_ids = list({row["id"] for row in rows})
 
-        delay_map = {}  # { ldud_id: [ (start_dt, end_dt, crane_count), ... ] }
+        delay_map = {}  # { ldud_id: [ (start_dt, end_dt), ... ] }
 
         if ldud_ids:
             cur.execute("""
@@ -697,14 +689,8 @@ def monthly_cargo_report():
     d.crane_number,
     vdt.type AS delay_type
     FROM ldud_delays d
-    JOIN (
-        SELECT DISTINCT ON (TRIM(LOWER(name)))
-            TRIM(LOWER(name)) AS name_key,
-            type
-        FROM vessel_delay_types
-        ORDER BY TRIM(LOWER(name)), id
-    ) vdt
-        ON vdt.name_key = TRIM(LOWER(d.delay_name))
+    JOIN vessel_delay_types vdt
+        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
     WHERE d.ldud_id = ANY(%s)
       AND vdt.type IN (
             'MOTHER VESSEL ACCOUNT',
@@ -714,10 +700,6 @@ def monthly_cargo_report():
       AND d.start_datetime IS NOT NULL
       AND d.end_datetime IS NOT NULL
 """, (ldud_ids,))
-
-            # Extra safety net: if ldud_delays itself ever contains a literal
-            # duplicate row for the same delay, don't double-count it either.
-            seen_delays = set()
 
             for r in cur.fetchall():
                 try:
@@ -730,18 +712,6 @@ def monthly_cargo_report():
                     crane_count = int(r["crane_number"] or 0)
                 except:
                     crane_count = 0
-
-                dedup_key = (
-                    r["ldud_id"],
-                    r["start_datetime"],
-                    r["end_datetime"],
-                    r["crane_number"],
-                    r["delay_type"],
-                )
-
-                if dedup_key in seen_delays:
-                    continue
-                seen_delays.add(dedup_key)
 
                 delay_map.setdefault(
                     r["ldud_id"],
@@ -863,15 +833,7 @@ def monthly_cargo_report():
                 )
                 gross_hours = min(gross_hours, 24)
                 # ---------------- Total Delay Hours ----------------
-                # FIX: delays were previously summed one-by-one, so two
-                # OVERLAPPING delay records (e.g. logged separately but
-                # covering the same real downtime) got double-counted,
-                # pushing deduction_hours above gross_hours and clamping
-                # W/W hours down to 0 even though the real downtime never
-                # exceeded the day. Overlapping intervals are now merged
-                # per crane_count bucket before their duration is measured,
-                # so the same minute of downtime is never counted twice.
-                crane_buckets = {}
+                deduction_hours = 0.0
 
                 for delay_start, delay_end, crane_count in vessel_delays:
 
@@ -884,55 +846,22 @@ def monthly_cargo_report():
                     if overlap_end <= overlap_start:
                         continue
 
-                    crane_buckets.setdefault(crane_count, []).append(
-                        (overlap_start, overlap_end)
-                    )
-
-                deduction_hours = 0.0
-
-                for crane_count, intervals in crane_buckets.items():
-
-                    intervals.sort(key=lambda iv: iv[0])
-                    merged = [intervals[0]]
-
-                    for start, end in intervals[1:]:
-                        last_start, last_end = merged[-1]
-                        if start <= last_end:  # overlapping or touching
-                            merged[-1] = (last_start, max(last_end, end))
-                        else:
-                            merged.append((start, end))
-
-                    bucket_hours = sum(
-                        (end - start).total_seconds() / 3600
-                        for start, end in merged
-                    )
+                    overlap_hours = (
+                        overlap_end - overlap_start
+                    ).total_seconds() / 3600
 
                     # Crane-wise adjustment
                     if crane_count == 1:
-                        adjusted_hours = bucket_hours / 4
+                        adjusted_hours = overlap_hours / 4
 
                     elif crane_count == 2:
-                        adjusted_hours = bucket_hours / 2
+                        adjusted_hours = overlap_hours / 2
 
                     elif crane_count == 3:
-                        adjusted_hours = bucket_hours * 3 / 4
+                        adjusted_hours = overlap_hours * 3 / 4
 
-                    elif crane_count == 4:
-                        adjusted_hours = bucket_hours
-
-                    else:
-                        # Unexpected crane_count (0, missing, negative, >4).
-                        # Previously silently treated the same as 4 cranes
-                        # (full deduction) with no visibility. Logging this
-                        # so we can confirm whether it's what's inflating
-                        # deduction_hours for specific vessels.
-                        print(
-                            f"WARNING: unexpected crane_count={crane_count} "
-                            f"for ldud_id={vessel_id} on {day['date_day']} "
-                            f"-> treating as full (4-crane) deduction, "
-                            f"bucket_hours={bucket_hours:.2f}"
-                        )
-                        adjusted_hours = bucket_hours
+                    else:       # 4 cranes
+                        adjusted_hours = overlap_hours
 
                     deduction_hours += adjusted_hours
 
@@ -2878,17 +2807,14 @@ def mbc_expected_report():
 
         WHERE
 
-            -- Cast off from load port has happened
-            NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
+            -- Reached load port
+            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
 
             -- Not yet arrived at Gull Island
             AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
-            -- ETA is present
-            AND NULLIF(TRIM(lpl.eta), '') IS NOT NULL
-
             AND DATE(
-                NULLIF(TRIM(lpl.eta), '')::timestamp
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2897,7 +2823,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(lpl.eta), '')::timestamp
+            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
 
         """
 
@@ -2967,6 +2893,7 @@ def mbc_expected_report():
 
         cur.close()
         conn.close()
+
 @bp.route(
     '/api/module/RP01/tide_report',
     methods=['GET']
