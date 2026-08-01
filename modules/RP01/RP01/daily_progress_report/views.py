@@ -2711,26 +2711,19 @@ def mbc_expected_report():
 
             mh.load_port,
 
-            lpl.eta
+            dpl.arrival_gull_island
 
         FROM mbc_header mh
 
         LEFT JOIN mbc_discharge_port_lines dpl
             ON dpl.mbc_id = mh.id
 
-        LEFT JOIN mbc_load_port_lines lpl
-            ON lpl.mbc_id = mh.id
-
         WHERE
 
-            -- Reached load port
-            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
-
-            -- Not yet arrived at Gull Island
-            AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
+            NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+                NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2739,7 +2732,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+            NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
 
         """
 
@@ -2764,7 +2757,7 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
+            eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
 
             data.append({
 
@@ -2778,7 +2771,7 @@ def mbc_expected_report():
 
                 "load_port": row["load_port"] or "",
 
-                "eta_mumbai": eta_gull
+                "eta_mumbai": eta_mumbai
 
             })
 
@@ -2809,6 +2802,7 @@ def mbc_expected_report():
 
         cur.close()
         conn.close()
+
 @bp.route(
     '/api/module/RP01/tide_report',
     methods=['GET']
