@@ -2807,14 +2807,17 @@ def mbc_expected_report():
 
         WHERE
 
-            -- Reached load port
-            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+            -- Cast off from load port has happened
+            NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
 
             -- Not yet arrived at Gull Island
             AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
+            -- ETA is present
+            AND NULLIF(TRIM(lpl.eta), '') IS NOT NULL
+
             AND DATE(
-                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+                NULLIF(TRIM(lpl.eta), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2823,7 +2826,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+            NULLIF(TRIM(lpl.eta), '')::timestamp
 
         """
 
@@ -2893,7 +2896,6 @@ def mbc_expected_report():
 
         cur.close()
         conn.close()
-
 @bp.route(
     '/api/module/RP01/tide_report',
     methods=['GET']
