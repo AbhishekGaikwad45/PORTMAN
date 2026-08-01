@@ -1662,6 +1662,332 @@ def _get_cutoff_editable_fy_values():
     methods=['GET']
 )
 @login_required
+# def barge_discharge_report():
+
+#     report_date = request.args.get('report_date')
+
+#     if not report_date:
+#         return jsonify({"success": False, "message": "Report date required"})
+
+#     try:
+#         report_date_obj = datetime.strptime(report_date, "%Y-%m-%d")
+#     except ValueError:
+#         return jsonify({"success": False, "message": "Invalid report_date format, expected YYYY-MM-DD"})
+
+#     # Selecting "13" means: show data for 12th (report_date - 1 day)
+#     data_date_obj = report_date_obj - timedelta(days=1)
+#     data_date = data_date_obj.strftime("%Y-%m-%d")
+
+#     # Month-to-date: 1st of that month -> data_date
+#     month_start = data_date_obj.replace(day=1).strftime("%Y-%m-%d")
+
+#     # Fiscal year start (assumption: Apr 1)
+#     fy_start_year = data_date_obj.year if data_date_obj.month >= 4 else data_date_obj.year - 1
+#     fy_start = f"{fy_start_year}-04-01"
+
+#     # Historic table (rp01_historical_lueu) covers April only.
+#     # Live table (lueu_lines) covers May 1 onward for this FY.
+#     historic_cutoff = f"{fy_start_year}-04-30"
+#     live_start = f"{fy_start_year}-05-01"
+
+#     EQUIP_EXPR = """
+#         CASE TRIM(equipment_name)
+#             WHEN 'Barge Unloader 1' THEN 'BUL-01'
+#             WHEN 'Barge Unloader 2' THEN 'BUL-02'
+#             ELSE COALESCE(TRIM(equipment_name), 'Others')
+#         END
+#     """
+
+#     def cat_key(ctype, ccat):
+#         return f"{ctype}||{ccat}"
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+
+#     try:
+#         # 0) FULL master list of cargo_type -> cargo_category
+#         cur.execute("""
+#             SELECT
+#                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                 COALESCE(vc.cargo_category, 'Others') AS cargo_category
+#             FROM vessel_cargo vc
+#             GROUP BY vc.cargo_type, vc.cargo_category
+#             ORDER BY vc.cargo_type, vc.cargo_category
+#         """)
+#         master_cargo_rows = cur.fetchall()
+
+#         # 0b) FULL master list of equipment (live table only)
+#         cur.execute(f"""
+#             SELECT DISTINCT {EQUIP_EXPR} AS equipment
+#             FROM lueu_lines
+#             WHERE is_deleted IS NOT TRUE
+#             ORDER BY 1
+#         """)
+#         master_equipment_rows = cur.fetchall()
+
+#         # 1) Day-level matrix: equipment x (cargo_type, cargo_category) for entry_date = data_date ONLY (live table only)
+#         cur.execute(f"""
+#             SELECT
+#                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                 COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+#                 {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')} AS equipment,
+#                 SUM(lbl.quantity) AS day_qty
+#             FROM lueu_lines lbl
+#             LEFT JOIN vessel_cargo vc
+#                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+#             WHERE lbl.is_deleted IS NOT TRUE
+#               AND lbl.quantity IS NOT NULL
+#               AND lbl.entry_date::date = %(data_date)s::date
+#             GROUP BY vc.cargo_type, vc.cargo_category, {EQUIP_EXPR.replace('equipment_name', 'lbl.equipment_name')}
+#         """, {"data_date": data_date})
+#         day_rows = cur.fetchall()
+
+#         # 2a) Historic total (rp01_historical_lueu): fy_start -> historic_cutoff (April 1 - April 30)
+#         cur.execute("""
+#             SELECT
+#                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                 COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+#                 SUM(COALESCE(h.quantity, 0)) AS historic_total
+#             FROM rp01_historical_lueu h
+#             LEFT JOIN vessel_cargo vc
+#                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(h.cargo_name))
+#             WHERE h.quantity IS NOT NULL
+#               AND h.entry_date BETWEEN %(fy_start)s::date AND %(historic_cutoff)s::date
+#             GROUP BY vc.cargo_type, vc.cargo_category
+#         """, {"fy_start": fy_start, "historic_cutoff": historic_cutoff})
+#         historic_rows = cur.fetchall()
+
+#         # 2b) Live total (lueu_lines): month_total (calendar month -> data_date),
+#         #     live_fy_total (live_start -> data_date)
+#         cur.execute("""
+#             SELECT
+#                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                 COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+#                 SUM(COALESCE(lbl.quantity, 0)) AS live_fy_total,
+#                 SUM(CASE WHEN lbl.entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+#                     THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total
+#             FROM lueu_lines lbl
+#             LEFT JOIN vessel_cargo vc
+#                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
+#             WHERE lbl.is_deleted IS NOT TRUE
+#               AND lbl.quantity IS NOT NULL
+#               AND lbl.entry_date::date BETWEEN %(live_start)s::date AND %(data_date)s::date
+#             GROUP BY vc.cargo_type, vc.cargo_category
+#         """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
+#         live_rows = cur.fetchall()
+
+#         # 2c) Raw category-level breakdown — same union-of-live-and-historic
+#         # rows _compute_fy_throughput sums (no FY bound, entry_date <= data_date),
+#         # grouped down to cargo_category. Used to split each cargo_type's
+#         # all-time total across its categories.
+#         cur.execute("""
+#             WITH cumulative AS (
+#                 SELECT
+#                     COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                     COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+#                     COALESCE(l.quantity, 0) AS quantity
+#                 FROM lueu_lines l
+#                 LEFT JOIN vessel_cargo vc
+#                     ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+#                 WHERE l.is_deleted IS NOT TRUE
+#                   AND l.quantity IS NOT NULL
+#                   AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+#                   AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') <= %(data_date)s::date
+
+#                 UNION ALL
+
+#                 SELECT
+#                     COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+#                     COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+#                     COALESCE(h.quantity, 0) AS quantity
+#                 FROM rp01_historical_lueu h
+#                 LEFT JOIN vessel_cargo vc
+#                     ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(h.cargo_name))
+#                 WHERE h.quantity IS NOT NULL
+#                   AND h.entry_date <= %(data_date)s::date
+#             )
+#             SELECT
+#                 cargo_type,
+#                 cargo_category,
+#                 SUM(quantity) AS cumulative_total
+#             FROM cumulative
+#             GROUP BY cargo_type, cargo_category
+#         """, {"data_date": data_date})
+#         cumulative_rows = cur.fetchall()
+
+#         # 3) Per-equipment totals: day total (live only) and month total (live only)
+#         cur.execute(f"""
+#             SELECT
+#                 {EQUIP_EXPR} AS equipment,
+#                 SUM(CASE WHEN entry_date::date = %(data_date)s::date
+#                     THEN quantity ELSE 0 END) AS day_total,
+#                 SUM(CASE WHEN entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+#                     THEN quantity ELSE 0 END) AS month_total
+#             FROM lueu_lines
+#             WHERE is_deleted IS NOT TRUE AND quantity IS NOT NULL
+#             GROUP BY {EQUIP_EXPR}
+#         """, {"data_date": data_date, "month_start": month_start})
+#         equipment_totals_rows = cur.fetchall()
+
+#         # ---- Build FULL cargo hierarchy: cargo_type -> [cargo_categories] ----
+#         cargo_hierarchy = {}
+#         for row in master_cargo_rows:
+#             ctype = row['cargo_type']
+#             ccat = row['cargo_category']
+#             cargo_hierarchy.setdefault(ctype, [])
+#             if ccat not in cargo_hierarchy[ctype]:
+#                 cargo_hierarchy[ctype].append(ccat)
+
+#         all_keys = [cat_key(row['cargo_type'], row['cargo_category']) for row in master_cargo_rows]
+
+#         # ---- Seed equipment_rows with the FULL equipment list (zeros by default) ----
+#         equipment_rows = {}
+#         for row in master_equipment_rows:
+#             equipment_rows[row['equipment']] = {k: 0 for k in all_keys}
+
+#         for row in day_rows:
+#             equip = row['equipment']
+#             key = cat_key(row['cargo_type'], row['cargo_category'])
+#             equipment_rows.setdefault(equip, {k: 0 for k in all_keys})
+#             equipment_rows[equip][key] = int(row['day_qty'] or 0)
+
+#         # ---- Historic totals (April) per category ----
+#         historic_totals = {}
+#         for row in historic_rows:
+#             key = cat_key(row['cargo_type'], row['cargo_category'])
+#             historic_totals[key] = int(row['historic_total'] or 0)
+
+#         # ---- Live totals (May onward) merged with historic to form FY ----
+#         month_totals = {}
+#         fy_totals = {}
+#         for row in live_rows:
+#             key = cat_key(row['cargo_type'], row['cargo_category'])
+#             month_totals[key] = int(row['month_total'] or 0)
+#             live_fy = int(row['live_fy_total'] or 0)
+#             hist = historic_totals.get(key, 0)
+#             fy_totals[key] = hist + live_fy
+
+#         # Categories that ONLY had historic (April) activity, with nothing live yet
+#         for key, hist_val in historic_totals.items():
+#             if key not in fy_totals:
+#                 fy_totals[key] = hist_val
+#                 month_totals.setdefault(key, 0)
+
+#         # ---- Raw category-level all-time totals (always available; this
+#         # alone reproduces the pre-override union total) ----
+#         raw_category_totals = {}   # cat_key -> qty
+#         raw_type_totals = {}       # cargo_type -> qty (sum of its categories)
+#         for row in cumulative_rows:
+#             ctype = row['cargo_type']
+#             key = cat_key(ctype, row['cargo_category'])
+#             qty = float(row['cumulative_total'] or 0)
+#             raw_category_totals[key] = qty
+#             raw_type_totals[ctype] = raw_type_totals.get(ctype, 0) + qty
+
+#         # ---- Cumulative totals: try to pull the authoritative per-type
+#         # total from _compute_fy_throughput (same function port_overview's
+#         # "All Time" card uses, admin overrides included) and scale each
+#         # category to match it. If that call fails for ANY reason (missing
+#         # table, import issue, bad override data, etc.) fall back to the
+#         # plain raw union total so the report never comes back empty. ----
+#         cumulative_totals = {}
+#         try:
+#             current_fy_label = fy_label(fy_start_year)
+#             editable_fy = _get_cutoff_editable_fy_values()
+#             editable_fy.pop(current_fy_label, None)
+#             fy_throughput = _compute_fy_throughput(data_date, editable_fy)
+
+#             cumulative_by_type = {}
+#             for fy_dict in fy_throughput.values():
+#                 for ctype, qty in fy_dict.items():
+#                     cumulative_by_type[ctype] = cumulative_by_type.get(ctype, 0) + qty
+
+#             # Case-insensitive index, since this report defaults missing
+#             # cargo_type to 'Others' while _compute_fy_throughput defaults
+#             # to 'OTHERS' — a straight dict lookup can miss a real match.
+#             cumulative_by_type_ci = {k.upper(): v for k, v in cumulative_by_type.items()}
+
+#             # Iterate the FULL cargo hierarchy (every type/category the
+#             # master list knows about), not just whatever raw_category_totals
+#             # happened to find. A cargo_type can have zero matching rows in
+#             # the raw union query (e.g. its vessel_cargo.cargo_name doesn't
+#             # line up with lueu_lines/rp01_historical_lueu cargo_name for
+#             # that entry) while still having real data via _compute_fy_
+#             # throughput — looping only over raw rows silently drops that
+#             # type from the response entirely instead of showing it as 0.
+#             for ctype, ccats in cargo_hierarchy.items():
+#                 authoritative_type_total = cumulative_by_type_ci.get(ctype.upper())
+#                 raw_type_total = raw_type_totals.get(ctype, 0)
+
+#                 if authoritative_type_total and raw_type_total > 0:
+#                     # Have both a trustworthy type total AND a raw category
+#                     # breakdown to scale it across — proportional split.
+#                     scale = authoritative_type_total / raw_type_total
+#                     for ccat in ccats:
+#                         key = cat_key(ctype, ccat)
+#                         raw_qty = raw_category_totals.get(key, 0)
+#                         cumulative_totals[key] = int(round(raw_qty * scale))
+
+#                 elif authoritative_type_total:
+#                     # Authoritative total exists but raw data has NO rows
+#                     # for this type at all (or sums to 0) — we have no
+#                     # category-level breakdown to scale, so split evenly
+#                     # across the type's categories rather than lose the
+#                     # number entirely. Single-category types get it whole.
+#                     share = authoritative_type_total / len(ccats) if ccats else 0
+#                     for ccat in ccats:
+#                         key = cat_key(ctype, ccat)
+#                         cumulative_totals[key] = int(round(share))
+
+#                 else:
+#                     # No authoritative data either — use whatever raw
+#                     # totals exist (0 if none).
+#                     for ccat in ccats:
+#                         key = cat_key(ctype, ccat)
+#                         cumulative_totals[key] = int(round(raw_category_totals.get(key, 0)))
+
+#         except Exception:
+#             import traceback
+#             traceback.print_exc()
+#             # Fallback: plain raw union total, no override weighting.
+#             cumulative_totals = {
+#                 key: int(round(qty)) for key, qty in raw_category_totals.items()
+#             }
+
+#         # Categories with historic-only activity that never showed up in
+#         # cumulative_rows (shouldn't normally happen since 2c also scans
+#         # rp01_historical_lueu, but keep this as a safety net).
+#         for key, hist_val in historic_totals.items():
+#             cumulative_totals.setdefault(key, hist_val)
+
+#         # ---- Seed equipment_totals with full equipment list too ----
+#         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
+#         for row in equipment_totals_rows:
+#             equipment_totals[row['equipment']] = {
+#                 "total_day": int(row['day_total'] or 0),
+#                 "total_month": int(row['month_total'] or 0),
+#             }
+
+#         final_data = {
+#             "cargo_hierarchy": cargo_hierarchy,
+#             "equipment_rows": equipment_rows,
+#             "equipment_totals": equipment_totals,
+#             "month_totals": month_totals,
+#             "fy_totals": fy_totals,
+#             "cumulative_totals": cumulative_totals,
+#         }
+
+#         return jsonify({"success": True, "data": final_data})
+
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return jsonify({"success": False, "message": str(e)})
+
+#     finally:
+#         cur.close()
+#         conn.close()
+
 def barge_discharge_report():
 
     report_date = request.args.get('report_date')
@@ -1776,42 +2102,24 @@ def barge_discharge_report():
         """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
         live_rows = cur.fetchall()
 
-        # 2c) Raw category-level breakdown — same union-of-live-and-historic
-        # rows _compute_fy_throughput sums (no FY bound, entry_date <= data_date),
+        # 2c) Raw category-level breakdown — LIVE ONLY (lueu_lines), historic
+        # excluded per requirement: cumulative_totals must not include
+        # rp01_historical_lueu data. (no FY bound, entry_date <= data_date),
         # grouped down to cargo_category. Used to split each cargo_type's
         # all-time total across its categories.
         cur.execute("""
-            WITH cumulative AS (
-                SELECT
-                    COALESCE(vc.cargo_type, 'Others') AS cargo_type,
-                    COALESCE(vc.cargo_category, 'Others') AS cargo_category,
-                    COALESCE(l.quantity, 0) AS quantity
-                FROM lueu_lines l
-                LEFT JOIN vessel_cargo vc
-                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
-                WHERE l.is_deleted IS NOT TRUE
-                  AND l.quantity IS NOT NULL
-                  AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
-                  AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') <= %(data_date)s::date
-
-                UNION ALL
-
-                SELECT
-                    COALESCE(vc.cargo_type, 'Others') AS cargo_type,
-                    COALESCE(vc.cargo_category, 'Others') AS cargo_category,
-                    COALESCE(h.quantity, 0) AS quantity
-                FROM rp01_historical_lueu h
-                LEFT JOIN vessel_cargo vc
-                    ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(h.cargo_name))
-                WHERE h.quantity IS NOT NULL
-                  AND h.entry_date <= %(data_date)s::date
-            )
             SELECT
-                cargo_type,
-                cargo_category,
-                SUM(quantity) AS cumulative_total
-            FROM cumulative
-            GROUP BY cargo_type, cargo_category
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(l.quantity, 0)) AS cumulative_total
+            FROM lueu_lines l
+            LEFT JOIN vessel_cargo vc
+                ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.quantity IS NOT NULL
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') <= %(data_date)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
         """, {"data_date": data_date})
         cumulative_rows = cur.fetchall()
 
@@ -1873,8 +2181,8 @@ def barge_discharge_report():
                 fy_totals[key] = hist_val
                 month_totals.setdefault(key, 0)
 
-        # ---- Raw category-level all-time totals (always available; this
-        # alone reproduces the pre-override union total) ----
+        # ---- Raw category-level all-time totals, LIVE ONLY (no historic).
+        # This alone reproduces the pre-override live-only union total. ----
         raw_category_totals = {}   # cat_key -> qty
         raw_type_totals = {}       # cargo_type -> qty (sum of its categories)
         for row in cumulative_rows:
@@ -1889,7 +2197,13 @@ def barge_discharge_report():
         # "All Time" card uses, admin overrides included) and scale each
         # category to match it. If that call fails for ANY reason (missing
         # table, import issue, bad override data, etc.) fall back to the
-        # plain raw union total so the report never comes back empty. ----
+        # plain raw live-only total so the report never comes back empty.
+        #
+        # NOTE: _compute_fy_throughput may itself include
+        # rp01_historical_lueu data internally. If cumulative_totals still
+        # includes historic figures after this change, that function needs
+        # to be checked/adjusted separately — this report file has no
+        # control over what it sums internally. ----
         cumulative_totals = {}
         try:
             current_fy_label = fy_label(fy_start_year)
@@ -1910,11 +2224,11 @@ def barge_discharge_report():
             # Iterate the FULL cargo hierarchy (every type/category the
             # master list knows about), not just whatever raw_category_totals
             # happened to find. A cargo_type can have zero matching rows in
-            # the raw union query (e.g. its vessel_cargo.cargo_name doesn't
-            # line up with lueu_lines/rp01_historical_lueu cargo_name for
-            # that entry) while still having real data via _compute_fy_
-            # throughput — looping only over raw rows silently drops that
-            # type from the response entirely instead of showing it as 0.
+            # the raw live query (e.g. its vessel_cargo.cargo_name doesn't
+            # line up with lueu_lines cargo_name for that entry) while still
+            # having real data via _compute_fy_throughput — looping only
+            # over raw rows silently drops that type from the response
+            # entirely instead of showing it as 0.
             for ctype, ccats in cargo_hierarchy.items():
                 authoritative_type_total = cumulative_by_type_ci.get(ctype.upper())
                 raw_type_total = raw_type_totals.get(ctype, 0)
@@ -1941,7 +2255,7 @@ def barge_discharge_report():
 
                 else:
                     # No authoritative data either — use whatever raw
-                    # totals exist (0 if none).
+                    # (live-only) totals exist (0 if none).
                     for ccat in ccats:
                         key = cat_key(ctype, ccat)
                         cumulative_totals[key] = int(round(raw_category_totals.get(key, 0)))
@@ -1949,16 +2263,16 @@ def barge_discharge_report():
         except Exception:
             import traceback
             traceback.print_exc()
-            # Fallback: plain raw union total, no override weighting.
+            # Fallback: plain raw live-only total, no override weighting.
             cumulative_totals = {
                 key: int(round(qty)) for key, qty in raw_category_totals.items()
             }
 
-        # Categories with historic-only activity that never showed up in
-        # cumulative_rows (shouldn't normally happen since 2c also scans
-        # rp01_historical_lueu, but keep this as a safety net).
-        for key, hist_val in historic_totals.items():
-            cumulative_totals.setdefault(key, hist_val)
+        # NOTE: historic backfill safety-net intentionally removed —
+        # cumulative_totals must not include rp01_historical_lueu data.
+        # Any cargo_type/category with only historic activity and no live
+        # rows will now correctly show as 0 (or absent) here, even though
+        # it may still appear in fy_totals/month_totals via historic_totals.
 
         # ---- Seed equipment_totals with full equipment list too ----
         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
@@ -2673,6 +2987,136 @@ def upcoming_vessel_report():
 
         conn.close()
 
+# @bp.route(
+#     '/api/module/RP01/mbc_expected_report',
+#     methods=['GET']
+# )
+# @login_required
+# def mbc_expected_report():
+
+#     report_date = request.args.get("report_date")
+
+#     print("\n========== MBC EXPECTED REPORT START ==========")
+#     print("REPORT DATE:", report_date)
+
+#     if not report_date:
+
+#         return jsonify({
+#             "success": False,
+#             "message": "Report date required"
+#         })
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+
+#     try:
+
+#         query = """
+
+#         SELECT
+
+#             mh.id,
+
+#             mh.mbc_name,
+
+#             mh.cargo_name,
+
+#             mh.bl_quantity,
+
+#             mh.load_port,
+
+#             dpl.arrival_gull_island
+
+#         FROM mbc_header mh
+
+#         LEFT JOIN mbc_discharge_port_lines dpl
+#             ON dpl.mbc_id = mh.id
+
+#         WHERE
+
+#             NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
+
+#             AND DATE(
+#                 NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+#             )
+#             BETWEEN
+#                 (%s::date - INTERVAL '1 day')
+#             AND
+#                 %s::date
+
+#         ORDER BY
+
+#             NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+
+#         """
+
+#         print(query)
+#         print(report_date)
+
+#         cur.execute(
+#             query,
+#             (
+#                 report_date,
+#                 report_date
+#             )
+#         )
+
+#         rows = cur.fetchall()
+
+#         print("TOTAL ROWS:", len(rows))
+
+#         data = []
+
+#         sr_no = 1
+
+#         for row in rows:
+
+#             eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
+
+#             data.append({
+
+#                 "mbc_no": sr_no,
+
+#                 "mbc_name": row["mbc_name"] or "",
+
+#                 "cargo": row["cargo_name"] or "",
+
+#                 "bl_qty": int(row["bl_quantity"] or 0),
+
+#                 "load_port": row["load_port"] or "",
+
+#                 "eta_mumbai": eta_mumbai
+
+#             })
+
+#             sr_no += 1
+
+#         return jsonify({
+
+#             "success": True,
+
+#             "data": data
+
+#         })
+
+#     except Exception as e:
+
+#         import traceback
+#         traceback.print_exc()
+
+#         return jsonify({
+
+#             "success": False,
+
+#             "message": str(e)
+
+#         })
+
+#     finally:
+
+#         cur.close()
+#         conn.close()
+
 @bp.route(
     '/api/module/RP01/mbc_expected_report',
     methods=['GET']
@@ -2711,19 +3155,26 @@ def mbc_expected_report():
 
             mh.load_port,
 
-            dpl.arrival_gull_island
+            lpl.eta
 
         FROM mbc_header mh
 
         LEFT JOIN mbc_discharge_port_lines dpl
             ON dpl.mbc_id = mh.id
 
+        LEFT JOIN mbc_load_port_lines lpl
+            ON lpl.mbc_id = mh.id
+
         WHERE
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
+            -- Reached load port
+            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+
+            -- Not yet arrived at Gull Island
+            AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2732,7 +3183,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
 
         """
 
@@ -2757,7 +3208,7 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
+            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
 
             data.append({
 
@@ -2771,7 +3222,7 @@ def mbc_expected_report():
 
                 "load_port": row["load_port"] or "",
 
-                "eta_mumbai": eta_mumbai
+                "eta_mumbai": eta_gull
 
             })
 
