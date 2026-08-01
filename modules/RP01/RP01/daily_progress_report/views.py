@@ -676,9 +676,17 @@ def monthly_cargo_report():
         #   MOTHER VESSEL ACCOUNT -> "Mother Vessel Agent"
         #   FORCE MAJEURE         -> "Force Majeure"
         #   MbPT                  -> "MBP"
+        #
+        # FIX: vessel_delay_types is not guaranteed unique on TRIM(LOWER(name)).
+        # If two rows in that lookup table share the same (trimmed/lowercased)
+        # name, the plain JOIN below duplicates every matching ldud_delays row
+        # once per duplicate -> deduction_hours gets summed twice for that
+        # delay -> some days get over-deducted down to 0 W/W hours.
+        # DISTINCT ON collapses vessel_delay_types to one row per name before
+        # the join, so each delay can only match once.
         ldud_ids = list({row["id"] for row in rows})
 
-        delay_map = {}  # { ldud_id: [ (start_dt, end_dt), ... ] }
+        delay_map = {}  # { ldud_id: [ (start_dt, end_dt, crane_count), ... ] }
 
         if ldud_ids:
             cur.execute("""
@@ -689,8 +697,14 @@ def monthly_cargo_report():
     d.crane_number,
     vdt.type AS delay_type
     FROM ldud_delays d
-    JOIN vessel_delay_types vdt
-        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+    JOIN (
+        SELECT DISTINCT ON (TRIM(LOWER(name)))
+            TRIM(LOWER(name)) AS name_key,
+            type
+        FROM vessel_delay_types
+        ORDER BY TRIM(LOWER(name)), id
+    ) vdt
+        ON vdt.name_key = TRIM(LOWER(d.delay_name))
     WHERE d.ldud_id = ANY(%s)
       AND vdt.type IN (
             'MOTHER VESSEL ACCOUNT',
@@ -700,6 +714,10 @@ def monthly_cargo_report():
       AND d.start_datetime IS NOT NULL
       AND d.end_datetime IS NOT NULL
 """, (ldud_ids,))
+
+            # Extra safety net: if ldud_delays itself ever contains a literal
+            # duplicate row for the same delay, don't double-count it either.
+            seen_delays = set()
 
             for r in cur.fetchall():
                 try:
@@ -712,6 +730,18 @@ def monthly_cargo_report():
                     crane_count = int(r["crane_number"] or 0)
                 except:
                     crane_count = 0
+
+                dedup_key = (
+                    r["ldud_id"],
+                    r["start_datetime"],
+                    r["end_datetime"],
+                    r["crane_number"],
+                    r["delay_type"],
+                )
+
+                if dedup_key in seen_delays:
+                    continue
+                seen_delays.add(dedup_key)
 
                 delay_map.setdefault(
                     r["ldud_id"],
