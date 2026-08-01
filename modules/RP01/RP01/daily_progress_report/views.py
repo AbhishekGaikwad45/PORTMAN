@@ -2347,6 +2347,7 @@ def arrived_vessel_report():
         cur.close()
         conn.close()
 
+
 @bp.route(
     '/api/module/RP01/mbc_arrived_report',
     methods=['GET']
@@ -2369,6 +2370,19 @@ def mbc_arrived_report():
     cur = get_cursor(conn)
 
     try:
+        # Same 8am -> 8am window mbc_report() uses to decide whether a
+        # row belongs in "MBC'S DISCHARGE COMPLETED". We need this here
+        # too so we can exclude any MBC that mbc_report() would show.
+        report_dt = datetime.strptime(report_date, "%Y-%m-%d")
+
+        window_end = datetime(
+            report_dt.year,
+            report_dt.month,
+            report_dt.day,
+            8, 0, 0
+        )
+
+        window_start = window_end - timedelta(hours=24)
 
         query = """
 
@@ -2395,6 +2409,11 @@ def mbc_arrived_report():
 
             NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
 
+            -- Discharge must NOT have started yet — once
+            -- unloading_commenced is set, this MBC belongs in the
+            -- discharge report, not the "arrived" report.
+            AND NULLIF(TRIM(dpl.unloading_commenced), '') IS NULL
+
             AND DATE(
                 NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp
             )
@@ -2402,6 +2421,24 @@ def mbc_arrived_report():
                 (%s::date - INTERVAL '1 day')
             AND
                 %s::date
+
+            -- Belt-and-braces: explicitly exclude any MBC that would
+            -- be picked up by mbc_report() for this same report_date
+            -- window (unloading_completed OR unloading_commenced
+            -- falling inside window_start -> window_end).
+            AND NOT (
+                (
+                    NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                )
+                OR
+                (
+                    NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                )
+            )
 
         ORDER BY
 
@@ -2413,7 +2450,11 @@ def mbc_arrived_report():
             query,
             (
                 report_date,
-                report_date
+                report_date,
+                window_start,
+                window_end,
+                window_start,
+                window_end
             )
         )
 
@@ -2670,19 +2711,26 @@ def mbc_expected_report():
 
             mh.load_port,
 
-            dpl.arrival_gull_island
+            lpl.eta
 
         FROM mbc_header mh
 
         LEFT JOIN mbc_discharge_port_lines dpl
             ON dpl.mbc_id = mh.id
 
+        LEFT JOIN mbc_load_port_lines lpl
+            ON lpl.mbc_id = mh.id
+
         WHERE
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
+            -- Reached load port
+            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+
+            -- Not yet arrived at Gull Island
+            AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2691,7 +2739,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
 
         """
 
@@ -2716,7 +2764,7 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
+            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
 
             data.append({
 
@@ -2730,7 +2778,7 @@ def mbc_expected_report():
 
                 "load_port": row["load_port"] or "",
 
-                "eta_mumbai": eta_mumbai
+                "eta_mumbai": eta_gull
 
             })
 
@@ -2761,7 +2809,6 @@ def mbc_expected_report():
 
         cur.close()
         conn.close()
-
 @bp.route(
     '/api/module/RP01/tide_report',
     methods=['GET']
