@@ -388,14 +388,21 @@ ORDER BY discharge_commenced DESC;
         rows = cur.fetchall()
         data = []
 
-        # A header (vessel) can have multiple Material PO rows (from cd fan-out).
-        # actual_discharge is a HEADER-level total, so it must only be attached
-        # to ONE row per header — otherwise any downstream code that groups/merges
-        # these rows and sums the column ends up multiplying it by the PO count.
+        # A header (vessel) can have multiple Material PO / cargo rows.
+        # For MBC, actual_discharge is a HEADER-level total (same value repeated
+        # on every PO row) -> dedupe key = (id, vessel_type).
+        # For MV, actual_discharge is aggregated PER CARGO (different cargo_name
+        # rows genuinely carry different amounts and must both be counted) ->
+        # dedupe key must also include cargo_name, or distinct cargo lines get
+        # wrongly zeroed out.
         seen_actual_keys = set()
 
         for row in rows:
-            header_key = (row['id'], row['vessel_type'])
+            if row['vessel_type'] == 'MV':
+                header_key = (row['id'], row['vessel_type'], row['cargo_name'])
+            else:
+                header_key = (row['id'], row['vessel_type'])
+
             raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
 
             if header_key in seen_actual_keys:
@@ -903,10 +910,13 @@ ORDER BY discharge_commenced DESC;
         total_actual = 0
         data_start   = 3
 
-        # A header (vessel) can have multiple Material PO rows (from cd fan-out).
-        # actual_discharge is a HEADER-level total, so it must only be written
-        # once per header — otherwise the merged cell + running total below
-        # end up multiplying it by the number of PO rows for that header.
+        # A header (vessel) can have multiple Material PO / cargo rows.
+        # For MBC, actual_discharge is a HEADER-level total (same value repeated
+        # on every PO row) -> dedupe key = (id, vessel_type).
+        # For MV, actual_discharge is aggregated PER CARGO (different cargo_name
+        # rows genuinely carry different amounts and must both be counted) ->
+        # dedupe key must also include cargo_name, or distinct cargo lines get
+        # wrongly zeroed out.
         seen_actual_keys = set()
         header_keys = []  # parallel list, one entry per data row, used for merging
 
@@ -915,7 +925,11 @@ ORDER BY discharge_commenced DESC;
             qty    = float(row['bl_qty_mt'])        if row['bl_qty_mt']        else 0
             raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
 
-            header_key = (row['id'], row['vessel_type'])
+            if row['vessel_type'] == 'MV':
+                header_key = (row['id'], row['vessel_type'], row['cargo_name'])
+            else:
+                header_key = (row['id'], row['vessel_type'])
+
             header_keys.append(header_key)
 
             if header_key in seen_actual_keys:
