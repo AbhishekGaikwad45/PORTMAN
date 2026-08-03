@@ -717,15 +717,22 @@ FROM ldud_delays d
 JOIN vessel_delay_types vdt
     ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
 WHERE d.ldud_id = ANY(%s)
-  AND vdt.type IN (
+
+    -- Only delays to be considered in W/W
+    AND vdt.type IN (
         'MOTHER VESSEL ACCOUNT',
         'FORCE MAJEURE',
-        'MbPT',
-        'PORT ACCOUNT',
-        'PROCESSE REQUIREMENT'
-  )
-  AND d.start_datetime IS NOT NULL
-  AND d.end_datetime IS NOT NULL
+        'MbPT'
+    )
+
+    -- Extra safety
+    AND TRIM(LOWER(d.delay_name)) NOT IN (
+        'want of barge',
+        'barge approaching'
+    )
+
+    AND d.start_datetime IS NOT NULL
+    AND d.end_datetime IS NOT NULL
 """, (ldud_ids,))
 
             for r in cur.fetchall():
@@ -903,12 +910,6 @@ WHERE d.ldud_id = ANY(%s)
                     # Show all delays
                     total_delay_hours += adjusted_hours
 
-                    # Exclude these from W/W deduction
-                    if delay_name not in (
-                        "want of barge",
-                        "barge approaching"
-                    ):
-                        deduction_hours += adjusted_hours
 
                 # Don't deduct more than gross hours
                 deduction_hours = min(deduction_hours, gross_hours)
