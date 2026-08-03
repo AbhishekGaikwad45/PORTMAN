@@ -708,10 +708,21 @@ def monthly_cargo_report():
                 except (ValueError, TypeError):
                     continue
 
-                try:
-                    crane_count = int(r["crane_number"] or 0)
-                except:
+                # Count number of cranes from values like:
+                # "1", "1, 2", "2, 3, 4", "1, 2, 3, 4"
+
+                crane_str = (r["crane_number"] or "").strip()
+
+                if crane_str:
+                    crane_count = len([
+                        c.strip()
+                        for c in crane_str.split(",")
+                        if c.strip()
+                    ])
+                else:
                     crane_count = 0
+
+                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}")
 
                 delay_map.setdefault(
                     r["ldud_id"],
