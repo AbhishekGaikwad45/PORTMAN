@@ -6,7 +6,6 @@ from flask import render_template, session, redirect, url_for, jsonify
 
 from .. import bp
 from database import get_db, get_cursor
-from ..daily_ops.views import _compute_fy_throughput
 from ..daily_ops.model import fy_label
 from ..shift_report.views import _fetch_delays
 from ..Barge_Position_Report.views import _fetch_tide_data, _fetch_all_barges
@@ -154,21 +153,6 @@ def _todays_notes():
     return notes or []
 
 
-def _get_cutoff_editable_values():
-    """Admin-set historical FY overrides (see daily_ops cutoff)."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute("SELECT cutoff_values FROM daily_ops_cutoff ORDER BY id DESC LIMIT 1")
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return {}
-    values = row['cutoff_values']
-    if isinstance(values, str):
-        values = json.loads(values)
-    return (values or {}).get('fy_throughput', {})
-
-
 def _cargo_by_type(start_date_s, end_date_s):
     """Live cargo-type breakdown from LUEU for a date range (inclusive)."""
     conn = get_db()
@@ -190,6 +174,112 @@ def _cargo_by_type(start_date_s, end_date_s):
     rows = cur.fetchall()
     conn.close()
     return {r['cargo_type']: float(r['qty']) for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# FY / All-Time cumulative logic — mirrors barge_discharge_report exactly.
+# Fixed baseline + current-FY (historic April + live May-onward) totals.
+# No _compute_fy_throughput call, no daily_ops_cutoff dependency, so prior
+# years can never silently drift or get zeroed by a stale override.
+# ---------------------------------------------------------------------------
+
+# Cumulative throughput per cargo_type, FY2012-2013 (Half Year) through
+# FY2025-2026 (i.e. everything up to and including March 31, 2026).
+# Sourced from the FY summary table (Total row). Keyed case-insensitively
+# (matched via .strip().upper()) to survive whatever casing cargo_type
+# actually has in vessel_cargo.
+BASELINE_TILL_MAR_2026 = {
+    "IBRM": 116229319,
+    "FLUXES": 24038328,
+    "CBRM": 52438887,
+    "CLINKER": 3453541,
+    "SLAG": 1439086,
+    "FINISH GOODS": 157549,
+    "OTHER": 354512,
+    "OTHERS": 354512,   # in case master data defaults to 'Others'
+}
+
+
+def _fy_window(today):
+    """Same FY/historic/live windowing rules as barge_discharge_report."""
+    fy_start_year = today.year if today.month >= 4 else today.year - 1
+    fy_start = f"{fy_start_year}-04-01"
+    historic_cutoff = f"{fy_start_year}-04-30"
+    live_start = f"{fy_start_year}-05-01"
+    return fy_start, historic_cutoff, live_start
+
+
+def _current_fy_by_type(today_s):
+    """
+    Current FY total per cargo_type = rp01_historical_lueu (Apr 1 -> Apr 30)
+    + lueu_lines (May 1 -> today). No _compute_fy_throughput call, so no risk
+    of it silently re-including rp01_historical_lueu data for PRIOR years.
+    """
+    today = datetime.strptime(today_s, "%Y-%m-%d").date()
+    fy_start, historic_cutoff, live_start = _fy_window(today)
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    cur.execute("""
+        SELECT COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+               SUM(COALESCE(h.quantity, 0)) AS historic_total
+        FROM rp01_historical_lueu h
+        LEFT JOIN vessel_cargo vc
+            ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(h.cargo_name))
+        WHERE h.quantity IS NOT NULL
+          AND h.entry_date BETWEEN %(fy_start)s::date AND %(historic_cutoff)s::date
+        GROUP BY vc.cargo_type
+    """, {"fy_start": fy_start, "historic_cutoff": historic_cutoff})
+    historic_totals = {r['cargo_type']: float(r['historic_total'] or 0) for r in cur.fetchall()}
+
+    cur.execute("""
+        SELECT COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+               SUM(COALESCE(l.quantity, 0)) AS live_total
+        FROM lueu_lines l
+        LEFT JOIN vessel_cargo vc
+            ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(l.cargo_name))
+        WHERE l.is_deleted IS NOT TRUE
+          AND l.quantity IS NOT NULL
+          AND l.entry_date::date BETWEEN %(live_start)s::date AND %(today)s::date
+        GROUP BY vc.cargo_type
+    """, {"live_start": live_start, "today": today_s})
+    live_totals = {r['cargo_type']: float(r['live_total'] or 0) for r in cur.fetchall()}
+    conn.close()
+
+    fy_totals = dict(historic_totals)
+    for ctype, qty in live_totals.items():
+        fy_totals[ctype] = fy_totals.get(ctype, 0) + qty
+    return fy_totals
+
+
+def _cumulative_by_type(today_s):
+    """
+    All-time per cargo_type = hardcoded BASELINE_TILL_MAR_2026 (through
+    Mar 31, 2026) + current FY total (historic-April + live-May-onward,
+    computed above). No proportional splitting needed here (unlike
+    barge_discharge_report) since port_overview cards are keyed by
+    cargo_type only, not cargo_category.
+    """
+    current_fy = _current_fy_by_type(today_s)
+    cumulative = dict(current_fy)  # start from current-FY totals
+
+    seen_other = False
+    for ctype, baseline in BASELINE_TILL_MAR_2026.items():
+        # 'OTHER' and 'OTHERS' are the same bucket in the baseline dict —
+        # only add it once to avoid double counting.
+        if ctype in ("OTHER", "OTHERS"):
+            if seen_other:
+                continue
+            seen_other = True
+
+        match = next((k for k in cumulative if k.strip().upper() == ctype), None)
+        if match:
+            cumulative[match] += baseline
+        else:
+            cumulative[ctype.title()] = baseline
+
+    return current_fy, cumulative
 
 
 def _top_delays_today():
@@ -229,20 +319,14 @@ def port_overview_data():
 
     current_fy_start = today.year if today.month >= 4 else today.year - 1
     current_fy_label = fy_label(current_fy_start)
-    editable_fy = _get_cutoff_editable_values()
-    # ponytail: a saved cutoff override must never zero the running FY here —
-    # live lueu_lines + rp01_historical_lueu are the truth for the current year
-    editable_fy.pop(current_fy_label, None)
-    fy_data = _compute_fy_throughput(today_s, editable_fy)
 
-    all_time = {}
-    for fy_dict in fy_data.values():
-        for ctype, qty in fy_dict.items():
-            all_time[ctype] = all_time.get(ctype, 0) + qty
+    # Baseline + current-FY cumulative logic, matching barge_discharge_report
+    # exactly — no _compute_fy_throughput, no daily_ops_cutoff dependency.
+    current_fy_by_type, all_time = _cumulative_by_type(today_s)
 
     cards = {
         'all_time':      {'label': 'All Time',              'by_type': all_time},
-        'current_fy':    {'label': f'FY {current_fy_label}', 'by_type': fy_data.get(current_fy_label, {})},
+        'current_fy':    {'label': f'FY {current_fy_label}', 'by_type': current_fy_by_type},
         'current_month': {'label': today.strftime('%b %Y'),  'by_type': _cargo_by_type(month_start_s, today_s)},
         'yesterday':     {'label': 'Yesterday',              'by_type': _cargo_by_type(yesterday_s, yesterday_s)},
         'today':         {'label': 'Today',                  'by_type': _cargo_by_type(today_s, today_s)},
