@@ -616,10 +616,7 @@ def monthly_cargo_report():
     ON lco.ldud_id = vl.id
    AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vl.cargo_name))
    AND DATE(lco.start_time) BETWEEN DATE(vl.discharge_started) AND %s::date
-   AND (
-        vl.discharge_completed IS NULL
-        OR DATE(lco.start_time) <= DATE(vl.discharge_completed)
-   )
+   AND DATE(lco.start_time) <= %s::date
 
         GROUP BY
             vl.id,
