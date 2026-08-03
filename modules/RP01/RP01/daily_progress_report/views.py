@@ -658,32 +658,6 @@ def monthly_cargo_report():
         )
         rows = cur.fetchall()
 
-        # ------------------------------------------------------------
-        # TEMP DEBUG: dump everything the main query returned for any
-        # vessel matching "ORION" so we can see, without DB access,
-        # whether ldud_vessel_operations rows for it are matching at
-        # all — and if so, what cargo_date / day_label / total_qty
-        # came back for each. Remove once the 08-02 issue is diagnosed.
-        # ------------------------------------------------------------
-        print("\n---------- ORION DEBUG START ----------")
-        print("cutoff_date used in query:", cutoff_date)
-        print("window_start:", window_start, " window_end:", window_end)
-        orion_rows = [r for r in rows if r['vessel_name'] and 'ORION' in r['vessel_name'].upper()]
-        print("ORION rows found in main query result:", len(orion_rows))
-        for r in orion_rows:
-            print({
-                "id": r["id"],
-                "vcn_id": r["vcn_id"],
-                "vessel_name": r["vessel_name"],
-                "cargo_name": r["cargo_name"],
-                "discharge_started": r["discharge_started"],
-                "discharge_completed": r["discharge_completed"],
-                "cargo_date": r["cargo_date"],
-                "day_label": r["day_label"],
-                "total_qty": r["total_qty"],
-            })
-        print("---------- ORION DEBUG END ----------\n")
-
         # NOTE: Total MV is no longer sourced from lueu_lines.
         # It is now derived from the vessel quantities actually shown on the UI
         # (see cumulative calculation further below, after report_data is built).
@@ -712,9 +686,19 @@ def monthly_cargo_report():
         #   MOTHER VESSEL ACCOUNT -> "Mother Vessel Agent"
         #   FORCE MAJEURE         -> "Force Majeure"
         #   MbPT                  -> "MBP"
+        #
+        # FIX: "Want of Barge" and "Barge Approaching" delay entries must
+        # NEVER be subtracted from gross working hours, even if they fall
+        # under one of the three deducted delay_types above. Excluded here
+        # via delay_name pattern match, independent of delay_type.
+        #
+        # IMPORTANT: verify these ILIKE patterns against your actual
+        # ldud_delays.delay_name values (see the "Delay Name:" print
+        # below, or query `SELECT DISTINCT delay_name FROM ldud_delays;`)
+        # and adjust the patterns if the real spelling differs.
         ldud_ids = list({row["id"] for row in rows})
 
-        delay_map = {}  # { ldud_id: [ (start_dt, end_dt), ... ] }
+        delay_map = {}  # { ldud_id: [ (start_dt, end_dt, crane_count), ... ] }
 
         if ldud_ids:
             cur.execute("""
@@ -723,6 +707,7 @@ def monthly_cargo_report():
     d.start_datetime,
     d.end_datetime,
     d.crane_number,
+    d.delay_name,
     vdt.type AS delay_type
     FROM ldud_delays d
     JOIN vessel_delay_types vdt
@@ -735,6 +720,8 @@ def monthly_cargo_report():
       )
       AND d.start_datetime IS NOT NULL
       AND d.end_datetime IS NOT NULL
+      AND d.delay_name NOT ILIKE '%%want of barge%%'
+      AND d.delay_name NOT ILIKE '%%barge approach%%'
 """, (ldud_ids,))
 
             for r in cur.fetchall():
@@ -758,7 +745,7 @@ def monthly_cargo_report():
                 else:
                     crane_count = 0
 
-                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}")
+                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}  |  Delay Name: {r['delay_name']}  |  Delay Type: {r['delay_type']}")
 
                 delay_map.setdefault(
                     r["ldud_id"],
@@ -880,6 +867,9 @@ def monthly_cargo_report():
                 )
                 gross_hours = min(gross_hours, 24)
                 # ---------------- Total Delay Hours ----------------
+                # NOTE: vessel_delays already excludes "Want of Barge" and
+                # "Barge Approaching" entries (filtered out in the SQL
+                # above), so this loop only ever sees deductible delays.
                 deduction_hours = 0.0
 
                 for delay_start, delay_end, crane_count in vessel_delays:
