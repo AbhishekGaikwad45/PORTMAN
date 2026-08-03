@@ -122,6 +122,141 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
     ''', [bill_qty, bill_qty, bill_qty, cargo_source_id])
 
 
+# ===== PARTY GUARDS (one invoice = one party) =====
+
+def _norm_party(name):
+    """Collapse a party name for comparison: trimmed, single-spaced, casefolded."""
+    return ' '.join(str(name or '').split()).casefold()
+
+
+def same_party(bill_customer, cargo_customer):
+    """Do a bill's customer and a cargo declaration's customer refer to one party?
+
+    Names are the join key everywhere else in billing (get_customer_billables
+    filters declarations by customer_name), so they are the key here too.
+    A blank declaration customer stakes no claim and never blocks — only a
+    populated, genuinely different name does."""
+    cargo = _norm_party(cargo_customer)
+    if not cargo:
+        return True
+    return cargo == _norm_party(bill_customer)
+
+
+def single_party(bill_rows):
+    """True if every bill row belongs to the same (customer_type, customer_id).
+    An empty selection is vacuously single-party; the caller rejects it earlier."""
+    return len({(r['customer_type'], r['customer_id']) for r in bill_rows}) <= 1
+
+
+def get_bill_parties(cur, bill_ids):
+    """The distinct parties across the given bills, for the single_party check."""
+    cur.execute('''SELECT DISTINCT customer_type, customer_id, customer_name
+                   FROM bill_header WHERE id = ANY(%s)''', [list(bill_ids)])
+    return [dict(r) for r in cur.fetchall()]
+
+
+def find_cargo_party_mismatch(cur, bill_ids):
+    """Cargo lines whose declaration no longer belongs to its bill's customer.
+
+    This is the guard that catches a declaration retro-edited after billing:
+    at bill time the names matched (that is how the item got listed), but if
+    someone later retypes customer_name on the MBC/VCN row, the bill silently
+    starts billing another party's cargo. Checked at invoice time — the point
+    where the money leaves — so the drift can never reach a customer.
+
+    Returns a list of {bill_number, bill_customer, cargo_customer, cargo_name}."""
+    problems = []
+    for cargo_source_type, (table, _qty_col) in _CARGO_TABLES.items():
+        # table comes from the _CARGO_TABLES constant, never from user input.
+        cur.execute(f'''
+            SELECT bh.bill_number, bh.customer_name AS bill_customer,
+                   d.customer_name AS cargo_customer, d.cargo_name
+            FROM bill_lines bl
+            JOIN bill_header bh ON bh.id = bl.bill_id
+            JOIN {table} d ON d.id = bl.cargo_source_id
+            WHERE bl.bill_id = ANY(%s) AND bl.cargo_source_type = %s
+        ''', [list(bill_ids), cargo_source_type])
+        for row in cur.fetchall():
+            r = dict(row)
+            if not same_party(r['bill_customer'], r['cargo_customer']):
+                problems.append(r)
+    return problems
+
+
+# ===== BILLING LOCK (an operational doc freezes once its cargo is billed) =====
+
+# Which declaration table + owning-document column each source document uses.
+_SOURCE_DECLARATIONS = {
+    'MBC': [('mbc_customer_details',          'mbc_id', 'MBC')],
+    'VCN': [('vcn_cargo_declaration',         'vcn_id', 'VCN_IMPORT'),
+            ('vcn_export_cargo_declaration',  'vcn_id', 'VCN_EXPORT')],
+}
+
+# A bill in these states no longer holds its cargo — rejection and cancellation
+# both release the billed tracking, so the source document must open up again.
+_DEAD_BILL_STATUSES = ('Cancelled', 'Rejected')
+
+
+def source_lock_state(cur, source_kind, source_id):
+    """Billing lock on an operational document (MBC doc or VCN call).
+
+    Returns:
+      ''          nothing billed — freely editable
+      'billed'    cargo sits on a live bill; frozen, but rejecting or removing
+                  that bill releases the cargo and reopens the document
+      'invoiced'  cargo reached an invoice; permanent, never editable again
+
+    'invoiced' deliberately ignores bill status: once a customer has been
+    invoiced off this cargo, the operational record behind it is evidence and
+    must never move, even if the bill is later cancelled.
+
+    source_kind: 'MBC' or 'VCN'."""
+    tables = _SOURCE_DECLARATIONS.get(source_kind)
+    if not tables or not source_id:
+        return ''
+
+    # Table/column names come from the _SOURCE_DECLARATIONS constant, never input.
+    for table, owner_col, cargo_source_type in tables:
+        cur.execute(f'''
+            SELECT 1 FROM {table} d
+            JOIN bill_lines bl ON bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
+            JOIN invoice_bill_mapping ibm ON ibm.bill_id = bl.bill_id
+            WHERE d.{owner_col} = %s LIMIT 1
+        ''', [cargo_source_type, source_id])
+        if cur.fetchone():
+            return 'invoiced'
+
+    for table, owner_col, cargo_source_type in tables:
+        cur.execute(f'''
+            SELECT 1 FROM {table} d
+            LEFT JOIN bill_lines bl ON bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
+            LEFT JOIN bill_header bh ON bh.id = bl.bill_id
+            WHERE d.{owner_col} = %s
+              AND (
+                    (bl.id IS NOT NULL AND COALESCE(bh.bill_status, '') <> ALL(%s))
+                    -- cutover-marked cargo carries no bill row but is still billed
+                    OR COALESCE(d.is_billed, 0) = 1
+                    OR COALESCE(d.billed_quantity, 0) > 0
+                  )
+            LIMIT 1
+        ''', [cargo_source_type, source_id, list(_DEAD_BILL_STATUSES)])
+        if cur.fetchone():
+            return 'billed'
+
+    return ''
+
+
+def lock_message(state, doc_kind='document'):
+    """User-facing reason a locked document cannot be changed, or '' if open."""
+    if state == 'invoiced':
+        return (f'This {doc_kind} has been invoiced. Invoiced records are permanent '
+                f'and can never be edited, reopened or deleted.')
+    if state == 'billed':
+        return (f'This {doc_kind} has been billed. Remove or reject the bill first '
+                f'(Admin → Remove Bill) — that releases the cargo and reopens it.')
+    return ''
+
+
 def release_bill_sources(cur, bill_id, only_if_still_linked=False):
     """Reverse cargo + service-record billed tracking held by one bill
     (used on bill rejection and by the startup reconciliation).
@@ -377,6 +512,510 @@ def _release_bill_for_delete(cur, bill_id):
             cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s', [other, srid])
         else:
             cur.execute('UPDATE service_records SET is_billed=0, bill_id=NULL WHERE id=%s', [srid])
+
+
+# ===== CARGO SWAP (replace wrong cargo on a bill, money untouched) =====
+
+_MONEY_FIELDS = ('line_amount', 'cgst_amount', 'sgst_amount', 'igst_amount',
+                 'line_total', 'tds_amount', 'tcs_amount')
+
+
+def split_line_amounts(original, quantities):
+    """Split one bill line's money across replacement quantities.
+
+    Each share is prorated by quantity and the residual paisa is pushed onto the
+    largest share, so the parts sum EXACTLY to the original — never a rupee more
+    or less. That exactness is what allows a swap on an already-invoiced bill:
+    the bill total, the invoice total and the SAP posting all stay put, so only
+    which cargo backs the charge changes.
+
+    original:   dict carrying the _MONEY_FIELDS (missing keys count as 0)
+    quantities: replacement quantities; their sum must equal the original
+                quantity (the caller enforces that)
+    Returns one dict of money fields per quantity."""
+    quantities = [float(q or 0) for q in quantities]
+    total = sum(quantities)
+    if not quantities or total <= 0:
+        raise ValueError('Replacement quantities must be positive')
+
+    biggest = max(range(len(quantities)), key=lambda i: quantities[i])
+    shares = [{} for _ in quantities]
+    for field in _MONEY_FIELDS:
+        source = round(float(original.get(field) or 0), 2)
+        parts = [round(source * q / total, 2) for q in quantities]
+        residual = round(source - sum(parts), 2)
+        if residual:
+            parts[biggest] = round(parts[biggest] + residual, 2)
+        for share, value in zip(shares, parts):
+            share[field] = value
+    return shares
+
+
+def quantities_balance(original_quantity, quantities):
+    """Do the replacement quantities add up to exactly what is being removed?
+    Same 0.001 tolerance as would_overbill, to absorb float noise."""
+    return abs(sum(float(q or 0) for q in quantities)
+               - float(original_quantity or 0)) <= 0.001
+
+
+# ===== CARGO RELEASE (admin escape hatch for mis-billed cargo) =====
+
+# (cargo_source_type, declaration table, owner column, parent table, doc column,
+#  vessel column, total-quantity column)
+_RELEASE_SOURCES = (
+    ('MBC',        'mbc_customer_details',         'mbc_id', 'mbc_header', 'doc_num',     'mbc_name',    'quantity'),
+    ('VCN_IMPORT', 'vcn_cargo_declaration',        'vcn_id', 'vcn_header', 'vcn_doc_num', 'vessel_name', 'bl_quantity'),
+    ('VCN_EXPORT', 'vcn_export_cargo_declaration', 'vcn_id', 'vcn_header', 'vcn_doc_num', 'vessel_name', 'bl_quantity'),
+)
+
+
+def get_billed_cargo(search='', limit=200):
+    """Cargo currently marked billed, with whoever is holding it.
+
+    Feeds the admin Release Cargo tab — the escape hatch for cargo billed to the
+    wrong party, where Uninvoice and Remove Bill are both refused because the
+    invoice reached SAP. One row per declaration; bills and invoices touching it
+    are aggregated so the admin can see exactly what they are cutting loose."""
+    term = f"%{(search or '').strip()}%"
+    conn = get_db()
+    cur = get_cursor(conn)
+    rows = []
+    try:
+        for (cstype, table, owner_col, parent, doc_col, vessel_col, qty_col) in _RELEASE_SOURCES:
+            # Every identifier here comes from the _RELEASE_SOURCES constant.
+            cur.execute(f'''
+                SELECT %s AS cargo_source_type, d.id AS cargo_source_id,
+                       p.{doc_col}    AS doc_num,
+                       p.{vessel_col} AS vessel_name,
+                       d.customer_name, d.cargo_name,
+                       COALESCE(d.{qty_col}, 0)       AS total_quantity,
+                       COALESCE(d.billed_quantity, 0) AS billed_quantity,
+                       COALESCE(STRING_AGG(DISTINCT bh.bill_number, ', '), '')    AS bills,
+                       COALESCE(STRING_AGG(DISTINCT ih.invoice_number, ', '), '') AS invoices
+                FROM {table} d
+                JOIN {parent} p ON p.id = d.{owner_col}
+                LEFT JOIN bill_lines bl
+                       ON bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
+                LEFT JOIN bill_header bh ON bh.id = bl.bill_id
+                LEFT JOIN invoice_bill_mapping ibm ON ibm.bill_id = bh.id
+                LEFT JOIN invoice_header ih ON ih.id = ibm.invoice_id
+                WHERE (COALESCE(d.is_billed, 0) = 1 OR COALESCE(d.billed_quantity, 0) > 0)
+                  AND (COALESCE(p.{doc_col}, '')    ILIKE %s
+                    OR COALESCE(p.{vessel_col}, '') ILIKE %s
+                    OR COALESCE(d.customer_name, '') ILIKE %s
+                    OR COALESCE(d.cargo_name, '')    ILIKE %s)
+                GROUP BY d.id, p.{doc_col}, p.{vessel_col}, d.customer_name,
+                         d.cargo_name, d.{qty_col}, d.billed_quantity
+                ORDER BY d.id DESC
+                LIMIT %s
+            ''', [cstype, cstype, term, term, term, term, limit])
+            rows.extend(dict(r) for r in cur.fetchall())
+    finally:
+        conn.close()
+    rows.sort(key=lambda r: (r['doc_num'] or '', r['cargo_source_id']), reverse=True)
+    return rows[:limit]
+
+
+def release_cargo(cargo_source_type, cargo_source_id, username, reason=''):
+    """Make one cargo declaration billable again, leaving every document intact.
+
+    Clears only the billed tracking (is_billed / billed_quantity / bill_id) on
+    that single declaration. Bills, invoices and SAP postings are deliberately
+    untouched: when cargo has been invoiced to the wrong party the money is
+    corrected by a credit note, not by rewriting an issued invoice. The freed
+    cargo can then be billed to its rightful customer.
+
+    Returns {'ok': bool, 'cargo', 'error'}."""
+    entry = _CARGO_TABLES.get(cargo_source_type)
+    if not entry:
+        return {'ok': False, 'error': f'Unknown cargo source type: {cargo_source_type}'}
+    table = entry[0]
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute(f'SELECT customer_name, cargo_name, billed_quantity FROM {table} '
+                    f'WHERE id=%s FOR UPDATE', [cargo_source_id])
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return {'ok': False, 'error': 'Cargo declaration not found'}
+        before = dict(row)
+
+        cur.execute(f'UPDATE {table} SET is_billed=0, billed_quantity=0, bill_id=NULL '
+                    f'WHERE id=%s', [cargo_source_id])
+
+        # Which documents still reference it — recorded so the audit trail
+        # explains why a bill and its cargo no longer agree.
+        cur.execute('''SELECT COALESCE(STRING_AGG(DISTINCT bh.bill_number, ', '), '') AS bills,
+                              COALESCE(STRING_AGG(DISTINCT ih.invoice_number, ', '), '') AS invoices
+                       FROM bill_lines bl
+                       LEFT JOIN bill_header bh ON bh.id = bl.bill_id
+                       LEFT JOIN invoice_bill_mapping ibm ON ibm.bill_id = bh.id
+                       LEFT JOIN invoice_header ih ON ih.id = ibm.invoice_id
+                       WHERE bl.cargo_source_type=%s AND bl.cargo_source_id=%s''',
+                    [cargo_source_type, cargo_source_id])
+        held = dict(cur.fetchone() or {})
+
+        comment = (f"Released {cargo_source_type} #{cargo_source_id} "
+                   f"\"{before.get('cargo_name') or 'cargo'}\" "
+                   f"({before.get('customer_name') or '?'}, "
+                   f"{float(before.get('billed_quantity') or 0):.3f} billed) "
+                   f"— bills: {held.get('bills') or '(none)'}; "
+                   f"invoices: {held.get('invoices') or '(none)'} left unchanged"
+                   + (f". Reason: {reason.strip()}" if reason and reason.strip() else ''))
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FIN01', %s, 'Cargo released by Admin', %s, %s)""",
+                    [cargo_source_id, comment, username])
+        conn.commit()
+        return {'ok': True,
+                'cargo': before.get('cargo_name') or f'{cargo_source_type} #{cargo_source_id}',
+                'customer': before.get('customer_name') or '',
+                'bills': held.get('bills') or '',
+                'invoices': held.get('invoices') or ''}
+    except Exception as e:
+        conn.rollback()
+        return {'ok': False, 'error': str(e)}
+    finally:
+        conn.close()
+
+
+def get_swappable_bills(search='', mismatched_only=False):
+    """Bills carrying cargo lines, flagged when any line's declaration belongs to
+    another party. Those flagged rows are exactly the bills this tab exists for."""
+    term = f"%{(search or '').strip()}%"
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('''
+            SELECT DISTINCT b.id, b.bill_number, b.bill_date, b.customer_name,
+                   b.source_display, b.total_amount, b.bill_status,
+                   COALESCE(STRING_AGG(DISTINCT ih.invoice_number, ', '), '') AS invoices
+            FROM bill_header b
+            JOIN bill_lines bl ON bl.bill_id = b.id AND bl.cargo_source_type IS NOT NULL
+            LEFT JOIN invoice_bill_mapping ibm ON ibm.bill_id = b.id
+            LEFT JOIN invoice_header ih ON ih.id = ibm.invoice_id
+            WHERE b.bill_status <> 'Cancelled'
+              AND (COALESCE(b.bill_number, '')    ILIKE %s
+                OR COALESCE(b.customer_name, '')  ILIKE %s
+                OR COALESCE(b.source_display, '') ILIKE %s)
+            GROUP BY b.id
+            ORDER BY b.id DESC
+            LIMIT 200
+        ''', [term, term, term])
+        bills = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for bill in bills:
+        bad = [l for l in get_bill_cargo_lines(bill['id']) if l['party_mismatch']]
+        bill['mismatch_count'] = len(bad)
+    if mismatched_only:
+        bills = [b for b in bills if b['mismatch_count']]
+    return bills
+
+
+def get_bill_cargo_lines(bill_id):
+    """Cargo lines on a bill, each flagged if its declaration now belongs to
+    someone other than the bill's customer. Drives the admin Swap Cargo tab."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    rows = []
+    try:
+        cur.execute('SELECT customer_name FROM bill_header WHERE id=%s', [bill_id])
+        header = cur.fetchone()
+        bill_customer = header['customer_name'] if header else ''
+
+        for cargo_source_type, (table, qty_col) in _CARGO_TABLES.items():
+            cur.execute(f'''
+                SELECT bl.id AS bill_line_id, bl.cargo_source_type, bl.cargo_source_id,
+                       bl.service_name, bl.service_description, bl.quantity, bl.uom,
+                       bl.rate, bl.line_amount, bl.line_total,
+                       d.customer_name AS cargo_customer, d.cargo_name
+                FROM bill_lines bl
+                JOIN {table} d ON d.id = bl.cargo_source_id
+                WHERE bl.bill_id = %s AND bl.cargo_source_type = %s
+                ORDER BY bl.id
+            ''', [bill_id, cargo_source_type])
+            for row in cur.fetchall():
+                r = dict(row)
+                r['bill_customer'] = bill_customer
+                r['party_mismatch'] = not same_party(bill_customer, r['cargo_customer'])
+                rows.append(r)
+    finally:
+        conn.close()
+    return sorted(rows, key=lambda r: r['bill_line_id'])
+
+
+def get_swap_candidates(bill_id):
+    """Unbilled cargo belonging to this bill's own customer — the only cargo a
+    swap may pull in. Filtering by the bill's customer here is what stops the
+    tab from repeating the very mistake it exists to repair."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    rows = []
+    try:
+        cur.execute('SELECT customer_name FROM bill_header WHERE id=%s', [bill_id])
+        header = cur.fetchone()
+        if not header:
+            return []
+        customer = header['customer_name']
+
+        for (cstype, table, owner_col, parent, doc_col, vessel_col, qty_col) in _RELEASE_SOURCES:
+            cur.execute(f'''
+                SELECT %s AS cargo_source_type, d.id AS cargo_source_id,
+                       p.{doc_col} AS doc_num, p.{vessel_col} AS vessel_name,
+                       d.cargo_name, d.customer_name,
+                       COALESCE(d.{qty_col}, 0) AS total_quantity,
+                       COALESCE(d.billed_quantity, 0) AS billed_quantity,
+                       ROUND(COALESCE(d.{qty_col}, 0) - COALESCE(d.billed_quantity, 0), 3)
+                           AS billable_quantity
+                FROM {table} d
+                JOIN {parent} p ON p.id = d.{owner_col}
+                WHERE d.customer_name = %s
+                  AND COALESCE(d.{qty_col}, 0) - COALESCE(d.billed_quantity, 0) > 0
+                ORDER BY d.id DESC
+            ''', [cstype, customer])
+            rows.extend(dict(r) for r in cur.fetchall())
+    finally:
+        conn.close()
+    return rows
+
+
+def _matching_invoice_line(cur, bill_id, line):
+    """The invoice line copied from this bill line, or None.
+
+    invoice_lines carries no bill_line_id, so it is matched on the fields
+    create_invoice_from_bills copies verbatim. Returns (invoice_id, row) only
+    when the match is unambiguous — the caller refuses the swap otherwise
+    rather than guess which line to rewrite."""
+    cur.execute('''SELECT * FROM invoice_lines
+                   WHERE bill_id = %s
+                     AND COALESCE(service_name, '') = COALESCE(%s, '')
+                     AND COALESCE(service_description, '') = COALESCE(%s, '')
+                     AND quantity = %s AND rate = %s''',
+                [bill_id, line.get('service_name'), line.get('service_description'),
+                 line['quantity'], line['rate']])
+    matches = [dict(r) for r in cur.fetchall()]
+    if len(matches) != 1:
+        return None, len(matches)
+    return matches[0], 1
+
+
+def swap_bill_cargo(bill_id, bill_line_id, replacements, username, reason=''):
+    """Replace one cargo line on a bill with cargo belonging to that same bill's
+    customer, keeping every amount identical.
+
+    Built for the case where a declaration was retro-edited and a bill ended up
+    charging one customer for another's cargo, after the invoice had already
+    gone out. Because the replacements inherit the removed line's rate and must
+    total the same quantity, the bill total, invoice total and SAP posting are
+    provably unchanged — only the cargo backing the charge moves. The displaced
+    cargo is released and becomes billable to its rightful customer.
+
+    Refuses anything it cannot do exactly: a quantity that does not balance, a
+    replacement belonging to another party, one that is already billed, or an
+    invoice line it cannot identify unambiguously.
+
+    replacements: [{'cargo_source_type', 'cargo_source_id', 'quantity'}]
+    Returns {'ok': bool, 'error', ...}."""
+    if not replacements:
+        return {'ok': False, 'error': 'Select at least one replacement cargo line'}
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT * FROM bill_header WHERE id=%s FOR UPDATE', [bill_id])
+        row = cur.fetchone()
+        if not row:
+            return {'ok': False, 'error': 'Bill not found'}
+        bill = dict(row)
+        if bill.get('bill_status') == 'Cancelled':
+            return {'ok': False, 'error': 'Bill is cancelled — nothing to swap'}
+
+        cur.execute('SELECT * FROM bill_lines WHERE id=%s AND bill_id=%s',
+                    [bill_line_id, bill_id])
+        row = cur.fetchone()
+        if not row:
+            return {'ok': False, 'error': 'Bill line not found on this bill'}
+        old = dict(row)
+        if not old.get('cargo_source_type') or not old.get('cargo_source_id'):
+            return {'ok': False, 'error': 'That line is not a cargo line'}
+
+        quantities = [float(r.get('quantity') or 0) for r in replacements]
+        if any(q <= 0 for q in quantities):
+            return {'ok': False, 'error': 'Every replacement quantity must be greater than zero'}
+        if not quantities_balance(old['quantity'], quantities):
+            return {'ok': False,
+                    'error': (f'Replacement quantity ({sum(quantities):.3f}) must equal the '
+                              f'quantity being removed ({float(old["quantity"]):.3f}). '
+                              f'A swap may not change the amount — use a credit note instead.')}
+
+        # Every replacement must belong to this bill's customer and have room.
+        for rep, qty in zip(replacements, quantities):
+            entry = _CARGO_TABLES.get(rep.get('cargo_source_type'))
+            if not entry:
+                return {'ok': False, 'error': f"Unknown cargo type: {rep.get('cargo_source_type')}"}
+            table, qty_col = entry
+            cur.execute(f'SELECT customer_name, cargo_name, COALESCE(billed_quantity,0) AS billed, '
+                        f'COALESCE({qty_col},0) AS total FROM {table} WHERE id=%s FOR UPDATE',
+                        [rep.get('cargo_source_id')])
+            decl = cur.fetchone()
+            if not decl:
+                return {'ok': False, 'error': f"Replacement cargo #{rep.get('cargo_source_id')} not found"}
+            if not same_party(bill['customer_name'], decl['customer_name']):
+                return {'ok': False,
+                        'error': (f"\"{decl['cargo_name'] or 'cargo'}\" belongs to "
+                                  f"{decl['customer_name']}, not {bill['customer_name']} — "
+                                  f"a swap may only pull in this customer's own cargo.")}
+            if would_overbill(decl['billed'], qty, decl['total']):
+                return {'ok': False,
+                        'error': (f"\"{decl['cargo_name'] or 'cargo'}\" only has "
+                                  f"{float(decl['total']) - float(decl['billed']):.3f} left to bill.")}
+
+        # Locate the invoice copy before changing anything, so an ambiguous
+        # match aborts the swap rather than leaving bill and invoice disagreeing.
+        cur.execute('SELECT invoice_id FROM invoice_bill_mapping WHERE bill_id=%s', [bill_id])
+        invoice_ids = [r['invoice_id'] for r in cur.fetchall()]
+        invoice_line = None
+        if invoice_ids:
+            invoice_line, count = _matching_invoice_line(cur, bill_id, old)
+            if invoice_line is None:
+                return {'ok': False,
+                        'error': (f'Could not identify this line on the invoice ({count} candidates). '
+                                  f'Swap aborted so the bill and invoice cannot drift apart — '
+                                  f'correct this one with a credit note.')}
+            invoice_before = money_sums(cur, 'invoice_lines', 'invoice_id',
+                                        invoice_line['invoice_id'])
+
+        bill_before = money_sums(cur, 'bill_lines', 'bill_id', bill_id)
+        shares = split_line_amounts(old, quantities)
+
+        # --- rewrite the bill line ---
+        _unmark_cargo_source_billed(cur, old['cargo_source_type'],
+                                    old['cargo_source_id'], float(old['quantity'] or 0))
+        released_table = _CARGO_TABLES[old['cargo_source_type']][0]
+        cur.execute(f'UPDATE {released_table} SET bill_id=NULL WHERE id=%s AND bill_id=%s',
+                    [old['cargo_source_id'], bill_id])
+        cur.execute('DELETE FROM bill_lines WHERE id=%s', [bill_line_id])
+
+        new_line_ids = []
+        for rep, qty, share in zip(replacements, quantities, shares):
+            cur.execute('''INSERT INTO bill_lines
+                (bill_id, cargo_source_type, cargo_source_id, service_record_id,
+                 service_type_id, service_name, service_description, quantity, uom, rate,
+                 line_amount, gst_rate_id, cgst_rate, sgst_rate, igst_rate,
+                 cgst_amount, sgst_amount, igst_amount, line_total, gl_code, sac_code,
+                 remarks, service_code, tds_applicable, tds_percent, tds_amount,
+                 tcs_applicable, tcs_percent, tcs_amount)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id''',
+                [bill_id, rep['cargo_source_type'], rep['cargo_source_id'],
+                 old.get('service_record_id'), old.get('service_type_id'),
+                 old.get('service_name'), rep.get('description') or old.get('service_description'),
+                 qty, old.get('uom'), old.get('rate'),
+                 share['line_amount'], old.get('gst_rate_id'), old.get('cgst_rate'),
+                 old.get('sgst_rate'), old.get('igst_rate'),
+                 share['cgst_amount'], share['sgst_amount'], share['igst_amount'],
+                 share['line_total'], old.get('gl_code'), old.get('sac_code'),
+                 old.get('remarks'), old.get('service_code'),
+                 old.get('tds_applicable', 0), old.get('tds_percent', 0), share['tds_amount'],
+                 old.get('tcs_applicable', 0), old.get('tcs_percent', 0), share['tcs_amount']])
+            new_line_ids.append(cur.fetchone()['id'])
+            _mark_cargo_source_billed(cur, rep['cargo_source_type'],
+                                      rep['cargo_source_id'], qty, bill_id)
+
+        # --- mirror onto the invoice so the print and cargo appendix agree ---
+        if invoice_line:
+            invoice_id = invoice_line['invoice_id']
+            cur.execute('DELETE FROM invoice_lines WHERE id=%s', [invoice_line['id']])
+            for rep, qty, share in zip(replacements, quantities, shares):
+                cur.execute('''INSERT INTO invoice_lines
+                    (invoice_id, bill_id, bill_number, line_number, service_name,
+                     service_description, quantity, uom, rate, line_amount,
+                     cgst_rate, sgst_rate, igst_rate, cgst_amount, sgst_amount, igst_amount,
+                     line_total, gl_code, sac_code, profit_center, cost_center,
+                     service_code, tds_applicable, tds_percent, tds_amount,
+                     tcs_applicable, tcs_percent, tcs_amount)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                    [invoice_id, bill_id, invoice_line.get('bill_number'),
+                     invoice_line.get('line_number'), invoice_line.get('service_name'),
+                     rep.get('description') or invoice_line.get('service_description'),
+                     qty, invoice_line.get('uom'), invoice_line.get('rate'),
+                     share['line_amount'], invoice_line.get('cgst_rate'),
+                     invoice_line.get('sgst_rate'), invoice_line.get('igst_rate'),
+                     share['cgst_amount'], share['sgst_amount'], share['igst_amount'],
+                     share['line_total'], invoice_line.get('gl_code'),
+                     invoice_line.get('sac_code'), invoice_line.get('profit_center'),
+                     invoice_line.get('cost_center'), invoice_line.get('service_code'),
+                     invoice_line.get('tds_applicable', 0), invoice_line.get('tds_percent', 0),
+                     share['tds_amount'], invoice_line.get('tcs_applicable', 0),
+                     invoice_line.get('tcs_percent', 0), share['tcs_amount']])
+
+            # No GST reconciliation and no header rewrite. The shares preserve
+            # each rate group's totals exactly, so the aggregate GST already
+            # holds; re-deriving the header would also silently "correct" any
+            # pre-existing drift, changing an invoice that has already gone out.
+            drift = describe_sum_drift(
+                invoice_before, money_sums(cur, 'invoice_lines', 'invoice_id', invoice_id))
+            if drift:
+                conn.rollback()
+                return {'ok': False,
+                        'error': (f'Swap would move the invoice amounts ({drift}). '
+                                  f'Refused — raise a credit note instead.')}
+
+        # Bill headers are left alone for the same reason; the lines must simply
+        # add up to what they did before.
+        drift = describe_sum_drift(bill_before, money_sums(cur, 'bill_lines', 'bill_id', bill_id))
+        if drift:
+            conn.rollback()
+            return {'ok': False, 'error': f'Swap would move the bill amounts ({drift}). Refused.'}
+
+        comment = (f"Swapped {old['cargo_source_type']} #{old['cargo_source_id']} "
+                   f"\"{old.get('service_description') or 'cargo'}\" "
+                   f"({float(old['quantity']):.3f} {old.get('uom') or ''}) out of {bill['bill_number']} "
+                   f"for {len(replacements)} line(s) at the same rate; amounts unchanged "
+                   f"(taxable {bill_before['taxable']:.2f}). "
+                   f"Displaced cargo released and billable again."
+                   + (f" Reason: {reason.strip()}" if reason and reason.strip() else ''))
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FIN01', %s, 'Bill cargo swapped by Admin', %s, %s)""",
+                    [bill_id, comment, username])
+
+        conn.commit()
+        return {'ok': True, 'bill_number': bill['bill_number'],
+                'replaced_lines': len(new_line_ids),
+                'total': round(bill_before['taxable'] + bill_before['cgst']
+                               + bill_before['sgst'] + bill_before['igst'], 2),
+                'invoice_updated': bool(invoice_line)}
+    except Exception as e:
+        conn.rollback()
+        return {'ok': False, 'error': str(e)}
+    finally:
+        conn.close()
+
+
+def money_sums(cur, table, key_column, key):
+    """Total taxable + tax across a document's lines.
+
+    The swap's invariant is measured here rather than on a header total, because
+    a header can already disagree with its own lines (invoice DPPL/26-27/65 was
+    stored ₹50 below the sum of its parts). Comparing line sums isolates what the
+    swap actually changed from drift that was there beforehand."""
+    cur.execute(f'''SELECT COALESCE(SUM(line_amount), 0)  AS taxable,
+                           COALESCE(SUM(cgst_amount), 0)  AS cgst,
+                           COALESCE(SUM(sgst_amount), 0)  AS sgst,
+                           COALESCE(SUM(igst_amount), 0)  AS igst
+                    FROM {table} WHERE {key_column} = %s''', [key])
+    row = cur.fetchone()
+    return {k: round(float(row[k]), 2) for k in ('taxable', 'cgst', 'sgst', 'igst')}
+
+
+def describe_sum_drift(before, after):
+    """'' when two money_sums snapshots match to the paisa, else what moved."""
+    moved = [f'{k} {before[k]:.2f} → {after[k]:.2f}'
+             for k in before if abs(before[k] - after[k]) > 0.005]
+    return '; '.join(moved)
 
 
 def get_removable_bills():

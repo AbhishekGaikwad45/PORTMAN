@@ -652,6 +652,15 @@ def open_vessel():
     conn = get_db()
     cur = get_cursor(conn)
 
+    # Same billing line as MBC: a vessel whose cargo is billed stays closed.
+    from modules.FIN01 import model as fin_model
+    cur.execute('SELECT vcn_id FROM ldud_header WHERE id=%s', [ldud_id])
+    row = cur.fetchone()
+    state = fin_model.source_lock_state(cur, 'VCN', row['vcn_id']) if row else ''
+    if state:
+        conn.close()
+        return jsonify({'error': fin_model.lock_message(state, 'vessel')}), 400
+
     cur.execute("SELECT COUNT(*) AS cnt FROM ldud_proof_documents WHERE ldud_id=%s", (ldud_id,))
     doc_count = cur.fetchone()['cnt']
     cur.execute("DELETE FROM ldud_proof_documents WHERE ldud_id=%s", (ldud_id,))
@@ -795,6 +804,14 @@ def reset_mbc_approval():
         return jsonify({'error': 'Missing id'}), 400
     conn = get_db()
     cur = get_cursor(conn)
+
+    # Admin override stops at the billing line: reopening a billed MBC would let
+    # its customer or quantity be retyped under an already-issued bill.
+    from modules.FIN01 import model as fin_model
+    state = fin_model.source_lock_state(cur, 'MBC', mbc_id)
+    if state:
+        conn.close()
+        return jsonify({'error': fin_model.lock_message(state, 'MBC')}), 400
 
     cur.execute("SELECT COUNT(*) AS cnt FROM mbc_proof_documents WHERE mbc_id=%s", (mbc_id,))
     doc_count = cur.fetchone()['cnt']
@@ -1044,6 +1061,66 @@ def uninvoice_do():
     result = fin_model.uninvoice_invoice(invoice_id, session.get('username'))
     if not result.get('ok'):
         return jsonify({'error': result.get('error', 'Uninvoice failed')}), 400
+    return jsonify({'success': True, **result})
+
+
+# ===== Release Cargo (free cargo billed to the wrong party) =====
+
+@bp.route('/api/cargo-release/list')
+@admin_required
+def cargo_release_list():
+    from modules.FIN01 import model as fin_model
+    return jsonify(fin_model.get_billed_cargo(request.args.get('q', '')))
+
+
+@bp.route('/api/cargo-release/do', methods=['POST'])
+@admin_required
+def cargo_release_do():
+    from modules.FIN01 import model as fin_model
+    d = request.json or {}
+    if not d.get('cargo_source_type') or not d.get('cargo_source_id'):
+        return jsonify({'error': 'Missing cargo reference'}), 400
+    result = fin_model.release_cargo(
+        d['cargo_source_type'], d['cargo_source_id'],
+        session.get('username'), d.get('reason', ''))
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error', 'Release failed')}), 400
+    return jsonify({'success': True, **result})
+
+
+# ===== Swap Bill Cargo (replace wrong cargo on a bill, amounts unchanged) =====
+
+@bp.route('/api/cargo-swap/bills')
+@admin_required
+def cargo_swap_bills():
+    from modules.FIN01 import model as fin_model
+    return jsonify(fin_model.get_swappable_bills(
+        request.args.get('q', ''),
+        mismatched_only=request.args.get('mismatched') == '1'))
+
+
+@bp.route('/api/cargo-swap/lines/<int:bill_id>')
+@admin_required
+def cargo_swap_lines(bill_id):
+    from modules.FIN01 import model as fin_model
+    return jsonify({
+        'lines': fin_model.get_bill_cargo_lines(bill_id),
+        'candidates': fin_model.get_swap_candidates(bill_id),
+    })
+
+
+@bp.route('/api/cargo-swap/do', methods=['POST'])
+@admin_required
+def cargo_swap_do():
+    from modules.FIN01 import model as fin_model
+    d = request.json or {}
+    if not d.get('bill_id') or not d.get('bill_line_id'):
+        return jsonify({'error': 'Missing bill or line reference'}), 400
+    result = fin_model.swap_bill_cargo(
+        d['bill_id'], d['bill_line_id'], d.get('replacements') or [],
+        session.get('username'), d.get('reason', ''))
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error', 'Swap failed')}), 400
     return jsonify({'success': True, **result})
 
 

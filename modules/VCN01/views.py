@@ -20,6 +20,50 @@ def get_perms():
         return {'can_read': 1, 'can_add': 1, 'can_edit': 1, 'can_delete': 1}
     return get_user_permissions(session.get('user_id'), MODULE_CODE)
 
+
+def _is_approver():
+    config = get_module_config(MODULE_CODE)
+    return (str(config.get('approver_id', '')) == str(session.get('user_id'))
+            or bool(session.get('is_admin')))
+
+
+def _vcn_id_of(table, row_id):
+    """Owning vcn_id for a sub-table row, so a line edit is gated by its parent."""
+    if not row_id:
+        return None
+    from database import get_db, get_cursor
+    conn = get_db()
+    cur = get_cursor(conn)
+    # table is one of the fixed names passed by the routes below, never input.
+    cur.execute(f'SELECT vcn_id FROM {table} WHERE id=%s', [row_id])
+    row = cur.fetchone()
+    conn.close()
+    return row['vcn_id'] if row else None
+
+
+def _check_editable(vcn_id):
+    """Gate every VCN write. Returns an error response, or None when allowed.
+
+    Mirrors MBC01: cargo that has been billed or invoiced freezes the vessel
+    call, because a retro-edited cargo declaration silently rewrites what a
+    customer was charged. Approved but unbilled stays admin-resettable."""
+    if not vcn_id:
+        return None
+    from modules.FIN01 import model as fin_model
+    from database import get_db, get_cursor
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        state = fin_model.source_lock_state(cur, 'VCN', vcn_id)
+    finally:
+        conn.close()
+    if state:
+        return jsonify({'error': fin_model.lock_message(state, 'vessel call')}), 403
+    if model.get_doc_status(vcn_id) == 'Approved' and not _is_approver():
+        return jsonify({'error': 'This VCN is Approved and locked for editing. '
+                                 'Ask an admin to reopen it from the Admin panel.'}), 403
+    return None
+
 @bp.route('/module/VCN01/')
 @login_required
 def view():
@@ -60,18 +104,12 @@ def save():
     if not is_new and not perms.get('can_edit'):
         return jsonify({'error': 'No permission to edit'}), 403
 
-    config = get_module_config('VCN01')
-    user_id = session.get('user_id')
-    is_approver = str(config.get('approver_id', '')) == str(user_id) or session.get('is_admin')
-
     if not is_new:
-        current_status = model.get_doc_status(data['id'])
-        if current_status == 'Approved':
-            if not is_approver:
-                return jsonify({'error': 'Cannot edit an approved record'}), 403
-            data['doc_status'] = 'Approved'
-        else:
-            data['doc_status'] = 'Draft'
+        blocked = _check_editable(data['id'])
+        if blocked:
+            return blocked
+        data['doc_status'] = ('Approved' if model.get_doc_status(data['id']) == 'Approved'
+                              else 'Draft')
     else:
         data['doc_status'] = 'Draft'
 
@@ -116,6 +154,9 @@ def send_back():
         return jsonify({'error': 'Missing id'}), 400
     if not comment:
         return jsonify({'error': 'A reason is required when sending back to Draft'}), 400
+    blocked = _check_editable(record_id)
+    if blocked:
+        return blocked
     model.send_back_to_draft(record_id, comment, session.get('username'))
     return jsonify({'doc_status': 'Draft'})
 
@@ -132,6 +173,9 @@ def delete():
     perms = get_perms()
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
+    blocked = _check_editable(request.json.get('id'))
+    if blocked:
+        return blocked
     model.delete_header(request.json.get('id'))
     return jsonify({'success': True})
 
@@ -195,7 +239,11 @@ def save_cargo():
     perms = get_perms()
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
-    row_id = model.save_cargo_declaration(request.json)
+    data = request.json
+    blocked = _check_editable(data.get('vcn_id') or _vcn_id_of('vcn_cargo_declaration', data.get('id')))
+    if blocked:
+        return blocked
+    row_id = model.save_cargo_declaration(data)
     return jsonify({'success': True, 'id': row_id})
 
 @bp.route('/api/module/VCN01/cargo/delete', methods=['POST'])
@@ -204,6 +252,9 @@ def delete_cargo():
     perms = get_perms()
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
+    blocked = _check_editable(_vcn_id_of('vcn_cargo_declaration', request.json.get('id')))
+    if blocked:
+        return blocked
     model.delete_cargo_declaration(request.json.get('id'))
     return jsonify({'success': True})
 
@@ -219,7 +270,11 @@ def save_export_cargo():
     perms = get_perms()
     if not perms.get('can_add') and not perms.get('can_edit'):
         return jsonify({'error': 'No permission'}), 403
-    row_id = model.save_export_cargo_declaration(request.json)
+    data = request.json
+    blocked = _check_editable(data.get('vcn_id') or _vcn_id_of('vcn_export_cargo_declaration', data.get('id')))
+    if blocked:
+        return blocked
+    row_id = model.save_export_cargo_declaration(data)
     return jsonify({'success': True, 'id': row_id})
 
 @bp.route('/api/module/VCN01/export_cargo/delete', methods=['POST'])
@@ -228,6 +283,9 @@ def delete_export_cargo():
     perms = get_perms()
     if not perms.get('can_delete'):
         return jsonify({'error': 'No permission to delete'}), 403
+    blocked = _check_editable(_vcn_id_of('vcn_export_cargo_declaration', request.json.get('id')))
+    if blocked:
+        return blocked
     model.delete_export_cargo_declaration(request.json.get('id'))
     return jsonify({'success': True})
 
