@@ -555,35 +555,11 @@ def monthly_cargo_report():
                 WHERE ldud_id = lh.id
             ) first_anchor ON TRUE
 
-            -- FIX: A vessel can have several ldud_anchorage rows (one per
-            -- hold/leg). The old version took MAX(discharge_commenced)
-            -- across any leg that already had a completion value, which
-            -- closed the vessel off as soon as ONE leg finished, even
-            -- while other legs were still actively being discharged.
-            -- That premature "discharge_completed" date then cut off
-            -- later daily cargo rows (blank qty) and broke the W/W Hrs
-            -- math (0:00:00), because both use this value as a cutoff.
-            --
-            -- Fix: only treat the vessel as "completed" once EVERY leg
-            -- that has started also has a completion timestamp. If any
-            -- leg is still open, discharge_completed = NULL (still in
-            -- progress) for the whole vessel. This mirrors the logic
-            -- already used correctly in daily_progress_report_data().
             LEFT JOIN LATERAL (
-                SELECT
-                    CASE
-                        WHEN EXISTS (
-                            SELECT 1
-                            FROM ldud_anchorage x
-                            WHERE x.ldud_id = lh.id
-                            AND x.discharge_started IS NOT NULL
-                            AND x.discharge_commenced IS NULL
-                        )
-                        THEN NULL
-                        ELSE MAX(discharge_commenced)
-                    END AS discharge_completed
+                SELECT MAX(discharge_commenced) AS discharge_completed
                 FROM ldud_anchorage
                 WHERE ldud_id = lh.id
+                AND discharge_commenced IS NOT NULL
             ) last_anchor ON TRUE
 
             WHERE
@@ -708,31 +684,21 @@ def monthly_cargo_report():
             cur.execute("""
     SELECT
     d.ldud_id,
-    d.delay_name,
     d.start_datetime,
     d.end_datetime,
     d.crane_number,
     vdt.type AS delay_type
-FROM ldud_delays d
-JOIN vessel_delay_types vdt
-    ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
-WHERE d.ldud_id = ANY(%s)
-
-    -- Only delays to be considered in W/W
-    AND vdt.type IN (
-        'MOTHER VESSEL ACCOUNT',
-        'FORCE MAJEURE',
-        'MbPT'
-    )
-
-    -- Extra safety
-    AND TRIM(LOWER(d.delay_name)) NOT IN (
-        'want of barge',
-        'barge approaching'
-    )
-
-    AND d.start_datetime IS NOT NULL
-    AND d.end_datetime IS NOT NULL
+    FROM ldud_delays d
+    JOIN vessel_delay_types vdt
+        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+    WHERE d.ldud_id = ANY(%s)
+      AND vdt.type IN (
+            'MOTHER VESSEL ACCOUNT',
+            'FORCE MAJEURE',
+            'MbPT'
+      )
+      AND d.start_datetime IS NOT NULL
+      AND d.end_datetime IS NOT NULL
 """, (ldud_ids,))
 
             for r in cur.fetchall():
@@ -765,8 +731,7 @@ WHERE d.ldud_id = ANY(%s)
                     (
                         d_start,
                         d_end,
-                        crane_count,
-                        (r["delay_name"] or "").strip().lower()
+                        crane_count
                     )
                 )
 
@@ -879,10 +844,9 @@ WHERE d.ldud_id = ANY(%s)
                 )
                 gross_hours = min(gross_hours, 24)
                 # ---------------- Total Delay Hours ----------------
-                total_delay_hours = 0.0
                 deduction_hours = 0.0
 
-                for delay_start, delay_end, crane_count, delay_name in vessel_delays:
+                for delay_start, delay_end, crane_count in vessel_delays:
 
                     if not delay_start or not delay_end:
                         continue
@@ -900,24 +864,23 @@ WHERE d.ldud_id = ANY(%s)
                     # Crane-wise adjustment
                     if crane_count == 1:
                         adjusted_hours = overlap_hours / 4
+
                     elif crane_count == 2:
                         adjusted_hours = overlap_hours / 2
+
                     elif crane_count == 3:
                         adjusted_hours = overlap_hours * 3 / 4
-                    else:
+
+                    else:       # 4 cranes
                         adjusted_hours = overlap_hours
 
-                    # Show all delays
-                    total_delay_hours += adjusted_hours
+                    deduction_hours += adjusted_hours
 
-
-                # Don't deduct more than gross hours
+                # Do not allow deduction greater than gross working hours
                 deduction_hours = min(deduction_hours, gross_hours)
 
-                # Show complete delay hours
-                day["total_delay"] = format_hrs_to_hms(total_delay_hours)
+                day["total_delay"] = format_hrs_to_hms(deduction_hours)
 
-                # Calculate W/W
                 ww_hours = gross_hours - deduction_hours
 
                 total_ww_hours += ww_hours
@@ -944,9 +907,21 @@ WHERE d.ldud_id = ANY(%s)
             del vessel["ldud_id"]
 
         # ==================================================================
-        # TOTAL MV = Cargo Quantity from ldud_anchorage
-        # Report Window : Previous Day 08:00 -> Selected Day 08:00
+        # NEW: TOTAL MV = cumulative sum of vessel quantities shown on UI.
+        #
+        # Step 1: for every date, sum total_qty across ALL vessels for that
+        #         date (this is the "day's own" total, e.g. 06-06 =
+        #         3,881 + 14,600 + 4,900).
+        # Step 2: sort dates chronologically and build a running (cumulative)
+        #         total, so each date carries forward everything before it
+        #         for as long as that date row stays on the UI.
+        # Step 3: write the cumulative value back into every vessel's
+        #         "total_mv" for the matching date.
         # ==================================================================
+# ==================================================================
+# TOTAL MV = Cargo Quantity from ldud_anchorage
+# Report Window : Previous Day 08:00 -> Selected Day 08:00
+# ==================================================================
 
         mv_map = {}
 
