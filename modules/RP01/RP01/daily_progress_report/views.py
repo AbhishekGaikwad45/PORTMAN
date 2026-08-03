@@ -555,20 +555,6 @@ def monthly_cargo_report():
                 WHERE ldud_id = lh.id
             ) first_anchor ON TRUE
 
-            -- FIX: A vessel can have several ldud_anchorage rows (one per
-            -- hold/leg). The old version took MAX(discharge_commenced)
-            -- across any leg that already had a completion value, which
-            -- closed the vessel off as soon as ONE leg finished, even
-            -- while other legs were still actively being discharged.
-            -- That premature "discharge_completed" date then cut off
-            -- later daily cargo rows (blank qty) and broke the W/W Hrs
-            -- math (0:00:00), because both use this value as a cutoff.
-            --
-            -- Fix: only treat the vessel as "completed" once EVERY leg
-            -- that has started also has a completion timestamp. If any
-            -- leg is still open, discharge_completed = NULL (still in
-            -- progress) for the whole vessel. This mirrors the logic
-            -- already used correctly in daily_progress_report_data().
             LEFT JOIN LATERAL (
                 SELECT
                     CASE
@@ -671,6 +657,32 @@ def monthly_cargo_report():
             )
         )
         rows = cur.fetchall()
+
+        # ------------------------------------------------------------
+        # TEMP DEBUG: dump everything the main query returned for any
+        # vessel matching "ORION" so we can see, without DB access,
+        # whether ldud_vessel_operations rows for it are matching at
+        # all — and if so, what cargo_date / day_label / total_qty
+        # came back for each. Remove once the 08-02 issue is diagnosed.
+        # ------------------------------------------------------------
+        print("\n---------- ORION DEBUG START ----------")
+        print("cutoff_date used in query:", cutoff_date)
+        print("window_start:", window_start, " window_end:", window_end)
+        orion_rows = [r for r in rows if r['vessel_name'] and 'ORION' in r['vessel_name'].upper()]
+        print("ORION rows found in main query result:", len(orion_rows))
+        for r in orion_rows:
+            print({
+                "id": r["id"],
+                "vcn_id": r["vcn_id"],
+                "vessel_name": r["vessel_name"],
+                "cargo_name": r["cargo_name"],
+                "discharge_started": r["discharge_started"],
+                "discharge_completed": r["discharge_completed"],
+                "cargo_date": r["cargo_date"],
+                "day_label": r["day_label"],
+                "total_qty": r["total_qty"],
+            })
+        print("---------- ORION DEBUG END ----------\n")
 
         # NOTE: Total MV is no longer sourced from lueu_lines.
         # It is now derived from the vessel quantities actually shown on the UI
