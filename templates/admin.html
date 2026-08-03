@@ -2719,6 +2719,8 @@ async function cutLoadBillables() {
             </tr>`;
         }).join('');
         html += '</tbody></table></div>';
+        html += '<div class="cut-actions"><button class="btn btn-danger" onclick="cutReopenSelected()">'
+             +  'Reopen selected (make billable again)</button></div>';
     }
 
     html += '<h4 class="cut-subhead">Other Services</h4>';
@@ -2782,6 +2784,19 @@ function cutToggleReopen(master) {
         .forEach(cb => { cb.checked = master.checked; });
 }
 
+// Own button, own scope: acts only on the cutover-flagged table, never on the
+// cargo table above it. Reopening is always a full reset to unbilled.
+async function cutReopenSelected() {
+    const cargo_items = [...document.querySelectorAll('.cut-reopen:checked')].map(e => (
+        { source_type: e.dataset.st, id: parseInt(e.dataset.id, 10) }
+    ));
+    if (!cargo_items.length) { alert('Select at least one flagged row to reopen'); return; }
+    if (!confirm(`Reopen ${cargo_items.length} cargo line(s)? They become billable in FIN01 again.`)) return;
+    const ok = await _cutPost('/admin/api/cutover/mark-billed',
+                              { cargo_items, service_ids: [], billed: false });
+    if (ok) { alert('Reopened'); cutLoadBillables(); }
+}
+
 async function cutMarkBilled(billed) {
     const cargo_items = [...document.querySelectorAll('.cut-cargo:checked')].map(e => {
         const item = { source_type: e.dataset.st, id: parseInt(e.dataset.id, 10) };
@@ -2791,12 +2806,6 @@ async function cutMarkBilled(billed) {
         }
         return item;
     });
-    // Reopen rows only ever unmark — never feed them to the mark-billed path.
-    if (!billed) {
-        cargo_items.push(...[...document.querySelectorAll('.cut-reopen:checked')].map(e => (
-            { source_type: e.dataset.st, id: parseInt(e.dataset.id, 10) }
-        )));
-    }
     const service_ids = [...document.querySelectorAll('.cut-svc:checked')].map(e => parseInt(e.dataset.id, 10));
     if (!cargo_items.length && !service_ids.length) { alert('Select at least one item'); return; }
     if (billed && cargo_items.some(c => !(c.bill_quantity > 0))) {
