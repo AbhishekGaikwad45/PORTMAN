@@ -5,6 +5,10 @@ import io
 from flask import request, jsonify
 from openpyxl.styles import PatternFill
 
+import json
+from ..daily_ops.views import _compute_fy_throughput
+from ..daily_ops.model import fy_label
+
 from flask import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -551,11 +555,35 @@ def monthly_cargo_report():
                 WHERE ldud_id = lh.id
             ) first_anchor ON TRUE
 
+            -- FIX: A vessel can have several ldud_anchorage rows (one per
+            -- hold/leg). The old version took MAX(discharge_commenced)
+            -- across any leg that already had a completion value, which
+            -- closed the vessel off as soon as ONE leg finished, even
+            -- while other legs were still actively being discharged.
+            -- That premature "discharge_completed" date then cut off
+            -- later daily cargo rows (blank qty) and broke the W/W Hrs
+            -- math (0:00:00), because both use this value as a cutoff.
+            --
+            -- Fix: only treat the vessel as "completed" once EVERY leg
+            -- that has started also has a completion timestamp. If any
+            -- leg is still open, discharge_completed = NULL (still in
+            -- progress) for the whole vessel. This mirrors the logic
+            -- already used correctly in daily_progress_report_data().
             LEFT JOIN LATERAL (
-                SELECT MAX(discharge_commenced) AS discharge_completed
+                SELECT
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM ldud_anchorage x
+                            WHERE x.ldud_id = lh.id
+                            AND x.discharge_started IS NOT NULL
+                            AND x.discharge_commenced IS NULL
+                        )
+                        THEN NULL
+                        ELSE MAX(discharge_commenced)
+                    END AS discharge_completed
                 FROM ldud_anchorage
                 WHERE ldud_id = lh.id
-                AND discharge_commenced IS NOT NULL
             ) last_anchor ON TRUE
 
             WHERE
@@ -704,10 +732,21 @@ def monthly_cargo_report():
                 except (ValueError, TypeError):
                     continue
 
-                try:
-                    crane_count = int(r["crane_number"] or 0)
-                except:
+                # Count number of cranes from values like:
+                # "1", "1, 2", "2, 3, 4", "1, 2, 3, 4"
+
+                crane_str = (r["crane_number"] or "").strip()
+
+                if crane_str:
+                    crane_count = len([
+                        c.strip()
+                        for c in crane_str.split(",")
+                        if c.strip()
+                    ])
+                else:
                     crane_count = 0
+
+                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}")
 
                 delay_map.setdefault(
                     r["ldud_id"],
@@ -892,21 +931,9 @@ def monthly_cargo_report():
             del vessel["ldud_id"]
 
         # ==================================================================
-        # NEW: TOTAL MV = cumulative sum of vessel quantities shown on UI.
-        #
-        # Step 1: for every date, sum total_qty across ALL vessels for that
-        #         date (this is the "day's own" total, e.g. 06-06 =
-        #         3,881 + 14,600 + 4,900).
-        # Step 2: sort dates chronologically and build a running (cumulative)
-        #         total, so each date carries forward everything before it
-        #         for as long as that date row stays on the UI.
-        # Step 3: write the cumulative value back into every vessel's
-        #         "total_mv" for the matching date.
+        # TOTAL MV = Cargo Quantity from ldud_anchorage
+        # Report Window : Previous Day 08:00 -> Selected Day 08:00
         # ==================================================================
-# ==================================================================
-# TOTAL MV = Cargo Quantity from ldud_anchorage
-# Report Window : Previous Day 08:00 -> Selected Day 08:00
-# ==================================================================
 
         mv_map = {}
 
@@ -1634,6 +1661,25 @@ def barge_status_report():
         cur.close()
         conn.close()
 
+def _get_cutoff_editable_fy_values():
+    """Admin-set historical FY overrides (see daily_ops_cutoff) — the exact
+    same source port_overview's 'All Time' card reads from."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute("SELECT cutoff_values FROM daily_ops_cutoff ORDER BY id DESC LIMIT 1")
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    values = row['cutoff_values']
+    if isinstance(values, str):
+        values = json.loads(values)
+    return (values or {}).get('fy_throughput', {})
+
+
 @bp.route(
     '/api/module/RP01/barge_discharge_report',
     methods=['GET']
@@ -1735,16 +1781,14 @@ def barge_discharge_report():
         historic_rows = cur.fetchall()
 
         # 2b) Live total (lueu_lines): month_total (calendar month -> data_date),
-        #     live_fy_total (live_start -> data_date), live_cumulative_total (live_start -> data_date)
+        #     live_fy_total (live_start -> data_date)
         cur.execute("""
             SELECT
                 COALESCE(vc.cargo_type, 'Others') AS cargo_type,
                 COALESCE(vc.cargo_category, 'Others') AS cargo_category,
                 SUM(COALESCE(lbl.quantity, 0)) AS live_fy_total,
                 SUM(CASE WHEN lbl.entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
-                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total,
-                SUM(CASE WHEN lbl.entry_date::date <= %(data_date)s::date
-                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS live_cumulative_total
+                    THEN COALESCE(lbl.quantity, 0) ELSE 0 END) AS month_total
             FROM lueu_lines lbl
             LEFT JOIN vessel_cargo vc
                 ON LOWER(TRIM(vc.cargo_name)) = LOWER(TRIM(lbl.cargo_name))
@@ -1754,6 +1798,28 @@ def barge_discharge_report():
             GROUP BY vc.cargo_type, vc.cargo_category
         """, {"live_start": live_start, "data_date": data_date, "month_start": month_start})
         live_rows = cur.fetchall()
+
+        # 2c) PRIOR-FY category weights only (entry_date < live_start, i.e.
+        # everything strictly before the current FY's live window starts).
+        # This is NOT used as an actual total — it's only a distribution
+        # shape, to proportionally split the hardcoded baseline (FY2012-13
+        # through FY2025-2026, one number per cargo_type) across each
+        # type's individual categories.
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(l.quantity, 0)) AS weight_total
+            FROM lueu_lines l
+            LEFT JOIN vessel_cargo vc
+                ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.quantity IS NOT NULL
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') < %(live_start)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"live_start": live_start})
+        cumulative_rows = cur.fetchall()
 
         # 3) Per-equipment totals: day total (live only) and month total (live only)
         cur.execute(f"""
@@ -1797,25 +1863,79 @@ def barge_discharge_report():
             key = cat_key(row['cargo_type'], row['cargo_category'])
             historic_totals[key] = int(row['historic_total'] or 0)
 
-        # ---- Live totals (May onward) merged with historic to form FY / cumulative ----
+        # ---- Live totals (May onward) merged with historic to form FY ----
         month_totals = {}
         fy_totals = {}
-        cumulative_totals = {}
         for row in live_rows:
             key = cat_key(row['cargo_type'], row['cargo_category'])
             month_totals[key] = int(row['month_total'] or 0)
             live_fy = int(row['live_fy_total'] or 0)
-            live_cum = int(row['live_cumulative_total'] or 0)
             hist = historic_totals.get(key, 0)
             fy_totals[key] = hist + live_fy
-            cumulative_totals[key] = hist + live_cum
 
         # Categories that ONLY had historic (April) activity, with nothing live yet
         for key, hist_val in historic_totals.items():
             if key not in fy_totals:
                 fy_totals[key] = hist_val
-                cumulative_totals[key] = hist_val
                 month_totals.setdefault(key, 0)
+
+        # ---- Prior-FY category weights (before live_start). Used ONLY to
+        # split the hardcoded baseline proportionally across categories
+        # within a cargo_type — these are NOT real totals. ----
+        weight_by_category = {}   # cat_key -> weight
+        weight_by_type = {}       # cargo_type -> weight (sum of its categories)
+        for row in cumulative_rows:
+            ctype = row['cargo_type']
+            key = cat_key(ctype, row['cargo_category'])
+            qty = float(row['weight_total'] or 0)
+            weight_by_category[key] = qty
+            weight_by_type[ctype] = weight_by_type.get(ctype, 0) + qty
+
+        # ---- HARDCODED baseline: cumulative throughput per cargo_type,
+        # FY2012-2013 (Half Year) through FY2025-2026 (i.e. everything up
+        # to and including March 31, 2026). Sourced from the FY summary
+        # table (Total row). Keyed case-insensitively so it matches
+        # whatever casing cargo_type actually has in vessel_cargo.
+        BASELINE_TILL_MAR_2026 = {
+            "IBRM": 116229319,
+            "FLUXES": 24038328,
+            "CBRM": 52438887,
+            "CLINKER": 3453541,
+            "SLAG": 1439086,
+            "FINISH GOODS": 157549,
+            "OTHER": 354512,
+            "OTHERS": 354512,   # in case master data defaults to 'Others'
+        }
+
+        # ---- Cumulative totals = hardcoded baseline (through Mar 2026)
+        # + current FY total (fy_totals, which is already historic-April
+        # + live-May-onward for the current FY, computed above). No call
+        # to _compute_fy_throughput, so no risk of it silently including
+        # rp01_historical_lueu data for prior years either — the baseline
+        # is a fixed, known-correct number instead. ----
+        cumulative_totals = {}
+        for ctype, ccats in cargo_hierarchy.items():
+            baseline_type_total = BASELINE_TILL_MAR_2026.get(ctype.strip().upper())
+            type_weight = weight_by_type.get(ctype, 0)
+
+            for ccat in ccats:
+                key = cat_key(ctype, ccat)
+                current_fy_amt = fy_totals.get(key, 0)
+
+                if baseline_type_total and type_weight > 0:
+                    # Split baseline across this type's categories using
+                    # prior-FY live proportions.
+                    cat_weight = weight_by_category.get(key, 0)
+                    share = baseline_type_total * (cat_weight / type_weight)
+                elif baseline_type_total:
+                    # No weight data to split by (e.g. brand-new category)
+                    # — split evenly across the type's categories instead.
+                    share = baseline_type_total / len(ccats) if ccats else 0
+                else:
+                    # No baseline for this cargo_type at all.
+                    share = 0
+
+                cumulative_totals[key] = int(round(share)) + int(current_fy_amt)
 
         # ---- Seed equipment_totals with full equipment list too ----
         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
@@ -2204,6 +2324,7 @@ def arrived_vessel_report():
         cur.close()
         conn.close()
 
+
 @bp.route(
     '/api/module/RP01/mbc_arrived_report',
     methods=['GET']
@@ -2226,6 +2347,19 @@ def mbc_arrived_report():
     cur = get_cursor(conn)
 
     try:
+        # Same 8am -> 8am window mbc_report() uses to decide whether a
+        # row belongs in "MBC'S DISCHARGE COMPLETED". We need this here
+        # too so we can exclude any MBC that mbc_report() would show.
+        report_dt = datetime.strptime(report_date, "%Y-%m-%d")
+
+        window_end = datetime(
+            report_dt.year,
+            report_dt.month,
+            report_dt.day,
+            8, 0, 0
+        )
+
+        window_start = window_end - timedelta(hours=24)
 
         query = """
 
@@ -2252,6 +2386,11 @@ def mbc_arrived_report():
 
             NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
 
+            -- Discharge must NOT have started yet — once
+            -- unloading_commenced is set, this MBC belongs in the
+            -- discharge report, not the "arrived" report.
+            AND NULLIF(TRIM(dpl.unloading_commenced), '') IS NULL
+
             AND DATE(
                 NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp
             )
@@ -2259,6 +2398,24 @@ def mbc_arrived_report():
                 (%s::date - INTERVAL '1 day')
             AND
                 %s::date
+
+            -- Belt-and-braces: explicitly exclude any MBC that would
+            -- be picked up by mbc_report() for this same report_date
+            -- window (unloading_completed OR unloading_commenced
+            -- falling inside window_start -> window_end).
+            AND NOT (
+                (
+                    NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                )
+                OR
+                (
+                    NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                )
+            )
 
         ORDER BY
 
@@ -2270,7 +2427,11 @@ def mbc_arrived_report():
             query,
             (
                 report_date,
-                report_date
+                report_date,
+                window_start,
+                window_end,
+                window_start,
+                window_end
             )
         )
 
@@ -2489,6 +2650,136 @@ def upcoming_vessel_report():
 
         conn.close()
 
+# @bp.route(
+#     '/api/module/RP01/mbc_expected_report',
+#     methods=['GET']
+# )
+# @login_required
+# def mbc_expected_report():
+
+#     report_date = request.args.get("report_date")
+
+#     print("\n========== MBC EXPECTED REPORT START ==========")
+#     print("REPORT DATE:", report_date)
+
+#     if not report_date:
+
+#         return jsonify({
+#             "success": False,
+#             "message": "Report date required"
+#         })
+
+#     conn = get_db()
+#     cur = get_cursor(conn)
+
+#     try:
+
+#         query = """
+
+#         SELECT
+
+#             mh.id,
+
+#             mh.mbc_name,
+
+#             mh.cargo_name,
+
+#             mh.bl_quantity,
+
+#             mh.load_port,
+
+#             dpl.arrival_gull_island
+
+#         FROM mbc_header mh
+
+#         LEFT JOIN mbc_discharge_port_lines dpl
+#             ON dpl.mbc_id = mh.id
+
+#         WHERE
+
+#             NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
+
+#             AND DATE(
+#                 NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+#             )
+#             BETWEEN
+#                 (%s::date - INTERVAL '1 day')
+#             AND
+#                 %s::date
+
+#         ORDER BY
+
+#             NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+
+#         """
+
+#         print(query)
+#         print(report_date)
+
+#         cur.execute(
+#             query,
+#             (
+#                 report_date,
+#                 report_date
+#             )
+#         )
+
+#         rows = cur.fetchall()
+
+#         print("TOTAL ROWS:", len(rows))
+
+#         data = []
+
+#         sr_no = 1
+
+#         for row in rows:
+
+#             eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
+
+#             data.append({
+
+#                 "mbc_no": sr_no,
+
+#                 "mbc_name": row["mbc_name"] or "",
+
+#                 "cargo": row["cargo_name"] or "",
+
+#                 "bl_qty": int(row["bl_quantity"] or 0),
+
+#                 "load_port": row["load_port"] or "",
+
+#                 "eta_mumbai": eta_mumbai
+
+#             })
+
+#             sr_no += 1
+
+#         return jsonify({
+
+#             "success": True,
+
+#             "data": data
+
+#         })
+
+#     except Exception as e:
+
+#         import traceback
+#         traceback.print_exc()
+
+#         return jsonify({
+
+#             "success": False,
+
+#             "message": str(e)
+
+#         })
+
+#     finally:
+
+#         cur.close()
+#         conn.close()
+
 @bp.route(
     '/api/module/RP01/mbc_expected_report',
     methods=['GET']
@@ -2527,19 +2818,26 @@ def mbc_expected_report():
 
             mh.load_port,
 
-            dpl.arrival_gull_island
+            lpl.eta
 
         FROM mbc_header mh
 
         LEFT JOIN mbc_discharge_port_lines dpl
             ON dpl.mbc_id = mh.id
 
+        LEFT JOIN mbc_load_port_lines lpl
+            ON lpl.mbc_id = mh.id
+
         WHERE
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
+            -- Reached load port
+            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+
+            -- Not yet arrived at Gull Island
+            AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2548,7 +2846,7 @@ def mbc_expected_report():
 
         ORDER BY
 
-            NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
 
         """
 
@@ -2573,7 +2871,7 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_mumbai = _parse_flexible_dt(row["arrival_gull_island"], "%d-%m-%Y %H:%M")
+            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
 
             data.append({
 
@@ -2587,7 +2885,7 @@ def mbc_expected_report():
 
                 "load_port": row["load_port"] or "",
 
-                "eta_mumbai": eta_mumbai
+                "eta_mumbai": eta_gull
 
             })
 

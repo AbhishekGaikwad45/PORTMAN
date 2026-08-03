@@ -756,47 +756,56 @@ $(document).ready(function () {
 
 
     }
+
     function mergeActualDischargeCells() {
 
-    const rows = $('#cargo-report-table tbody tr');
+        const rows = $('#cargo-report-table tbody tr');
 
-    let prevKey = '';
-    let firstCell = null;
-    let rowspan = 1;
+        let prevKey = '';
+        let firstCell = null;
+        let rowspan = 1;
+        let sum = 0;
 
-    rows.each(function () {
+        rows.each(function () {
 
-        const cells = $(this).find('td');
+            const cells = $(this).find('td');
 
-        if (cells.length < 13) return;
+            if (cells.length < 13) return;
 
-        const vesselName = cells.eq(1).text().trim();
-        const vesselType = cells.eq(2).text().trim();
+            const vesselName = cells.eq(1).text().trim();
+            const vesselType = cells.eq(2).text().trim();
 
-        const key = vesselName + '|' + vesselType;
+            const key = vesselName + '|' + vesselType;
 
-        const actualCell = cells.eq(7);
+            const actualCell = cells.eq(7);
+            const actualValue = parseFloat(actualCell.text().replace(/,/g, '')) || 0;
 
-        if (key === prevKey) {
+            if (key === prevKey) {
 
-            rowspan++;
+                rowspan++;
+                sum += actualValue;
 
-            firstCell.attr('rowspan', rowspan);
+                firstCell.attr('rowspan', rowspan);
+                firstCell.text(sum);
 
-            actualCell.remove();
+                actualCell.remove();
 
-        } else {
+            } else {
 
-            prevKey = key;
-            firstCell = actualCell;
-            rowspan = 1;
-        }
-    });
+                prevKey = key;
+                firstCell = actualCell;
+                rowspan = 1;
+                sum = actualValue;
 
-    $('#cargo-report-table td[rowspan]').css({
-        'vertical-align': 'middle',
-    });
-}
+                firstCell.text(sum);
+            }
+        });
+
+        $('#cargo-report-table td[rowspan]').css({
+            'vertical-align': 'middle',
+        });
+    }
+
     $(document).on('change', '.material-po-input', async function () {
 
         const materialPo = $(this).val();
@@ -840,6 +849,7 @@ $(document).ready(function () {
 
         }
     });
+
     function validateDates(fromDate, toDate) {
 
         const cutoffDate = '2026-05-01';

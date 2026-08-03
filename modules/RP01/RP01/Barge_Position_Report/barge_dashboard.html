@@ -1285,17 +1285,18 @@
                         <tr>
                             <th>Parameter</th>
                             {% for vessel in mother_vessels %}
-                            <th>Vessel {{ loop.index }}<br>{{ vessel.vessel_name }}</th>
+                            <th>Vessel {{ loop.index }}<br>{{ vessel.vessel_name }}<br><span
+                                    style="font-weight:400;font-size:10px;">{{ vessel.cargo_name }}</span></th>
                             {% endfor %}
                         </tr>
                     </thead>
                     <tbody id="motherVesselBody">
                         <tr>
-                            <td><b>VSL DISCH COMMNACED</b></td>
+                            <td><b>VSL DISCH COMMENCED</b></td>
                             {% for vessel in mother_vessels %}<td>{{ vessel.discharge_commenced }}</td>{% endfor %}
                         </tr>
                         <tr>
-                            <td><b>VSL DISCHARGE COMPLITED</b></td>
+                            <td><b>VSL DISCHARGE COMPLETED</b></td>
                             {% for vessel in mother_vessels %}<td>{{ vessel.discharge_completed }}</td>{% endfor %}
                         </tr>
                         <tr>
@@ -2374,12 +2375,11 @@
 
         headRow.innerHTML = '<th>Parameter</th>';
         vessels.forEach((v, i) => {
-            headRow.innerHTML += `<th>Vessel ${i + 1}<br>${v.vessel_name || ''}</th>`;
+            headRow.innerHTML += `<th>Vessel ${i + 1}<br>${v.vessel_name || ''}<br><span style="font-weight:400;font-size:10px;">${v.cargo_name || ''}</span></th>`;
         });
-
         const rows = [
-            ['VSL DISCH COMMNACED', 'discharge_commenced', false],
-            ['VSL DISCHARGE COMPLITED', 'discharge_completed', false],
+            ['VSL DISCH COMMENCED', 'discharge_commenced', false],
+            ['VSL DISCHARGE COMPLETED', 'discharge_completed', false],
             ['UNDER LOADING', 'under_loading', false],
             ['ETA TO DHARAMTAR', 'at_gull_loaded', false],
             ['WT @ R19', 'wt_r19', true],  // editable
@@ -3239,6 +3239,8 @@
 
         // Initial dropzone binding
         bindDropzones();
+        // Auto-load report on page open — no need to click Preview
+        applyDateRangeFilter();
     });
     async function downloadModalExcel() {
         if (!_modalExcelMode) return;

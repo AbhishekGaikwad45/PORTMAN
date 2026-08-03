@@ -309,13 +309,13 @@ html, body {
           </table>
         </div>
       </div>
-      <div class="panel">
+      <!-- <div class="panel">
         <div class="panel-hdr"><span>Shift Notes</span></div>
         <div class="panel-body">
           <div id="notesList" class="notes-list"></div>
           <div class="notes-hint">Read-only — edit in the Barge Position report for the current shift.</div>
         </div>
-      </div>
+      </div> -->
     </div>
 
   </div>
@@ -557,7 +557,7 @@ function loadData() {
       renderCards(d.cargo_cards || {});
       renderDelays(d.delays || []);
       renderTide(d.tide || []);
-      renderNotes(d.notes || []);
+      // renderNotes(d.notes || []);
       document.getElementById('ftr-upd').textContent = d.as_of || '—';
     })
     .catch(e => console.error('Port overview error:', e));
