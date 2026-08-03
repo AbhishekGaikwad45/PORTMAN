@@ -2662,7 +2662,7 @@ async function cutLoadBillables() {
     } else {
         html += '<div class="cut-table-wrap"><table class="admin-table cut-cargo-table"><thead><tr>'
             + '<th><input type="checkbox" id="cut-select-all" onclick="cutToggleAll(this)"></th>'
-            + '<th>Source</th><th>Status</th><th>Service</th><th>Cargo</th><th>Proof Docs</th>'
+            + '<th>Source</th><th>Status</th><th>Material PO</th><th>Service</th><th>Cargo</th><th>Proof Docs</th>'
             + '<th>BL Date</th><th class="num">BL Qty</th><th class="num">Billed</th>'
             + '<th class="num">Balance</th><th class="num">Bill Qty</th><th class="num">Rate</th>'
             + '<th class="num">Amount</th></tr></thead><tbody>';
@@ -2678,6 +2678,7 @@ async function cutLoadBillables() {
                 <td><input type="checkbox" class="cut-cargo" data-st="${c.cargo_source_type}" data-id="${c.cargo_source_id}"></td>
                 <td>${c.doc_label || ''} <span class="cut-tag">${tag}</span></td>
                 <td><span class="cut-chip ${chip}">${c.doc_status || '—'}</span></td>
+                <td>${c.material_po || '—'}</td>
                 <td>${c.service_name || ''}</td>
                 <td>${c.cargo_name || ''}</td>
                 <td>${cutProofCell(c)}</td>
@@ -2701,7 +2702,7 @@ async function cutLoadBillables() {
         html += '<h4 class="cut-subhead">Cutover-flagged (no bill) — reopen to make billable again</h4>';
         html += '<div class="cut-table-wrap"><table class="admin-table"><thead><tr>'
             + '<th><input type="checkbox" onclick="cutToggleReopen(this)"></th>'
-            + '<th>Source</th><th>Cargo</th><th class="num">Qty</th>'
+            + '<th>Source</th><th>Material PO</th><th>Cargo</th><th class="num">Qty</th>'
             + '<th class="num">Flagged Billed</th></tr></thead><tbody>';
         html += flagged.map(b => {
             const qty = Number(b.quantity || 0);
@@ -2711,6 +2712,7 @@ async function cutLoadBillables() {
             return `<tr>
                 <td><input type="checkbox" class="cut-reopen" data-st="${b.cargo_source_type}" data-id="${b.id}"></td>
                 <td>${b.service_name || ''}</td>
+                <td>${b.material_po || '—'}</td>
                 <td>${b.cargo_name || ''}</td>
                 <td class="num">${qty.toFixed(2)}</td>
                 <td class="num"><span${warn}>${bq.toFixed(2)}</span></td>
