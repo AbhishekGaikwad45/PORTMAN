@@ -555,6 +555,20 @@ def monthly_cargo_report():
                 WHERE ldud_id = lh.id
             ) first_anchor ON TRUE
 
+            -- FIX: A vessel can have several ldud_anchorage rows (one per
+            -- hold/leg). The old version took MAX(discharge_commenced)
+            -- across any leg that already had a completion value, which
+            -- closed the vessel off as soon as ONE leg finished, even
+            -- while other legs were still actively being discharged.
+            -- That premature "discharge_completed" date then cut off
+            -- later daily cargo rows (blank qty) and broke the W/W Hrs
+            -- math (0:00:00), because both use this value as a cutoff.
+            --
+            -- Fix: only treat the vessel as "completed" once EVERY leg
+            -- that has started also has a completion timestamp. If any
+            -- leg is still open, discharge_completed = NULL (still in
+            -- progress) for the whole vessel. This mirrors the logic
+            -- already used correctly in daily_progress_report_data().
             LEFT JOIN LATERAL (
                 SELECT
                     CASE
@@ -686,42 +700,32 @@ def monthly_cargo_report():
         #   MOTHER VESSEL ACCOUNT -> "Mother Vessel Agent"
         #   FORCE MAJEURE         -> "Force Majeure"
         #   MbPT                  -> "MBP"
-        #
-        # FIX: "Want of Barge" and "Barge Approaching" delay entries must
-        # NEVER be subtracted from gross working hours, even if they fall
-        # under one of the three deducted delay_types above. Excluded here
-        # via delay_name pattern match, independent of delay_type.
-        #
-        # IMPORTANT: verify these ILIKE patterns against your actual
-        # ldud_delays.delay_name values (see the "Delay Name:" print
-        # below, or query `SELECT DISTINCT delay_name FROM ldud_delays;`)
-        # and adjust the patterns if the real spelling differs.
         ldud_ids = list({row["id"] for row in rows})
 
-        delay_map = {}  # { ldud_id: [ (start_dt, end_dt, crane_count), ... ] }
+        delay_map = {}  # { ldud_id: [ (start_dt, end_dt), ... ] }
 
         if ldud_ids:
             cur.execute("""
     SELECT
     d.ldud_id,
+    d.delay_name,
     d.start_datetime,
     d.end_datetime,
     d.crane_number,
-    d.delay_name,
     vdt.type AS delay_type
-    FROM ldud_delays d
-    JOIN vessel_delay_types vdt
-        ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
-    WHERE d.ldud_id = ANY(%s)
-      AND vdt.type IN (
-            'MOTHER VESSEL ACCOUNT',
-            'FORCE MAJEURE',
-            'MbPT'
-      )
-      AND d.start_datetime IS NOT NULL
-      AND d.end_datetime IS NOT NULL
-      AND d.delay_name NOT ILIKE '%%want of barge%%'
-      AND d.delay_name NOT ILIKE '%%barge approach%%'
+FROM ldud_delays d
+JOIN vessel_delay_types vdt
+    ON TRIM(LOWER(vdt.name)) = TRIM(LOWER(d.delay_name))
+WHERE d.ldud_id = ANY(%s)
+  AND vdt.type IN (
+        'MOTHER VESSEL ACCOUNT',
+        'FORCE MAJEURE',
+        'MbPT',
+        'PORT ACCOUNT',
+        'PROCESSE REQUIREMENT'
+  )
+  AND d.start_datetime IS NOT NULL
+  AND d.end_datetime IS NOT NULL
 """, (ldud_ids,))
 
             for r in cur.fetchall():
@@ -745,7 +749,7 @@ def monthly_cargo_report():
                 else:
                     crane_count = 0
 
-                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}  |  Delay Name: {r['delay_name']}  |  Delay Type: {r['delay_type']}")
+                print(f"Crane Number: {crane_str} -> Crane Count: {crane_count}")
 
                 delay_map.setdefault(
                     r["ldud_id"],
@@ -754,7 +758,8 @@ def monthly_cargo_report():
                     (
                         d_start,
                         d_end,
-                        crane_count
+                        crane_count,
+                        (r["delay_name"] or "").strip().lower()
                     )
                 )
 
@@ -867,12 +872,10 @@ def monthly_cargo_report():
                 )
                 gross_hours = min(gross_hours, 24)
                 # ---------------- Total Delay Hours ----------------
-                # NOTE: vessel_delays already excludes "Want of Barge" and
-                # "Barge Approaching" entries (filtered out in the SQL
-                # above), so this loop only ever sees deductible delays.
+                total_delay_hours = 0.0
                 deduction_hours = 0.0
 
-                for delay_start, delay_end, crane_count in vessel_delays:
+                for delay_start, delay_end, crane_count, delay_name in vessel_delays:
 
                     if not delay_start or not delay_end:
                         continue
@@ -890,23 +893,30 @@ def monthly_cargo_report():
                     # Crane-wise adjustment
                     if crane_count == 1:
                         adjusted_hours = overlap_hours / 4
-
                     elif crane_count == 2:
                         adjusted_hours = overlap_hours / 2
-
                     elif crane_count == 3:
                         adjusted_hours = overlap_hours * 3 / 4
-
-                    else:       # 4 cranes
+                    else:
                         adjusted_hours = overlap_hours
 
-                    deduction_hours += adjusted_hours
+                    # Show all delays
+                    total_delay_hours += adjusted_hours
 
-                # Do not allow deduction greater than gross working hours
+                    # Exclude these from W/W deduction
+                    if delay_name not in (
+                        "want of barge",
+                        "barge approaching"
+                    ):
+                        deduction_hours += adjusted_hours
+
+                # Don't deduct more than gross hours
                 deduction_hours = min(deduction_hours, gross_hours)
 
-                day["total_delay"] = format_hrs_to_hms(deduction_hours)
+                # Show complete delay hours
+                day["total_delay"] = format_hrs_to_hms(total_delay_hours)
 
+                # Calculate W/W
                 ww_hours = gross_hours - deduction_hours
 
                 total_ww_hours += ww_hours
