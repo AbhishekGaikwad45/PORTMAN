@@ -168,3 +168,28 @@ def test_compute_partial_billed_stale_already_over_total_never_negative():
 def test_compute_partial_billed_high_precision_total_still_flags():
     # bl_quantity with >3 decimals: a full-balance mark must still flip is_billed=1
     assert cutover.compute_partial_billed(100.0001, 0, 100.0001) == (100.0, 1)
+
+
+# --- Reopen: unmark a cutover-flagged MBC line ------------------------------
+
+def test_apply_billed_unmark_resets_cargo_fully():
+    """Reopen must reset to zero, not decrement.
+
+    A bad cutover run can leave billed_quantity above the line quantity (prod had
+    2539.00 flagged against a 254.00 MT MBC line). Subtracting would leave the row
+    still flagged; a full reset is what makes it billable again.
+    """
+    cur = _FakeCursor()
+    counts = cutover._apply_billed(
+        cur,
+        [{'source_type': 'MBC', 'id': 31}],
+        [],
+        billed=False,
+    )
+    assert counts == {'cargo': 1, 'services': 0}
+    sqls = [c[0] for c in cur.calls]
+    # No SELECT needed on the unmark path — it is an unconditional reset.
+    assert not any('SELECT' in s for s in sqls)
+    reset = next(c for c in cur.calls if 'UPDATE mbc_customer_details' in c[0])
+    assert 'SET is_billed=0, billed_quantity=0 WHERE id=%s' in reset[0]
+    assert reset[1] == [31]

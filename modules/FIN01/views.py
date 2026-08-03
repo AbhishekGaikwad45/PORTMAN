@@ -967,6 +967,7 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.bl_quantity AS quantity, cd.billed_quantity,
                cd.quantity_uom AS uom,
+               'VCN_IMPORT' AS cargo_source_type,
                (vh.vcn_doc_num || ' – VCN Import') AS service_name
         FROM vcn_cargo_declaration cd
         JOIN vcn_header vh ON cd.vcn_id = vh.id
@@ -985,6 +986,7 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.bl_quantity AS quantity, cd.billed_quantity,
                cd.quantity_uom AS uom,
+               'VCN_EXPORT' AS cargo_source_type,
                (vh.vcn_doc_num || ' – VCN Export') AS service_name
         FROM vcn_export_cargo_declaration cd
         JOIN vcn_header vh ON cd.vcn_id = vh.id
@@ -1003,6 +1005,7 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.quantity, cd.billed_quantity,
                NULL AS uom,
+               'MBC' AS cargo_source_type,
                (mh.doc_num || ' – MBC') AS service_name
         FROM mbc_customer_details cd
         JOIN mbc_header mh ON cd.mbc_id = mh.id
