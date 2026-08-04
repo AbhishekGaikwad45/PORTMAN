@@ -151,6 +151,35 @@ tbody tr:hover td { background: var(--bg); }
 .pill.ok { color: var(--green); background: var(--green-lt); border: 1px solid var(--green-bd); }
 .pill.warn { color: var(--amber); background: var(--amber-lt); border: 1px solid var(--amber-bd); }
 
+/* ── DRILLDOWN MODAL ────────────────────── */
+.brow.click { cursor: pointer; border-radius: 4px; }
+.brow.click:hover { background: var(--blue-lt); }
+.brow.click:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.brow .go { font-size: 9px; color: var(--text3); opacity: 0; }
+.brow.click:hover .go, .brow.click:focus-visible .go { opacity: 1; color: var(--blue); }
+
+#ovl {
+  position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 200;
+  display: none; align-items: center; justify-content: center; padding: 24px;
+}
+#ovl.open { display: flex; }
+#modal {
+  background: var(--surface); border-radius: 9px; width: min(1240px, 100%);
+  max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 18px 48px rgba(15,23,42,.28);
+}
+#modal .mh { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+#modal .mh h3 { font-size: 13px; font-weight: 600; }
+#modal .mh .msub { font-size: 10px; color: var(--text3); }
+#modal .mh .sp { flex: 1; }
+#modal .mstats { display: flex; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--bg); flex-wrap: wrap; }
+#modal .ms { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+#modal .ms .l { font-size: 8.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+#modal .ms .n { font-family: 'DM Mono', monospace; font-size: 14px; color: var(--text); }
+#modal .mbody { overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+#modal .mbody::-webkit-scrollbar { width: 6px; height: 6px; }
+#modal .mbody::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
 /* ── FOOTER ─────────────────────────────── */
 #ftr {
   position: fixed; bottom: 0; left: 0; right: 0; height: var(--ftr-h);
@@ -183,10 +212,6 @@ tbody tr:hover td { background: var(--bg); }
 
 <div id="app">
 
-  <div class="banner">
-    Cargo tonnage (MT) and line counts only — this view carries no rates, amounts or values by
-    design. It answers what is outstanding to bill, not what it is worth.
-  </div>
 
   <div class="panel-title">Position</div>
   <div class="tiles" id="tiles"></div>
@@ -247,6 +272,32 @@ tbody tr:hover td { background: var(--bg); }
 
 </div>
 
+<div id="ovl" onclick="if (event.target === this) closeDrill()">
+  <div id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <div class="mh">
+      <div>
+        <h3 id="m-title">—</h3>
+        <div class="msub" id="m-sub">—</div>
+      </div>
+      <div class="sp"></div>
+      <button class="hdr-btn solid" onclick="exportDrill()">⬇ Excel dump</button>
+      <button class="hdr-btn" onclick="closeDrill()">✕ Close</button>
+    </div>
+    <div class="mstats" id="m-stats"></div>
+    <div class="mbody">
+      <table>
+        <thead><tr>
+          <th>Status</th><th>Vessel / MBC</th><th>Material PO</th><th>Customer</th>
+          <th>Type</th><th>Cargo</th><th style="text-align:right;">Pending Qty (MT)</th>
+          <th>Load Port</th><th>MV/MBC</th><th>Discharge Completed</th>
+          <th style="text-align:right;">Age (d)</th><th>Doc Status</th>
+        </tr></thead>
+        <tbody id="m-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div id="ftr">
   <span>Updated <b id="gen-at">—</b></span>
   <span>Auto-refresh every 30 min · next in <b id="countdown">30:00</b></span>
@@ -264,23 +315,95 @@ function esc(s) {
     { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 }
 
-/* one hue unless a per-row colour var is supplied (the ordinal age ramp) */
-function drawBars(hostId, items, colorFor) {
+/* one hue unless a per-row colour var is supplied (the ordinal age ramp).
+   `drill` = {dim, scope, title} makes every bar open its own line list. */
+function drawBars(hostId, items, colorFor, drill) {
   const host = document.getElementById(hostId);
   if (!items || !items.length) { host.innerHTML = '<div class="empty">Nothing pending</div>'; return; }
   const max = Math.max(...items.map(i => i.qty), 1);
-  host.innerHTML = items.map(i => {
+  host.innerHTML = items.map((i, idx) => {
     // a zero row paints no mark — min-width would leave a 2px stub that reads
     // as "a little" when the answer is "none"
     const pct = i.qty > 0 ? Math.max((i.qty / max) * 100, 1.5) : 0;
     const style = (colorFor ? `background:var(${colorFor(i)});` : '') + (pct ? '' : 'min-width:0;');
-    return `<div class="brow" title="${esc(i.label)} — ${nf.format(i.qty)} MT across ${i.lines} line(s)">
-      <div class="nm">${esc(i.label)}</div>
+    // an empty bucket has nothing to drill into, so it stays inert
+    const on = drill && i.lines > 0;
+    const attrs = on
+      ? ` class="brow click" role="button" tabindex="0" data-host="${hostId}" data-idx="${idx}"`
+        + ` title="${esc(i.label)} — ${nf.format(i.qty)} MT across ${i.lines} line(s) · click to open"`
+      : ` class="brow" title="${esc(i.label)} — ${nf.format(i.qty)} MT across ${i.lines} line(s)"`;
+    return `<div${attrs}>
+      <div class="nm">${esc(i.label)}${on ? ' <span class="go">▸</span>' : ''}</div>
       <div class="track"><div class="fill" style="width:${pct}%;${style}"></div></div>
       <div class="v">${nf.format(i.qty)} <span class="n">· ${i.lines}</span></div>
     </div>`;
   }).join('');
+  if (!drill) return;
+  DRILLS[hostId] = { drill, items };
+  host.querySelectorAll('.brow.click').forEach(el => {
+    const open = () => openDrill(hostId, Number(el.dataset.idx));
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
 }
+
+/* ── drilldown ── */
+const DRILLS = {};
+let CURRENT = null;
+
+function drillFilter(dim, val, scope, siblings) {
+  const inScope = DATA.rows.filter(r =>
+    scope === 'all' ? true
+      : scope === 'ready' ? r.status === 'Ready to bill'
+      : r.status === 'Blocked upstream');
+  const label = r => ((r[dim] || '').trim() || '—');
+  // "Other (n)" is the tail the chart folded away — everything not named on it
+  if (val.startsWith('Other (')) {
+    const named = new Set(siblings.filter(s => !s.startsWith('Other (')));
+    return inScope.filter(r => !named.has(label(r)));
+  }
+  return inScope.filter(r => label(r) === val);
+}
+
+function openDrill(hostId, idx) {
+  const { drill, items } = DRILLS[hostId];
+  const item = items[idx];
+  const rows = drillFilter(drill.dim, item.label, drill.scope, items.map(i => i.label));
+  CURRENT = { dim: drill.dim, val: item.label, scope: drill.scope };
+
+  document.getElementById('m-title').textContent = `${drill.title} — ${item.label}`;
+  document.getElementById('m-sub').textContent =
+    drill.scope === 'blocked' ? 'Blocked upstream · waiting on operations'
+                              : 'Ready to bill · nothing upstream is blocking these';
+  const qty = rows.reduce((s, r) => s + (r.bl_qty || 0), 0);
+  const ages = rows.map(r => r.age_days).filter(d => d != null);
+  const customers = new Set(rows.map(r => r.customer_name || '—'));
+  document.getElementById('m-stats').innerHTML = [
+    ['Lines', nf.format(rows.length)],
+    ['Pending Qty', nf.format(Math.round(qty * 100) / 100) + ' MT'],
+    ['Oldest', (ages.length ? Math.max(...ages) : 0) + ' days'],
+    ['Customers', nf.format(customers.size)],
+  ].map(([l, n]) => `<div class="ms"><div class="l">${l}</div><div class="n">${n}</div></div>`).join('');
+
+  document.getElementById('m-tbody').innerHTML =
+    rows.map(rowHtml).join('') || '<tr><td colspan="12" class="empty">No lines</td></tr>';
+  document.getElementById('ovl').classList.add('open');
+}
+
+function closeDrill() {
+  document.getElementById('ovl').classList.remove('open');
+  CURRENT = null;
+}
+
+function exportDrill() {
+  if (!CURRENT) return;
+  const q = new URLSearchParams(CURRENT).toString();
+  window.location = '/api/module/RP02/billing-dashboard/export?' + q;
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrill(); });
 
 function tile(cls, label, value, unit, foot) {
   return `<div class="tile ${cls}">
@@ -301,10 +424,14 @@ function render() {
     tile('',     'Billed to date',    nf.format(k.billed_lines),  'lines', nf.format(k.billed_month) + ' in ' + k.month_label),
   ].join('');
 
-  drawBars('c-ageing', DATA.ageing, i => AGE_VARS[i.label] || '--bar');
-  drawBars('c-customer', DATA.by_customer);
-  drawBars('c-cargo', DATA.by_cargo);
-  drawBars('c-blocked', DATA.blocked_by_status);
+  drawBars('c-ageing', DATA.ageing, i => AGE_VARS[i.label] || '--bar',
+           { dim: 'age_bucket', scope: 'ready', title: 'Ready to bill by age' });
+  drawBars('c-customer', DATA.by_customer, null,
+           { dim: 'customer_name', scope: 'ready', title: 'Ready to bill by customer' });
+  drawBars('c-cargo', DATA.by_cargo, null,
+           { dim: 'cargo_type', scope: 'ready', title: 'Ready to bill by cargo type' });
+  drawBars('c-blocked', DATA.blocked_by_status, null,
+           { dim: 'doc_status', scope: 'blocked', title: 'Blocked by document status' });
   renderTable();
 }
 
@@ -320,19 +447,24 @@ function renderTable() {
 
   document.getElementById('tcount').textContent =
     `${nf.format(rows.length)} / ${nf.format(DATA.rows.length)} lines`;
-  document.getElementById('tbody').innerHTML = rows.map(r => {
-    const ok = r.status === 'Ready to bill';
-    return `<tr>
-      <td><span class="pill ${ok ? 'ok' : 'warn'}">${ok ? 'Ready' : 'Blocked'}</span></td>
-      <td class="k">${esc(r.vessel_name)}</td><td>${esc(r.material_po)}</td>
-      <td>${esc(r.customer_name)}</td><td>${esc(r.cargo_type)}</td><td>${esc(r.cargo_name)}</td>
-      <td class="num">${nf.format(r.bl_qty)}</td>
-      <td>${esc(r.load_port)}</td><td>${esc(r.mv_mbc)}</td>
-      <td>${esc(r.discharge_completed)}</td>
-      <td class="num">${r.age_days == null ? '—' : r.age_days}</td>
-      <td>${esc(r.doc_status)}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="12" class="empty">No lines match these filters</td></tr>';
+  document.getElementById('tbody').innerHTML =
+    rows.map(rowHtml).join('') || '<tr><td colspan="12" class="empty">No lines match these filters</td></tr>';
+}
+
+/* one row renderer for both the main table and the drilldown modal, so the
+   two can never drift apart */
+function rowHtml(r) {
+  const ok = r.status === 'Ready to bill';
+  return `<tr>
+    <td><span class="pill ${ok ? 'ok' : 'warn'}">${ok ? 'Ready' : 'Blocked'}</span></td>
+    <td class="k">${esc(r.vessel_name)}</td><td>${esc(r.material_po)}</td>
+    <td>${esc(r.customer_name)}</td><td>${esc(r.cargo_type)}</td><td>${esc(r.cargo_name)}</td>
+    <td class="num">${nf.format(r.bl_qty)}</td>
+    <td>${esc(r.load_port)}</td><td>${esc(r.mv_mbc)}</td>
+    <td>${esc(r.discharge_completed)}</td>
+    <td class="num">${r.age_days == null ? '—' : r.age_days}</td>
+    <td>${esc(r.doc_status)}</td>
+  </tr>`;
 }
 
 async function load() {

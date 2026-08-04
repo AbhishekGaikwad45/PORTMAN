@@ -1,3 +1,4 @@
+import re
 from functools import wraps
 from flask import render_template, request, jsonify, session, redirect, url_for, Response
 
@@ -199,14 +200,26 @@ _EXPORT_COLUMNS = [
 @login_required
 def billing_dashboard_export():
     """Excel dump of the pending lines, plus a summary sheet of the same numbers
-    the dashboard shows. Deliberately carries no rates or amounts."""
+    the dashboard shows. Deliberately carries no rates or amounts.
+
+    ?dim=&val=&scope= exports one breakdown bar's drilldown instead of the whole
+    pipeline, filtered by the same model helper the modal uses."""
     import io
     from datetime import datetime as _dt
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
+    dim = request.args.get('dim')
+    val = request.args.get('val')
+    scope = request.args.get('scope', 'all')
+
     data = model.get_billing_dashboard()
+    if dim or scope != 'all':
+        rows, drill_desc = model.filter_pending(dim, val, scope, rows=data['rows'])
+        data = {**data, 'rows': rows}
+    else:
+        drill_desc = None
 
     thin = Side(style='thin', color='000000')
     bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -233,13 +246,14 @@ def billing_dashboard_export():
     numeric = {'bl_qty', 'age_days'}
     for row_i, r in enumerate(data['rows'], 2):
         blocked = r.get('status') != 'Ready to bill'
+        # not `val` — that name holds the drilldown query param used below
         for col_i, (_label, key) in enumerate(_EXPORT_COLUMNS, 1):
-            val = r.get(key)
-            c = ws.cell(row_i, col_i, '' if val is None else val)
+            cell_val = r.get(key)
+            c = ws.cell(row_i, col_i, '' if cell_val is None else cell_val)
             c.border = bdr
             c.font = blocked_font if blocked else cell_font
             c.alignment = rgt if key in numeric else lft
-            if key == 'bl_qty' and val is not None:
+            if key == 'bl_qty' and cell_val is not None:
                 c.number_format = '#,##0.00'
     ws.auto_filter.ref = f'A1:{get_column_letter(len(_EXPORT_COLUMNS))}{max(len(data["rows"]) + 1, 1)}'
 
@@ -252,8 +266,19 @@ def billing_dashboard_export():
     blocks = [
         ('Billing Pipeline — generated ' + data['generated_at'], None, None),
         ('Quantities are cargo tonnage (MT) and line counts only. No rates or amounts.', None, None),
+    ]
+    if drill_desc:
+        # a drilldown export says what it is a slice of, so the file is not
+        # mistaken for the whole pipeline once it leaves this screen
+        blocks += [
+            (None, None, None),
+            ('Drilldown: ' + drill_desc, None, None),
+            ('Lines in this export', len(data['rows']),
+             round(sum(r['bl_qty'] or 0 for r in data['rows']), 2)),
+        ]
+    blocks += [
         (None, None, None),
-        ('Measure', 'Lines', 'Qty (MT)'),
+        ('Whole pipeline', 'Lines', 'Qty (MT)'),
         ('Ready to bill', k['ready_lines'], k['ready_qty']),
         ('Blocked upstream', k['blocked_lines'], k['blocked_qty']),
         ('Oldest waiting (days)', k['oldest_days'], None),
@@ -273,17 +298,22 @@ def billing_dashboard_export():
         ca = ws2.cell(row_i, 1, a if a is not None else '')
         ca.font = Font(name='Calibri', size=10, bold=bool(is_head))
         ca.alignment = lft
-        for col_i, val in ((2, b), (3, c_)):
-            cc = ws2.cell(row_i, col_i, '' if val is None else val)
+        # not `val` — that name holds the drilldown query param used below
+        for col_i, cell_val in ((2, b), (3, c_)):
+            cc = ws2.cell(row_i, col_i, '' if cell_val is None else cell_val)
             cc.font = Font(name='Calibri', size=10, bold=bool(is_head))
             cc.alignment = rgt
-            if col_i == 3 and isinstance(val, (int, float)):
+            if col_i == 3 and isinstance(cell_val, (int, float)):
                 cc.number_format = '#,##0.00'
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"RP02_billing_pipeline_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    slug = ''
+    if drill_desc:
+        safe = re.sub(r'[^A-Za-z0-9]+', '_', (val or scope)).strip('_')[:40]
+        slug = f'_{safe}' if safe else '_drilldown'
+    fname = f"RP02_billing_pipeline{slug}_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx"
     return Response(
         buf.getvalue(),
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

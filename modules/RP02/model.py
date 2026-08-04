@@ -699,11 +699,21 @@ def get_pending_rows():
         conn.close()
 
 
+# How many bars each breakdown shows before folding the tail into "Other".
+# Shared so a drilldown on "Other" resolves to exactly the bars that were folded.
+_TOP_N = {'customer_name': 8, 'cargo_type': 6, 'doc_status': 6, 'mv_mbc': 4}
+
+
+def _label(row, key):
+    """The bucket a row falls in for a breakdown — blanks collapse to one label."""
+    return (row.get(key) or '').strip() or '—'
+
+
 def _top(rows, key, n=8):
     """Top-n {label, lines, qty} by pending quantity; the tail folds into Other."""
     agg = {}
     for r in rows:
-        k = (r.get(key) or '').strip() or '—'
+        k = _label(r, key)
         a = agg.setdefault(k, {'label': k, 'lines': 0, 'qty': 0.0})
         a['lines'] += 1
         a['qty'] += r['bl_qty']
@@ -756,11 +766,46 @@ def get_billing_dashboard():
         },
         'ageing':            [{**buckets[l], 'qty': round(buckets[l]['qty'], 2)}
                               for l in BUCKET_LABELS],
-        'by_customer':       _top(ready, 'customer_name'),
-        'by_cargo':          _top(ready, 'cargo_type', n=6),
-        'by_mode':           _top(pending, 'mv_mbc', n=4),
-        'blocked_by_status': _top(blocked, 'doc_status', n=6),
+        'by_customer':       _top(ready, 'customer_name', _TOP_N['customer_name']),
+        'by_cargo':          _top(ready, 'cargo_type', _TOP_N['cargo_type']),
+        'by_mode':           _top(pending, 'mv_mbc', _TOP_N['mv_mbc']),
+        'blocked_by_status': _top(blocked, 'doc_status', _TOP_N['doc_status']),
         'rows':              sorted(pending,
                                     key=lambda r: (-(r['age_days'] if r['age_days'] is not None else -1),
                                                    r['customer_name'] or '')),
     }
+
+
+# Which pending rows a breakdown bar stands for. scope mirrors the card the bar
+# came from: the ageing/customer/cargo cards chart ready lines, the document
+# status card charts blocked ones.
+DRILL_SCOPES = {'ready': 'Ready to bill', 'blocked': 'Blocked upstream'}
+DRILL_DIMS = ('age_bucket', 'customer_name', 'cargo_type', 'doc_status', 'mv_mbc')
+
+
+def filter_pending(dim=None, val=None, scope='all', rows=None):
+    """The rows behind one breakdown bar.
+
+    A bar labelled "Other (n)" is the tail the chart folded away, so it resolves
+    to everything outside that breakdown's own top-n — recomputed here with the
+    same _TOP_N, which is why the modal and the export can never disagree.
+
+    Returns (rows, human-readable description)."""
+    rows = get_pending_rows() if rows is None else rows
+
+    status = DRILL_SCOPES.get(scope)
+    if status:
+        rows = [r for r in rows if r['status'] == status]
+    scope_txt = status or 'All pending'
+
+    if not dim or dim not in DRILL_DIMS or val is None or val == '':
+        return rows, scope_txt
+
+    if val.startswith('Other ('):
+        kept = {t['label'] for t in _top(rows, dim, _TOP_N.get(dim, 8))
+                if not t['label'].startswith('Other (')}
+        rows = [r for r in rows if _label(r, dim) not in kept]
+    else:
+        rows = [r for r in rows if _label(r, dim) == val]
+
+    return rows, f'{scope_txt} · {dim.replace("_", " ")} = {val}'
