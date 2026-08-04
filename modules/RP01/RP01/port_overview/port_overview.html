@@ -418,8 +418,8 @@ function renderBerths(layout) {
     const MBC_LEN = 80;                                             // MBCs are one fixed size
 
     // Group by bank tier. The PBM01 box is the berth's water area, not the hull:
-    // A/S floats in the middle of it, and each extra bank steps outboard (-x,
-    // away from the jetty face) by one beam.
+    // A/S moors flush against the mooring face (+x, the blue edge in PBM01) and
+    // each extra bank steps outboard (-x, away from the jetty) by one beam.
     const tiers = {};
     assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
 
@@ -428,8 +428,8 @@ function renderBerths(layout) {
       list.forEach((a, i) => {
         const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
         const beam = Math.max(len * 0.3, 6);
-        const inset = -(+t) * (beam + 2);
-        const ex = b.cx + inset * cos, ey = b.cy + inset * sin;
+        const off = (b.w || 60) / 2 - beam / 2 - (+t) * (beam + 2);
+        const ex = b.cx + off * cos, ey = b.cy + off * sin;
         const s = (i - (list.length - 1) / 2) * slot; // along-edge offset
         const px = ex - s * sin, py = ey + s * cos;
 
