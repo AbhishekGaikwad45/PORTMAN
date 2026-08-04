@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% block title %}Port Overview — Targets{% endblock %}
+
+{% block content %}
+<div id="targets-page" class="targets-page">
+
+  <div class="targets-toolbar">
+    <label for="fy-select">Financial Year:</label>
+    <select id="fy-select"></select>
+    <span id="save-status" class="save-status"></span>
+    <button id="save-btn" class="btn-save">Save</button>
+  </div>
+
+  <div class="panel">
+    <h2>Monthly Targets &amp; Outlook</h2>
+    <p class="hint">
+      <strong>Read-only.</strong> These totals are calculated automatically from the
+      Category-wise Targets &amp; Outlook below — edit values there.
+    </p>
+
+    <div id="month-grid" class="month-grid"></div>
+
+    <div class="fy-totals">
+      <div class="fy-total">
+        <div class="fy-total-label">Base FY Target</div>
+        <div class="fy-total-value" id="base-fy-total">0 MT</div>
+      </div>
+      <div class="fy-total">
+        <div class="fy-total-label">Effective FY Target (with Outlook)</div>
+        <div class="fy-total-value effective" id="effective-fy-total">0 MT</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Category-wise Targets &amp; Outlook</h2>
+    <div id="category-list" class="category-list"></div>
+  </div>
+
+</div>
+
+<style>
+  .targets-page { max-width: 1000px; margin: 0 auto; padding: 16px; }
+  .targets-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .targets-toolbar label { font-weight:600; font-size:14px; }
+  .targets-toolbar select {
+    border:1px solid #cbd5e1; border-radius:4px; padding:6px 10px; font-size:14px;
+  }
+  .btn-save {
+    margin-left:auto; background:#0f766e; color:#fff; border:none; border-radius:4px;
+    padding:8px 18px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .btn-save:hover { background:#0d6058; }
+  .btn-save:disabled { background:#94a3b8; cursor:default; }
+  .save-status { font-size:13px; color:#0f766e; margin-left:6px; min-width:110px; }
+  .save-status.error { color:#dc2626; }
+
+  .panel {
+    background:#fff; border:1px solid #e2e8f0; border-radius:6px;
+    padding:20px; margin-bottom:20px;
+  }
+  .panel h2 { margin:0 0 6px 0; font-size:18px; border-bottom:1px solid #e2e8f0; padding-bottom:10px; }
+  .hint { font-size:12.5px; color:#64748b; margin:10px 0 16px 0; }
+
+  .month-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;
+  }
+  @media (max-width: 900px) { .month-grid { grid-template-columns:repeat(2, 1fr); } }
+  @media (max-width: 560px) { .month-grid { grid-template-columns:1fr; } }
+
+  .month-card {
+    background:#eefdf5; border:1px solid #bfe9d3; border-radius:6px; padding:12px 14px;
+  }
+  .month-card .month-name { font-weight:700; font-size:14px; margin-bottom:8px; }
+  .month-card .ro-row {
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:11px; color:#475569; font-weight:600; margin-top:8px;
+  }
+  .month-card .ro-row .ro-value {
+    font-size:13px; color:#0f172a; font-weight:700;
+  }
+  .month-card .ro-row.outlook .ro-value { color:#0f766e; }
+  .month-card .ro-row.outlook .ro-value.unset { color:#94a3b8; font-weight:500; }
+  .month-card .effective-line {
+    margin-top:10px; padding-top:8px; border-top:1px dashed #bfe9d3;
+    font-size:12px; color:#0f766e; font-weight:600;
+  }
+
+  .fy-totals { display:flex; justify-content:space-between; margin-top:22px; }
+  .fy-total { text-align:right; }
+  .fy-total-label { font-size:12px; color:#64748b; }
+  .fy-total-value { font-size:20px; font-weight:700; margin-top:2px; }
+  .fy-total-value.effective { color:#0f766e; }
+
+  .category-row {
+    border-bottom:1px solid #e2e8f0;
+  }
+  .category-row:last-child { border-bottom:none; }
+  .category-head {
+    display:flex; align-items:center; gap:8px; padding:12px 6px; cursor:pointer;
+    background:#f8fafc;
+  }
+  .category-head:hover { background:#f1f5f9; }
+  .category-head .chevron { transition:transform .15s ease; font-size:12px; color:#64748b; width:12px; }
+  .category-row.open .chevron { transform:rotate(90deg); }
+  .category-head .cat-name { font-weight:600; font-size:14px; flex:1; }
+  .category-head .cat-total { font-weight:700; font-size:14px; }
+
+  .category-body {
+    display:none; padding:14px 6px 18px 6px;
+  }
+  .category-row.open .category-body { display:block; }
+  .category-month-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;
+  }
+  @media (max-width: 900px) { .category-month-grid { grid-template-columns:repeat(2, 1fr); } }
+  .category-month-cell {
+    border:1px solid #e2e8f0; border-radius:4px; padding:8px 10px; background:#fff;
+  }
+  .category-month-cell .cm-name { font-size:11px; font-weight:700; color:#334155; margin-bottom:4px; }
+  .category-month-cell label { display:block; font-size:10px; color:#94a3b8; margin-top:4px; }
+  .category-month-cell input {
+    width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:3px;
+    padding:4px 6px; font-size:12px; margin-top:1px;
+  }
+</style>
+
+<script>
+(function () {
+  const API = '/api/module/RP01/port-overview/targets';
+  let state = { financial_year: null, categories: [], targets: [] };
+  let dirty = false;
+
+  function fmtINR(n) {
+    n = Math.round(Number(n) || 0);
+    const neg = n < 0;
+    const s = Math.abs(n).toString();
+    let last3 = s.length > 3 ? s.slice(-3) : s;
+    let rest = s.length > 3 ? s.slice(0, -3) : '';
+    if (rest) last3 = ',' + last3;
+    rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+    return (neg ? '-' : '') + rest + last3;
+  }
+
+  function num(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  }
+
+  function effectiveOf(base, outlook) {
+    return (outlook === null || outlook === undefined || outlook === '') ? (base || 0) : outlook;
+  }
+
+  function markDirty() {
+    dirty = true;
+    document.getElementById('save-status').textContent = 'Unsaved changes';
+    document.getElementById('save-status').classList.remove('error');
+  }
+
+  // ---------- rendering ----------
+
+  // Month base/outlook are derived from the category breakdown, not entered
+  // directly. base_target = sum of category bases. outlook = sum of
+  // category-effective values, but only reported as "set" if at least one
+  // category has an outlook entered for that month.
+  function computeMonthsFromCategories() {
+    state.targets.forEach(row => {
+      let base = 0, outlookSum = 0, anyOutlookSet = false;
+      state.categories.forEach(cat => {
+        const c = row.categories[cat] || { base: 0, outlook: null };
+        const cb = c.base || 0;
+        base += cb;
+        if (c.outlook !== null && c.outlook !== undefined && c.outlook !== '') {
+          anyOutlookSet = true;
+          outlookSum += Number(c.outlook);
+        } else {
+          outlookSum += cb;
+        }
+      });
+      row.base_target = base;
+      row.outlook = anyOutlookSet ? outlookSum : null;
+    });
+  }
+
+  function renderMonthGrid() {
+    const grid = document.getElementById('month-grid');
+    grid.innerHTML = '';
+    state.targets.forEach(row => {
+      const eff = effectiveOf(row.base_target, row.outlook);
+      const outlookSet = row.outlook !== null && row.outlook !== undefined;
+      const card = document.createElement('div');
+      card.className = 'month-card';
+      card.innerHTML = `
+        <div class="month-name">${row.month}</div>
+        <div class="ro-row">
+          <span>Base Target (MT)</span>
+          <span class="ro-value">${fmtINR(row.base_target || 0)}</span>
+        </div>
+        <div class="ro-row outlook">
+          <span>Outlook (MT)</span>
+          <span class="ro-value${outlookSet ? '' : ' unset'}">${outlookSet ? fmtINR(row.outlook) : '—'}</span>
+        </div>
+        <div class="effective-line">Effective: ${fmtINR(eff)} MT</div>
+      `;
+      grid.appendChild(card);
+    });
+    renderFyTotals();
+  }
+
+  function renderFyTotals() {
+    let base = 0, eff = 0;
+    state.targets.forEach(r => {
+      base += r.base_target || 0;
+      eff += effectiveOf(r.base_target, r.outlook) || 0;
+    });
+    document.getElementById('base-fy-total').textContent = fmtINR(base) + ' MT';
+    document.getElementById('effective-fy-total').textContent = fmtINR(eff) + ' MT';
+  }
+
+  function categoryTotal(cat) {
+    let total = 0;
+    state.targets.forEach(r => {
+      const c = r.categories[cat] || { base: 0, outlook: null };
+      total += effectiveOf(c.base, c.outlook) || 0;
+    });
+    return total;
+  }
+
+  function renderCategoryList() {
+    const list = document.getElementById('category-list');
+    list.innerHTML = '';
+    state.categories.forEach(cat => {
+      const row = document.createElement('div');
+      row.className = 'category-row';
+      row.innerHTML = `
+        <div class="category-head">
+          <span class="chevron">&#9656;</span>
+          <span class="cat-name">${cat}</span>
+          <span class="cat-total">${fmtINR(categoryTotal(cat))} MT</span>
+        </div>
+        <div class="category-body"><div class="category-month-grid"></div></div>
+      `;
+      const head = row.querySelector('.category-head');
+      const totalEl = row.querySelector('.cat-total');
+      const monthGrid = row.querySelector('.category-month-grid');
+
+      state.targets.forEach(r => {
+        const c = r.categories[cat] || (r.categories[cat] = { base: 0, outlook: null });
+        const cell = document.createElement('div');
+        cell.className = 'category-month-cell';
+        cell.innerHTML = `
+          <div class="cm-name">${r.month}</div>
+          <label>Base (MT)</label>
+          <input type="number" step="0.01" class="cat-base" value="${c.base ?? 0}">
+          <label>Outlook (MT)</label>
+          <input type="number" step="0.01" class="cat-outlook" placeholder="—" value="${c.outlook ?? ''}">
+        `;
+        const baseIn = cell.querySelector('.cat-base');
+        const outIn = cell.querySelector('.cat-outlook');
+        const upd = () => {
+          c.base = num(baseIn.value) || 0;
+          c.outlook = num(outIn.value);
+          totalEl.textContent = fmtINR(categoryTotal(cat)) + ' MT';
+          computeMonthsFromCategories();
+          renderMonthGrid();
+          markDirty();
+        };
+        baseIn.addEventListener('input', upd);
+        outIn.addEventListener('input', upd);
+        monthGrid.appendChild(cell);
+      });
+
+      head.addEventListener('click', () => row.classList.toggle('open'));
+      list.appendChild(row);
+    });
+  }
+
+  // ---------- data load / save ----------
+
+  async function loadFor(fy) {
+    const res = await fetch(API + '?fy=' + encodeURIComponent(fy));
+    const data = await res.json();
+    state = data;
+    dirty = false;
+    document.getElementById('save-status').textContent = '';
+
+    const sel = document.getElementById('fy-select');
+    sel.innerHTML = '';
+    (data.fy_options || []).forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt;
+      o.textContent = 'FY ' + opt;
+      if (opt === data.financial_year) o.selected = true;
+      sel.appendChild(o);
+    });
+
+    computeMonthsFromCategories();
+    renderMonthGrid();
+    renderCategoryList();
+  }
+
+  async function save() {
+    const btn = document.getElementById('save-btn');
+    const status = document.getElementById('save-status');
+    btn.disabled = true;
+    status.textContent = 'Saving…';
+    status.classList.remove('error');
+    try {
+      const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ financial_year: state.financial_year, targets: state.targets }),
+      });
+      if (!res.ok) throw new Error('save failed');
+      dirty = false;
+      status.textContent = 'Saved ✓';
+    } catch (e) {
+      status.textContent = 'Save failed — try again';
+      status.classList.add('error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  document.getElementById('save-btn').addEventListener('click', save);
+  document.getElementById('fy-select').addEventListener('change', (e) => {
+    if (dirty && !confirm('You have unsaved changes. Switch financial year anyway?')) {
+      e.target.value = state.financial_year;
+      return;
+    }
+    loadFor(e.target.value);
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  loadFor(''); // '' -> backend defaults to current FY
+})();
+</script>
+{% endblock %}

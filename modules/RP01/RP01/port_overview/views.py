@@ -9,6 +9,7 @@ from database import get_db, get_cursor
 from ..daily_ops.model import fy_label
 from ..shift_report.views import _fetch_delays
 from ..Barge_Position_Report.views import _fetch_tide_data, _fetch_all_barges
+from flask import render_template, session, redirect, url_for, jsonify, request
 
 IMAGE_SIZE = (941, 1672)  # static/img/Clean_berths.png natural pixel size
 
@@ -272,6 +273,161 @@ def _cargo_by_type(start_date_s, end_date_s):
 
 
 # ---------------------------------------------------------------------------
+# MBC Status — live voyage-stage status per MBC (JSW Infra / JSW Shipping
+# owned only), independent of the berth-occupancy layout above. Sourced
+# from mbc_master joined to its latest mbc_header + load/discharge lines.
+# ---------------------------------------------------------------------------
+
+def _fetch_mbc_status(report_date=None):
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    cur.execute("""
+        SELECT
+
+            TRIM(m.mbc_name) AS mbc_name,
+
+            CASE
+
+                /* Cargo only shown for loaded / loading MBCs — empty in
+                   every other stage (waiting/on-the-way/discharging). */
+                WHEN h.id IS NULL
+                THEN NULL
+
+                WHEN
+                    NULLIF(TRIM(l.arrived_load_port), '') IS NOT NULL
+                    AND NULLIF(TRIM(l.loading_commenced), '') IS NULL
+                THEN NULL
+
+                WHEN
+                    NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
+                    AND d.sailed_out_load_port IS NOT NULL
+                THEN NULL
+
+                WHEN
+                    NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
+                THEN NULL
+
+                WHEN COALESCE(NULLIF(TRIM(h.cargo_name), ''), '') <> ''
+                THEN TRIM(h.cargo_name)
+
+                ELSE NULL
+
+            END AS cargo_name,
+
+            CASE
+
+                /* Empty : Waiting at Jaigad */
+                WHEN h.id IS NULL
+                THEN 'EMPTY : WAITING AT JAIGAD'
+
+                /* Empty : Waiting at Load Port */
+                WHEN
+                    NULLIF(TRIM(l.arrived_load_port), '') IS NOT NULL
+                    AND NULLIF(TRIM(l.loading_commenced), '') IS NULL
+                THEN
+                    'EMPTY : WAITING AT LOAD PORT'
+
+                /* Under Loading */
+                WHEN
+                    NULLIF(TRIM(l.loading_commenced), '') IS NOT NULL
+                    AND NULLIF(TRIM(l.loading_completed), '') IS NULL
+                THEN
+                    'UNDER LOADING'
+
+                /* Loaded : Waiting at Load Port */
+                WHEN
+                    NULLIF(TRIM(l.loading_completed), '') IS NOT NULL
+                    AND NULLIF(TRIM(l.cast_off_load_port), '') IS NULL
+                THEN
+                    'LOADED : WAITING AT LOAD PORT'
+
+                /* Loaded : On the way to Gull */
+                WHEN
+                    NULLIF(TRIM(l.cast_off_load_port), '') IS NOT NULL
+                    AND NULLIF(TRIM(d.arrival_gull_island), '') IS NULL
+                THEN
+                    'LOADED : ON THE WAY TO GULL'
+
+                /* Loaded : Waiting at Gull */
+                WHEN
+                    NULLIF(TRIM(d.arrival_gull_island), '') IS NOT NULL
+                    AND NULLIF(TRIM(d.departure_gull_island), '') IS NULL
+                THEN
+                    'LOADED : WAITING AT GULL'
+
+                /* Loaded : On the way to Dharamtar */
+                WHEN
+                    NULLIF(TRIM(d.departure_gull_island), '') IS NOT NULL
+                    AND NULLIF(TRIM(d.vessel_arrival_port), '') IS NULL
+                THEN
+                    'LOADED : ON THE WAY TO DHARAMTAR'
+
+                /* Loaded : Waiting at Dharamtar */
+                WHEN
+                    NULLIF(TRIM(d.vessel_arrival_port), '') IS NOT NULL
+                    AND NULLIF(TRIM(d.unloading_commenced), '') IS NULL
+                THEN
+                    'LOADED : WAITING AT DHARAMTAR'
+
+                /* Under Discharge */
+                WHEN
+                    NULLIF(TRIM(d.unloading_commenced), '') IS NOT NULL
+                    AND NULLIF(TRIM(d.unloading_completed), '') IS NULL
+                THEN
+                    'UNDER DISCHARGE AT DHARAMTAR'
+
+                /* Empty : On the way to Jaigad */
+                WHEN
+                    NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
+                    AND d.sailed_out_load_port IS NOT NULL
+                THEN
+                    'EMPTY : ON THE WAY TO JAIGAD'
+
+                /* Empty : Waiting at Dharamtar */
+                WHEN
+                    NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
+                THEN
+                    'EMPTY : WAITING AT DHARAMTAR'
+
+                ELSE
+                    'NA'
+
+            END AS mbc_status
+
+        FROM mbc_master m
+
+        LEFT JOIN LATERAL (
+            SELECT h.*
+            FROM mbc_header h
+            WHERE TRIM(h.mbc_name) = TRIM(m.mbc_name)
+            ORDER BY h.id DESC
+            LIMIT 1
+        ) h ON TRUE
+
+        LEFT JOIN mbc_load_port_lines l
+            ON l.mbc_id = h.id
+
+        LEFT JOIN mbc_discharge_port_lines d
+            ON d.mbc_id = h.id
+
+        WHERE
+            UPPER(TRIM(COALESCE(m.mbc_owner_name, '')))
+            IN ('JSW INFRA', 'JSW SHIPPING')
+
+        ORDER BY m.mbc_name
+    """)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # FY / All-Time cumulative logic — mirrors barge_discharge_report exactly.
 # Fixed baseline + current-FY (historic April + live May-onward) totals.
 # No _compute_fy_throughput call, no daily_ops_cutoff dependency, so prior
@@ -419,16 +575,42 @@ def port_overview_data():
     # exactly — no _compute_fy_throughput, no daily_ops_cutoff dependency.
     current_fy_by_type, all_time = _cumulative_by_type(today_s)
 
+
+#Accept
+    target_base, target_effective = _fy_target_totals(current_fy_label)
+    month_target = _month_target(current_fy_label, today.month)   # <<< NEW
+
     cards = {
         'all_time':      {'label': 'All Time',              'by_type': all_time},
-        'current_fy':    {'label': f'FY {current_fy_label}', 'by_type': current_fy_by_type},
-        'current_month': {'label': today.strftime('%b %Y'),  'by_type': _cargo_by_type(month_start_s, today_s)},
+        'current_fy':    {
+            'label': f'FY {current_fy_label}',
+            'by_type': current_fy_by_type,
+            'target': target_base,
+            'target_effective': target_effective,
+        },
+        'current_month': {
+            'label': today.strftime('%b %Y'),
+            'by_type': _cargo_by_type(month_start_s, today_s),
+            'target': month_target,          # <<< NEW
+        },
         'yesterday':     {'label': 'Yesterday',              'by_type': _cargo_by_type(yesterday_s, yesterday_s)},
         'today':         {'label': 'Today',                  'by_type': _cargo_by_type(today_s, today_s)},
     }
     for c in cards.values():
         c['total'] = round(sum(c['by_type'].values()), 2)
         c['by_type'] = {k: round(v, 2) for k, v in c['by_type'].items() if v > 0}
+
+    # MBC Status — same live data used everywhere else in RP01, fetched
+    # fresh on every dashboard refresh so it never drifts from mbc_master.
+    mbc_status_rows = _fetch_mbc_status(today_s)
+    mbc_status = [
+        {
+            'mbc_name':    r['mbc_name'],
+            'cargo_name':  r['cargo_name'],
+            'mbc_status':  r['mbc_status'],
+        }
+        for r in mbc_status_rows
+    ]
 
     return jsonify({
         'layout':      layout,
@@ -437,5 +619,165 @@ def port_overview_data():
         'cargo_cards': cards,
         'upcoming':    _upcoming_arrivals(),
         'delays':      _top_delays_today(),
+        'mbc_status':  mbc_status,
         'as_of':       now.strftime('%Y-%m-%d %H:%M:%S'),
     })
+
+#ACCEPTED
+
+# ---------------------------------------------------------------------------
+# Targets (FY monthly ABP + Outlook, with category-wise breakdown)
+# ---------------------------------------------------------------------------
+
+TARGET_MONTHS = [
+    ('April', 4), ('May', 5), ('June', 6), ('July', 7),
+    ('August', 8), ('September', 9), ('October', 10), ('November', 11),
+    ('December', 12), ('January', 1), ('February', 2), ('March', 3),
+]
+
+# Same categories the Port Overview cargo cards are keyed by (cargo_type),
+# minus Finish Goods / Others which don't get monthly targets set.
+TARGET_CATEGORIES = ['IBRM', 'CBRM', 'FLUXES', 'CLINKER', 'SLAG']
+
+
+def _default_fy_targets():
+    return [
+        {
+            'month': name,
+            'month_num': num,
+            'base_target': 0,
+            'outlook': None,
+            'categories': {cat: {'base': 0, 'outlook': None} for cat in TARGET_CATEGORIES},
+        }
+        for name, num in TARGET_MONTHS
+    ]
+
+
+def _fy_options(today=None):
+    """Dropdown options: current FY, next FY, and 5 prior FYs."""
+    today = today or date.today()
+    current_fy_start = today.year if today.month >= 4 else today.year - 1
+    options = []
+    for start_year in range(current_fy_start + 1, current_fy_start - 5, -1):
+        options.append(fy_label(start_year))
+    return options
+
+
+def _load_fy_targets(financial_year):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT targets FROM financial_year_targets WHERE financial_year = %s
+    """, (financial_year,))
+    row = cur.fetchone()
+    conn.close()
+
+    targets = row['targets'] if row else None
+    if isinstance(targets, str):
+        try:
+            targets = json.loads(targets)
+        except Exception:
+            targets = None
+    if not targets:
+        return _default_fy_targets()
+
+    # Merge with defaults so a FY saved before a month/category existed
+    # never comes back with missing keys.
+    by_month = {t.get('month_num'): t for t in targets if isinstance(t, dict)}
+    merged = []
+    for name, num in TARGET_MONTHS:
+        saved = by_month.get(num) or {}
+        cats = saved.get('categories') or {}
+        merged.append({
+            'month': name,
+            'month_num': num,
+            'base_target': saved.get('base_target') or 0,
+            'outlook': saved.get('outlook'),
+            'categories': {
+                cat: {
+                    'base': (cats.get(cat) or {}).get('base') or 0,
+                    'outlook': (cats.get(cat) or {}).get('outlook'),
+                }
+                for cat in TARGET_CATEGORIES
+            },
+        })
+    return merged
+
+
+def _save_fy_targets(financial_year, targets):
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        INSERT INTO financial_year_targets (financial_year, targets, updated_at)
+        VALUES (%s, %s::jsonb, NOW())
+        ON CONFLICT (financial_year)
+        DO UPDATE SET targets = EXCLUDED.targets, updated_at = NOW()
+    """, (financial_year, json.dumps(targets)))
+    conn.commit()
+    conn.close()
+
+#Accept
+
+def _fy_target_totals(financial_year):
+    """Sum of monthly Base Target and Effective (Outlook-aware) values for a FY."""
+    targets = _load_fy_targets(financial_year)
+    base_total = sum(t.get('base_target') or 0 for t in targets)
+    effective_total = sum(
+        (t.get('outlook') if t.get('outlook') not in (None, '') else t.get('base_target')) or 0
+        for t in targets
+    )
+    return round(base_total, 2), round(effective_total, 2)
+
+
+def _month_target(financial_year, month_num):
+    """Effective target (Outlook if set, else Base) for one month of a FY."""
+    targets = _load_fy_targets(financial_year)
+    row = next((t for t in targets if t.get('month_num') == month_num), None)
+    if not row:
+        return 0
+    outlook = row.get('outlook')
+    base = row.get('base_target') or 0
+    value = outlook if outlook not in (None, '') else base
+    return round(value or 0, 2)
+
+
+@bp.route('/module/RP01/port-overview/targets')
+@login_required
+def port_overview_targets():
+    return render_template('port_overview/targets.html', username=session.get('username'))
+
+
+@bp.route('/api/module/RP01/port-overview/targets', methods=['GET'])
+@login_required
+def port_overview_targets_get():
+    today = date.today()
+    default_fy = fy_label(today.year if today.month >= 4 else today.year - 1)
+    financial_year = (request.args.get('fy') or default_fy).strip()
+
+    return jsonify({
+        'financial_year': financial_year,
+        'fy_options': _fy_options(),
+        'categories': TARGET_CATEGORIES,
+        'targets': _load_fy_targets(financial_year),
+        'totals': _fy_target_totals(financial_year),
+    })
+
+
+@bp.route('/api/module/RP01/port-overview/targets', methods=['POST'])
+@login_required
+def port_overview_targets_save():
+    payload = request.get_json(force=True) or {}
+    financial_year = (payload.get('financial_year') or '').strip()
+    targets = payload.get('targets')
+
+    if not financial_year or not isinstance(targets, list):
+        return jsonify({'error': 'financial_year and targets[] are required'}), 400
+
+    # Basic shape validation so a bad payload can't corrupt the JSONB blob.
+    valid_months = {num for _, num in TARGET_MONTHS}
+    for row in targets:
+        if not isinstance(row, dict) or row.get('month_num') not in valid_months:
+            return jsonify({'error': 'invalid targets payload'}), 400
+
+    _save_fy_targets(financial_year, targets)
+    return jsonify({'status': 'ok', 'financial_year': financial_year})
