@@ -118,8 +118,12 @@ html, body {
   background:linear-gradient(135deg,var(--ocean),var(--teal));
 }
 .panel-hdr .muted { font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:0; text-transform:none; font-size:10.5px; color:var(--ocean); background:var(--ocean-lt); padding:2px 8px; border-radius:20px; }
-.image-inner { position:relative; width:100%; flex:1; min-height:0; }
-.image-inner img { width:100%; height:100%; object-fit:contain; display:block; }
+/* The stage is sized to the *drawn* image rect (see fitStage), never the
+   container — otherwise object-fit letterboxing shifts the overlay and scales
+   x/y differently, which drifts and shears the vessels on every resize. */
+.image-inner { width:100%; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; }
+#berthStage { position:relative; flex:none; }
+#berthStage img { width:100%; height:100%; display:block; }
 .overlay { position:absolute; inset:0; }
 /* Status colours mirror the Barge Position berth cards:
    green = under discharge, cyan = waiting, amber = discharged but not cast off. */
@@ -276,9 +280,11 @@ html, body {
   <div id="image-col">
     <div class="image-panel">
       <div class="panel-hdr"><span>Berth Layout</span><span id="occupiedCount" class="muted">—</span></div>
-      <div class="image-inner">
-        <img id="berthImg" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
-        <div class="overlay" id="berthOverlay"></div>
+      <div class="image-inner" id="berthViewport">
+        <div id="berthStage">
+          <img id="berthImg" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
+          <div class="overlay" id="berthOverlay"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -379,10 +385,26 @@ function fmtMins(m) {
 }
 
 /* ── BERTH OVERLAY (vessels only) ── */
+/* Same coordinate space as the PBM01 picker: overlay % == image %. Keeping the
+   stage at the image's own aspect ratio makes the x and y scale factors equal,
+   so widths, heights and rotations survive any resize. */
+let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layout.image_size
+
+function fitStage() {
+  const vp = document.getElementById('berthViewport');
+  const st = document.getElementById('berthStage');
+  const s = Math.min(vp.clientWidth / IMG_SIZE[0], vp.clientHeight / IMG_SIZE[1]);
+  st.style.width  = IMG_SIZE[0] * s + 'px';
+  st.style.height = IMG_SIZE[1] * s + 'px';
+}
+new ResizeObserver(fitStage).observe(document.getElementById('berthViewport'));
+
 function renderBerths(layout) {
   const overlay = document.getElementById('berthOverlay');
   overlay.innerHTML = '';
-  const [iw, ih] = layout.image_size && layout.image_size[0] ? layout.image_size : [1, 1];
+  const [iw, ih] = layout.image_size && layout.image_size[0] ? layout.image_size : IMG_SIZE;
+  IMG_SIZE = [iw, ih];
+  fitStage();
   let occupied = 0;
 
   (layout.berths || []).forEach(b => {
