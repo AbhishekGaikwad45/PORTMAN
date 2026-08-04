@@ -10,14 +10,14 @@ Prefixes and names are preserved and stay visible in CNDS01, where an admin can
 deliberately re-enable one. Until they do, FDCN01 keeps issuing DPPLCN/DPPLDN
 exactly as it does today — this migration changes no document number.
 
-Revision ID: e1f2a3b4c5d6
-Revises: d5e6f7a8b9c0
+Revision ID: a3f5c81b2d47
+Revises: cf01aa22bb33
 Create Date: 2026-07-30
 """
 from alembic import op
 
-revision = 'e1f2a3b4c5d6'
-down_revision = 'd5e6f7a8b9c0'
+revision = 'a3f5c81b2d47'
+down_revision = 'cf01aa22bb33'
 branch_labels = None
 depends_on = None
 
