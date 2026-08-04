@@ -1062,29 +1062,81 @@ def get_service_records(customer_type, customer_id):
     return jsonify({'data': records})
 
 
+# Cargo a customer can actually be billed for, by name. Mirrors the gates in
+# get_customer_billables: unbilled (or part-billed) AND the parent document
+# open enough to bill. Draft cargo is deliberately excluded — it renders locked
+# in the UI, so a customer holding only drafts has nothing to bill today.
+_BILLABLE_CARGO_COUNT = '''
+    SELECT cd.customer_name AS name, COUNT(*) AS n
+    FROM vcn_cargo_declaration cd
+    JOIN (SELECT DISTINCT ON (vcn_id) vcn_id, doc_status FROM ldud_header
+          ORDER BY vcn_id, id DESC) lh ON lh.vcn_id = cd.vcn_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.bl_quantity)
+      AND lh.doc_status IN ('Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+  UNION ALL
+    SELECT cd.customer_name, COUNT(*)
+    FROM vcn_export_cargo_declaration cd
+    JOIN (SELECT DISTINCT ON (vcn_id) vcn_id, doc_status FROM ldud_header
+          ORDER BY vcn_id, id DESC) lh ON lh.vcn_id = cd.vcn_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.bl_quantity)
+      AND lh.doc_status IN ('Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+  UNION ALL
+    SELECT cd.customer_name, COUNT(*)
+    FROM mbc_customer_details cd
+    JOIN mbc_header mh ON mh.id = cd.mbc_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.quantity)
+      AND mh.doc_status IN ('Approved', 'Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+'''
+
+
 @bp.route('/api/module/FIN01/customers/<path:customer_type>')
 def get_customers_for_billing(customer_type):
-    """Get customers or agents with billing details"""
+    """Get customers or agents with billing details.
+
+    ?with_billables=1 adds a billable_count per party, drops parties with none,
+    and orders by count desc. Opt-in because the admin cutover picker needs the
+    full master list (it works on cargo that is already flagged billed)."""
     if 'user_id' not in session:
         return jsonify({'error': 'Not logged in'}), 401
 
+    if customer_type == 'Customer':
+        table, active = 'vessel_customers', ''
+    elif customer_type == 'Agent':
+        table, active = 'vessel_agents', 'WHERE is_active = 1'
+    else:
+        return jsonify({'error': 'Invalid customer type'}), 400
+
     conn = get_db()
     cur = get_cursor(conn)
-    if customer_type == 'Customer':
-        cur.execute('''
-            SELECT id, name, gstin, gst_state_code,
-                   billing_address, city, pincode, contact_phone, contact_email
-            FROM vessel_customers ORDER BY name
-        ''')
-    elif customer_type == 'Agent':
-        cur.execute('''
-            SELECT id, name, gstin, gst_state_code,
-                   billing_address, city, pincode, contact_phone, contact_email
-            FROM vessel_agents WHERE is_active = 1 ORDER BY name
-        ''')
+    cols = ('id, name, gstin, gst_state_code, billing_address, city, pincode, '
+            'contact_phone, contact_email')
+
+    if request.args.get('with_billables') == '1':
+        # Cargo links to a party by name; service records link by id. Both are
+        # counted so the ordering reflects everything the page will list.
+        cur.execute(f'''
+            WITH cargo AS ({_BILLABLE_CARGO_COUNT}),
+            svc AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM service_records
+                WHERE source_type = %s AND doc_status = 'Approved'
+                  AND COALESCE(is_billed, 0) = 0
+                GROUP BY source_id
+            )
+            SELECT p.{cols.replace(', ', ', p.')},
+                   COALESCE((SELECT SUM(n) FROM cargo c WHERE c.name = p.name), 0)
+                 + COALESCE((SELECT n FROM svc s WHERE s.id = p.id), 0) AS billable_count
+            FROM {table} p
+            {active}
+            ORDER BY billable_count DESC, p.name
+        ''', [customer_type])
+        rows = [dict(r) for r in cur.fetchall() if r['billable_count'] > 0]
     else:
-        conn.close()
-        return jsonify({'error': 'Invalid customer type'}), 400
-    rows = cur.fetchall()
+        cur.execute(f'SELECT {cols} FROM {table} {active} ORDER BY name')
+        rows = [dict(r) for r in cur.fetchall()]
+
     conn.close()
-    return jsonify({'data': [dict(r) for r in rows]})
+    return jsonify({'data': rows})

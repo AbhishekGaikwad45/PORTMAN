@@ -288,12 +288,22 @@ async function loadCustomers() {
         return;
     }
     sel.innerHTML = '<option value="">-- Loading... --</option>';
-    const resp = await fetch(`/api/module/FIN01/customers/${ct}`);
+    // with_billables=1: only parties with something to bill, most items first.
+    const resp = await fetch(`/api/module/FIN01/customers/${ct}?with_billables=1`);
     const json = await resp.json();
+    const list = json.data || [];
+    if (!list.length) {
+        sel.innerHTML = `<option value="">-- No ${ct.toLowerCase()}s with billable items --</option>`;
+        return;
+    }
     sel.innerHTML = '<option value="">-- Select --</option>';
-    (json.data || []).forEach(c => {
-        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name}</option>`;
+    list.forEach(c => {
+        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name} (${c.billable_count})</option>`;
     });
+    // Preselect the busiest party. Agreements load with it; billables do not —
+    // the user still clicks Load Billables, so nothing heavy runs unasked.
+    sel.value = list[0].id;
+    onCustomerSelected();
 }
 
 async function onCustomerSelected() {
@@ -341,6 +351,13 @@ async function loadBillables() {
         if (agId) url += `?agreement_id=${agId}`;
         const resp = await fetch(url);
         billableData = await resp.json();
+
+        // Billable rows first, locked ones (Draft / no LDUD) after. Sorted in
+        // place, not on a copy: the rendered row index is the key used to read
+        // billableData.cargo_handling back when the bill is built, so the two
+        // orders must stay identical. Stable sort keeps server order per group.
+        (billableData.cargo_handling || []).sort(
+            (a, b) => (b.is_billable ? 1 : 0) - (a.is_billable ? 1 : 0));
 
         renderCargoCards(billableData.cargo_handling || []);
         renderOtherServices(billableData.other_services || []);
