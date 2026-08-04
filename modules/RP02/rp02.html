@@ -100,6 +100,22 @@
         <div class="card-arrow">Open &rarr;</div>
     </a>
 
+    <!-- Billing Pipeline dashboard (opens in a new window) -->
+    <a class="report-card" href="/module/RP02/billing-dashboard/" target="_blank" rel="noopener">
+        <div class="card-icon">
+            <img src="{{ url_for('static', filename='img/budget.png') }}" alt="Billing Pipeline"
+                 style="width:34px;height:34px;">
+        </div>
+        <div class="card-title">Billing Pipeline</div>
+        <div class="card-desc">
+            Dashboard-cum-report on the Bill Master dataset, from the billing desk's point of
+            view: what is ready to bill, what is blocked upstream, how long it has been waiting,
+            and which customers and cargo it sits against. Tonnage and line counts only — no
+            rates or amounts. Excel dump, fullscreen, auto-refreshes every 30 minutes.
+        </div>
+        <div class="card-arrow">Open Dashboard &rarr;</div>
+    </a>
+
     <!-- Bill Master Report (uploaded + live invoice data) -->
     <a class="report-card" href="/module/RP02/bill-master-report/">
         <div class="card-icon">

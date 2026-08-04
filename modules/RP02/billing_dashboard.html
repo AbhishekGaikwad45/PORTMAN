@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Billing Pipeline — RP02</title>
+<link rel="icon" href="{{ url_for('static', filename='img/budget.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #F1F5F9;
+  --surface: #FFFFFF;
+  --border:  #E2E8F0;
+  --border2: #CBD5E1;
+
+  --text:  #0F172A;
+  --text2: #475569;
+  --text3: #94A3B8;
+
+  --blue:   #2563EB; --blue-lt:  #EFF6FF; --blue-bd:  #BFDBFE;
+  --green:  #059669; --green-lt: #ECFDF5; --green-bd: #6EE7B7;
+  --amber:  #D97706; --amber-lt: #FFFBEB; --amber-bd: #FCD34D;
+  --slate:  #64748B;
+
+  /* ordinal age ramp — one hue, light→dark, validated against #FFFFFF */
+  --age-1: #86b6ef; --age-2: #5598e7; --age-3: #2a78d6; --age-4: #184f95;
+  --age-0: #CBD5E1;          /* undated: carries no magnitude */
+  --bar:   #2563EB;          /* single-series magnitude */
+
+  --hdr-h: 52px;
+  --ftr-h: 30px;
+}
+
+html, body { width: 100vw; height: 100vh; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: 'Outfit', system-ui, sans-serif; font-size: 13px;
+}
+
+/* ── HEADER ─────────────────────────────── */
+#hdr {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--hdr-h);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 16px; gap: 12px; z-index: 100;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+#hdr-logo { height: 28px; width: auto; }
+.hdr-sep { width: 1px; height: 24px; background: var(--border); }
+.hdr-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.hdr-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--blue); background: var(--blue-lt); border: 1px solid var(--blue-bd);
+  padding: 2px 7px; border-radius: 4px;
+}
+.hdr-sub { font-size: 10px; color: var(--text3); }
+.hdr-flex { flex: 1; }
+.hdr-clock { font-family: 'DM Mono', monospace; font-size: 16px; font-weight: 500; letter-spacing: 1px; }
+.hdr-date { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; }
+.hdr-btn {
+  border: 1px solid var(--border2); background: var(--surface); color: var(--text2);
+  font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 500; letter-spacing: .3px;
+  padding: 5px 10px; border-radius: 5px; cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.hdr-btn:hover, .hdr-btn.active { border-color: var(--blue); color: var(--blue); background: var(--blue-lt); }
+.hdr-btn.solid { background: var(--blue); border-color: var(--blue); color: #fff; }
+.hdr-btn.solid:hover { background: #1D4ED8; color: #fff; }
+
+/* ── LAYOUT ─────────────────────────────── */
+#app {
+  position: fixed; top: var(--hdr-h); bottom: var(--ftr-h); left: 0; right: 0;
+  overflow-y: auto; overflow-x: hidden; padding: 10px 12px 14px;
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+}
+#app::-webkit-scrollbar { width: 6px; }
+#app::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.panel-title {
+  font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text3); margin: 2px 0 6px;
+}
+.banner {
+  background: var(--blue-lt); border: 1px solid var(--blue-bd); border-radius: 6px;
+  color: #1E40AF; font-size: 11px; padding: 6px 11px; margin-bottom: 10px;
+}
+
+/* ── KPI TILES ──────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; }
+.tile.ok { border-left: 3px solid var(--green); }
+.tile.warn { border-left: 3px solid var(--amber); }
+.tile .lbl {
+  font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text3); display: flex; align-items: center; gap: 5px;
+}
+.tile .val {
+  font-family: 'DM Mono', monospace; font-size: 26px; font-weight: 500;
+  line-height: 1.15; margin-top: 5px; color: var(--text);
+}
+.tile .val .u { font-family: 'Outfit', sans-serif; font-size: 11px; font-weight: 500; color: var(--text2); margin-left: 4px; }
+.tile .foot { font-size: 10px; color: var(--text2); margin-top: 2px; }
+.tile.ok .val { color: var(--green); }
+.tile.warn .val { color: var(--amber); }
+
+/* ── CHART CARDS ────────────────────────── */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px 12px; }
+.card h2 { font-size: 11px; font-weight: 600; color: var(--text); }
+.card .cap { font-size: 9.5px; color: var(--text3); margin: 1px 0 9px; }
+
+.bars { display: flex; flex-direction: column; gap: 2px; }
+.brow { display: grid; grid-template-columns: minmax(74px, 118px) 1fr auto; gap: 8px; align-items: center; padding: 2px 0; }
+.brow .nm { font-size: 10.5px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brow:hover .nm { color: var(--text); }
+.track { background: var(--bg); border: 1px solid var(--border); border-radius: 0 4px 4px 0; height: 14px; }
+.fill { height: 100%; border-radius: 0 4px 4px 0; background: var(--bar); min-width: 2px; }
+.brow .v { font-family: 'DM Mono', monospace; font-size: 10.5px; color: var(--text); white-space: nowrap; }
+.brow .v .n { color: var(--text3); }
+.empty { color: var(--text3); font-size: 11px; padding: 12px 0; text-align: center; }
+
+/* ── TABLE ──────────────────────────────── */
+.tablewrap { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.tbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tbar h2 { font-size: 11px; font-weight: 600; }
+.tbar input, .tbar select {
+  font-family: 'Outfit', sans-serif; font-size: 11px; padding: 4px 8px; border-radius: 5px;
+  border: 1px solid var(--border2); background: var(--surface); color: var(--text);
+}
+.tbar input:focus, .tbar select:focus { outline: none; border-color: var(--blue); }
+.tcount { margin-left: auto; font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; }
+.scroll { overflow: auto; max-height: 46vh; scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+.scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+table { border-collapse: collapse; width: 100%; font-size: 11px; }
+th {
+  position: sticky; top: 0; z-index: 2; background: var(--bg); text-align: left;
+  font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text3);
+  padding: 7px 9px; border-bottom: 1px solid var(--border2); white-space: nowrap;
+}
+td { padding: 5px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; color: var(--text2); }
+td.k { color: var(--text); font-weight: 500; }
+td.num { text-align: right; font-family: 'DM Mono', monospace; color: var(--text); }
+tbody tr:hover td { background: var(--bg); }
+.pill {
+  display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .4px;
+  padding: 2px 7px; border-radius: 4px; text-transform: uppercase;
+}
+.pill.ok { color: var(--green); background: var(--green-lt); border: 1px solid var(--green-bd); }
+.pill.warn { color: var(--amber); background: var(--amber-lt); border: 1px solid var(--amber-bd); }
+
+/* ── FOOTER ─────────────────────────────── */
+#ftr {
+  position: fixed; bottom: 0; left: 0; right: 0; height: var(--ftr-h);
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 14px; padding: 0 16px;
+  font-size: 10px; color: var(--text3);
+}
+#ftr b { color: var(--text2); font-family: 'DM Mono', monospace; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <img id="hdr-logo" src="{{ url_for('static', filename='img/budget.png') }}" alt="">
+  <div class="hdr-sep"></div>
+  <div>
+    <div class="hdr-title">Billing Pipeline</div>
+    <div class="hdr-sub">What is waiting to be billed · Bill Master dataset</div>
+  </div>
+  <span class="hdr-tag">RP02</span>
+  <div class="hdr-flex"></div>
+  <div style="text-align:right;">
+    <div class="hdr-clock" id="hdr-clock">--:--:--</div>
+    <div class="hdr-date" id="hdr-date">—</div>
+  </div>
+  <div class="hdr-sep"></div>
+  <button class="hdr-btn" id="fs-btn" onclick="toggleFS()">⛶ Fullscreen</button>
+  <button class="hdr-btn solid" onclick="exportXlsx()">⬇ Excel dump</button>
+</div>
+
+<div id="app">
+
+  <div class="banner">
+    Cargo tonnage (MT) and line counts only — this view carries no rates, amounts or values by
+    design. It answers what is outstanding to bill, not what it is worth.
+  </div>
+
+  <div class="panel-title">Position</div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="panel-title">Breakdown</div>
+  <div class="grid">
+    <div class="card">
+      <h2>Ready to bill — by age</h2>
+      <div class="cap">Days since discharge completed · darker = older</div>
+      <div class="bars" id="c-ageing"></div>
+    </div>
+    <div class="card">
+      <h2>Ready to bill — by customer</h2>
+      <div class="cap">Pending tonnage (MT) · line count</div>
+      <div class="bars" id="c-customer"></div>
+    </div>
+    <div class="card">
+      <h2>Ready to bill — by cargo type</h2>
+      <div class="cap">Pending tonnage (MT) · line count</div>
+      <div class="bars" id="c-cargo"></div>
+    </div>
+    <div class="card">
+      <h2>Blocked upstream — by document status</h2>
+      <div class="cap">Waiting on operations before it can be billed</div>
+      <div class="bars" id="c-blocked"></div>
+    </div>
+  </div>
+
+  <div class="panel-title">Pending lines</div>
+  <div class="tablewrap">
+    <div class="tbar">
+      <select id="f-status" onchange="renderTable()">
+        <option value="">All statuses</option>
+        <option value="Ready to bill">Ready to bill</option>
+        <option value="Blocked upstream">Blocked upstream</option>
+      </select>
+      <select id="f-mode" onchange="renderTable()">
+        <option value="">MV &amp; MBC</option>
+        <option value="MV">MV only</option>
+        <option value="MBC">MBC only</option>
+      </select>
+      <input id="f-text" type="search" placeholder="Filter vessel / customer / PO / cargo…"
+             oninput="renderTable()" style="min-width:250px;">
+      <span class="tcount" id="tcount"></span>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Status</th><th>Vessel / MBC</th><th>Material PO</th><th>Customer</th>
+          <th>Type</th><th>Cargo</th><th style="text-align:right;">Pending Qty (MT)</th>
+          <th>Load Port</th><th>MV/MBC</th><th>Discharge Completed</th>
+          <th style="text-align:right;">Age (d)</th><th>Doc Status</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div id="ftr">
+  <span>Updated <b id="gen-at">—</b></span>
+  <span>Auto-refresh every 30 min · next in <b id="countdown">30:00</b></span>
+  <span id="err" style="color:#DC2626;"></span>
+</div>
+
+<script>
+const AGE_VARS = { '0-7 days':'--age-1', '8-15 days':'--age-2', '16-30 days':'--age-3',
+                   '30+ days':'--age-4', 'Undated':'--age-0' };
+let DATA = null;
+const nf = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+}
+
+/* one hue unless a per-row colour var is supplied (the ordinal age ramp) */
+function drawBars(hostId, items, colorFor) {
+  const host = document.getElementById(hostId);
+  if (!items || !items.length) { host.innerHTML = '<div class="empty">Nothing pending</div>'; return; }
+  const max = Math.max(...items.map(i => i.qty), 1);
+  host.innerHTML = items.map(i => {
+    // a zero row paints no mark — min-width would leave a 2px stub that reads
+    // as "a little" when the answer is "none"
+    const pct = i.qty > 0 ? Math.max((i.qty / max) * 100, 1.5) : 0;
+    const style = (colorFor ? `background:var(${colorFor(i)});` : '') + (pct ? '' : 'min-width:0;');
+    return `<div class="brow" title="${esc(i.label)} — ${nf.format(i.qty)} MT across ${i.lines} line(s)">
+      <div class="nm">${esc(i.label)}</div>
+      <div class="track"><div class="fill" style="width:${pct}%;${style}"></div></div>
+      <div class="v">${nf.format(i.qty)} <span class="n">· ${i.lines}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function tile(cls, label, value, unit, foot) {
+  return `<div class="tile ${cls}">
+    <div class="lbl">${esc(label)}</div>
+    <div class="val">${value}<span class="u">${esc(unit || '')}</span></div>
+    <div class="foot">${esc(foot || '')}</div>
+  </div>`;
+}
+
+function render() {
+  const k = DATA.kpi;
+  document.getElementById('gen-at').textContent = DATA.generated_at;
+  document.getElementById('tiles').innerHTML = [
+    tile('ok',   'Ready to bill',     nf.format(k.ready_lines),   'lines', nf.format(k.ready_qty) + ' MT outstanding'),
+    tile('warn', 'Blocked upstream',  nf.format(k.blocked_lines), 'lines', nf.format(k.blocked_qty) + ' MT not yet billable'),
+    tile('',     'Oldest waiting',    nf.format(k.oldest_days),   'days',  'since discharge completed'),
+    tile('',     'Customers waiting', nf.format(k.customers),     '',      'with cargo ready to bill'),
+    tile('',     'Billed to date',    nf.format(k.billed_lines),  'lines', nf.format(k.billed_month) + ' in ' + k.month_label),
+  ].join('');
+
+  drawBars('c-ageing', DATA.ageing, i => AGE_VARS[i.label] || '--bar');
+  drawBars('c-customer', DATA.by_customer);
+  drawBars('c-cargo', DATA.by_cargo);
+  drawBars('c-blocked', DATA.blocked_by_status);
+  renderTable();
+}
+
+function renderTable() {
+  if (!DATA) return;
+  const st = document.getElementById('f-status').value;
+  const md = document.getElementById('f-mode').value;
+  const q = document.getElementById('f-text').value.trim().toLowerCase();
+  const rows = DATA.rows.filter(r =>
+    (!st || r.status === st) && (!md || r.mv_mbc === md) &&
+    (!q || [r.vessel_name, r.customer_name, r.material_po, r.cargo_name, r.cargo_type]
+             .some(v => (v || '').toLowerCase().includes(q))));
+
+  document.getElementById('tcount').textContent =
+    `${nf.format(rows.length)} / ${nf.format(DATA.rows.length)} lines`;
+  document.getElementById('tbody').innerHTML = rows.map(r => {
+    const ok = r.status === 'Ready to bill';
+    return `<tr>
+      <td><span class="pill ${ok ? 'ok' : 'warn'}">${ok ? 'Ready' : 'Blocked'}</span></td>
+      <td class="k">${esc(r.vessel_name)}</td><td>${esc(r.material_po)}</td>
+      <td>${esc(r.customer_name)}</td><td>${esc(r.cargo_type)}</td><td>${esc(r.cargo_name)}</td>
+      <td class="num">${nf.format(r.bl_qty)}</td>
+      <td>${esc(r.load_port)}</td><td>${esc(r.mv_mbc)}</td>
+      <td>${esc(r.discharge_completed)}</td>
+      <td class="num">${r.age_days == null ? '—' : r.age_days}</td>
+      <td>${esc(r.doc_status)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="12" class="empty">No lines match these filters</td></tr>';
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/module/RP02/billing-dashboard/data');
+    DATA = await res.json();
+    document.getElementById('err').textContent = '';
+    render();
+  } catch (e) {
+    document.getElementById('err').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+function exportXlsx() { window.location = '/api/module/RP02/billing-dashboard/export'; }
+
+/* ── clock ── */
+function tick() {
+  const n = new Date(), p = v => String(v).padStart(2, '0');
+  document.getElementById('hdr-clock').textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  const D = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],
+        M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('hdr-date').textContent = `${D[n.getDay()]} ${p(n.getDate())} ${M[n.getMonth()]} ${n.getFullYear()}`;
+}
+setInterval(tick, 1000); tick();
+
+/* ── fullscreen ── */
+function toggleFS() {
+  const btn = document.getElementById('fs-btn');
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+    btn.textContent = '✕ Exit Fullscreen'; btn.classList.add('active');
+  } else {
+    document.exitFullscreen().catch(() => {});
+    btn.textContent = '⛶ Fullscreen'; btn.classList.remove('active');
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    const b = document.getElementById('fs-btn');
+    b.textContent = '⛶ Fullscreen'; b.classList.remove('active');
+  }
+});
+
+/* ── 30-minute refresh, countdown so a stale screen is obvious ── */
+const REFRESH_MS = 30 * 60 * 1000;
+let nextAt = Date.now() + REFRESH_MS;
+setInterval(() => {
+  const left = Math.max(nextAt - Date.now(), 0);
+  const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+  document.getElementById('countdown').textContent = `${m}:${String(s).padStart(2, '0')}`;
+  if (left === 0) { nextAt = Date.now() + REFRESH_MS; load(); }
+}, 1000);
+
+load();
+</script>
+</body>
+</html>

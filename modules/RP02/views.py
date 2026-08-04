@@ -160,3 +160,132 @@ def bill_master_row_delete():
         return jsonify({'error': 'Missing id'}), 400
     model.delete_row(data['id'])
     return jsonify({'success': True})
+
+
+# ── Billing Pipeline dashboard ───────────────────────────────────────────────
+
+@bp.route('/module/RP02/billing-dashboard/')
+@login_required
+def billing_dashboard_index():
+    return render_template('billing_dashboard.html', username=session.get('username'))
+
+
+@bp.route('/api/module/RP02/billing-dashboard/data')
+@login_required
+def billing_dashboard_data():
+    return jsonify(model.get_billing_dashboard())
+
+
+# Columns for the Excel dump — quantity and dates only, no rates or amounts.
+_EXPORT_COLUMNS = [
+    ('Status', 'status'),
+    ('Vessel / MBC', 'vessel_name'),
+    ('Material PO', 'material_po'),
+    ('Customer', 'customer_name'),
+    ('Type of Cargo', 'cargo_type'),
+    ('Cargo', 'cargo_name'),
+    ('Pending Qty (MT)', 'bl_qty'),
+    ('Load Port', 'load_port'),
+    ('MV/MBC', 'mv_mbc'),
+    ('Discharge Commence', 'discharge_commence'),
+    ('Discharge Completed', 'discharge_completed'),
+    ('Age (days)', 'age_days'),
+    ('Age Bucket', 'age_bucket'),
+    ('Doc Status', 'doc_status'),
+]
+
+
+@bp.route('/api/module/RP02/billing-dashboard/export')
+@login_required
+def billing_dashboard_export():
+    """Excel dump of the pending lines, plus a summary sheet of the same numbers
+    the dashboard shows. Deliberately carries no rates or amounts."""
+    import io
+    from datetime import datetime as _dt
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    data = model.get_billing_dashboard()
+
+    thin = Side(style='thin', color='000000')
+    bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill('solid', fgColor='1E3A5F')
+    hdr_font = Font(name='Calibri', bold=True, size=10, color='FFFFFF')
+    cell_font = Font(name='Calibri', size=10)
+    blocked_font = Font(name='Calibri', size=10, color='8A5A00')
+    lft = Alignment(horizontal='left', vertical='center')
+    rgt = Alignment(horizontal='right', vertical='center')
+    ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    wb = openpyxl.Workbook()
+
+    # Sheet 1: the lines
+    ws = wb.active
+    ws.title = 'Pending Lines'
+    ws.freeze_panes = 'A2'
+    ws.row_dimensions[1].height = 22
+    for i, (label, _k) in enumerate(_EXPORT_COLUMNS, 1):
+        c = ws.cell(1, i, label)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = bdr; c.alignment = ctr
+        ws.column_dimensions[get_column_letter(i)].width = max(12, len(label) + 3)
+
+    numeric = {'bl_qty', 'age_days'}
+    for row_i, r in enumerate(data['rows'], 2):
+        blocked = r.get('status') != 'Ready to bill'
+        for col_i, (_label, key) in enumerate(_EXPORT_COLUMNS, 1):
+            val = r.get(key)
+            c = ws.cell(row_i, col_i, '' if val is None else val)
+            c.border = bdr
+            c.font = blocked_font if blocked else cell_font
+            c.alignment = rgt if key in numeric else lft
+            if key == 'bl_qty' and val is not None:
+                c.number_format = '#,##0.00'
+    ws.auto_filter.ref = f'A1:{get_column_letter(len(_EXPORT_COLUMNS))}{max(len(data["rows"]) + 1, 1)}'
+
+    # Sheet 2: the dashboard's own numbers, so the file stands alone
+    ws2 = wb.create_sheet('Summary')
+    ws2.column_dimensions['A'].width = 34
+    ws2.column_dimensions['B'].width = 18
+    ws2.column_dimensions['C'].width = 14
+    k = data['kpi']
+    blocks = [
+        ('Billing Pipeline — generated ' + data['generated_at'], None, None),
+        ('Quantities are cargo tonnage (MT) and line counts only. No rates or amounts.', None, None),
+        (None, None, None),
+        ('Measure', 'Lines', 'Qty (MT)'),
+        ('Ready to bill', k['ready_lines'], k['ready_qty']),
+        ('Blocked upstream', k['blocked_lines'], k['blocked_qty']),
+        ('Oldest waiting (days)', k['oldest_days'], None),
+        ('Customers waiting', k['customers'], None),
+        ('Billed to date (bill master lines)', k['billed_lines'], None),
+        (f"Billed in {k['month_label']}", k['billed_month'], None),
+    ]
+    for title, group in (('Ready to bill by age', data['ageing']),
+                         ('Ready to bill by customer', data['by_customer']),
+                         ('Ready to bill by cargo type', data['by_cargo']),
+                         ('Blocked by document status', data['blocked_by_status'])):
+        blocks += [(None, None, None), (title, 'Lines', 'Qty (MT)')]
+        blocks += [(g['label'], g['lines'], g['qty']) for g in group]
+
+    for row_i, (a, b, c_) in enumerate(blocks, 1):
+        is_head = b in ('Lines',) or (row_i == 1)
+        ca = ws2.cell(row_i, 1, a if a is not None else '')
+        ca.font = Font(name='Calibri', size=10, bold=bool(is_head))
+        ca.alignment = lft
+        for col_i, val in ((2, b), (3, c_)):
+            cc = ws2.cell(row_i, col_i, '' if val is None else val)
+            cc.font = Font(name='Calibri', size=10, bold=bool(is_head))
+            cc.alignment = rgt
+            if col_i == 3 and isinstance(val, (int, float)):
+                cc.number_format = '#,##0.00'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"RP02_billing_pipeline_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return Response(
+        buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"'},
+    )
