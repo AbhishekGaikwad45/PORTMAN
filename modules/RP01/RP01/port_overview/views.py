@@ -124,79 +124,85 @@ def _fetch_berth_occupancy():
     return occupancy
 
 
-def _upcoming_arrivals():
-    """Sailed from Gull Island loaded, nothing logged since — i.e. inbound now.
+def _val(row, *fields):
+    """First non-blank value among fields ('' if none). Dates here are text."""
+    for f in fields:
+        v = str(row.get(f) or '').strip()
+        if v:
+            return v
+    return ''
 
-    Barges: LDUD01 barge lines, latest trip per barge. Import trips carry the
-    loaded leg in *_empty (the grid labels aweigh_gull_island_empty as "Aweigh
-    Gull Island (Loaded)"), so that is the column to read. Export trips sail
-    away from the port, never toward a berth, so they are excluded.
-    MBCs: MBC01 discharge port lines, latest line per MBC.
+
+# Anything logged at the port. Once one of these exists the vessel has arrived,
+# so it is no longer upcoming — this is the "nothing after Gull Island" test.
+_BARGE_AT_PORT = ('amf_at_port', 'along_side_berth', 'commence_discharge_berth',
+                  'completed_discharge_berth', 'cast_off_berth', 'cast_off_port')
+_MBC_AT_PORT = ('arrived_yellow_crane', 'vessel_arrival_port', 'vessel_all_made_fast',
+                'unloading_commenced', 'cleaning_commenced', 'cleaning_completed',
+                'unloading_completed', 'vessel_cast_off', 'sailed_out_load_port')
+
+
+def _upcoming_arrivals():
+    """Departed Gull Island, nothing logged at the port since — inbound now.
+
+    Barge rule: loaded (loading done / cast off the MV) + an aweigh-from-Gull-
+    Island time + nothing at the port yet. LDUD01 has two aweigh columns and
+    the grids disagree on which carries the loaded leg — Import labels
+    aweigh_gull_island_empty "Aweigh Gull Island (Loaded)", Export uses
+    aweigh_gull_island — so accept either. Requiring "loaded" is what keeps the
+    outbound empty leg (which also sets an aweigh) out of the list.
+    Export LDUDs sail away from the port, never toward a berth, so they're out.
     """
     conn = get_db()
     cur = get_cursor(conn)
 
-    # DISTINCT ON picks the latest trip first; the emptiness test is applied to
-    # that row only, so an older matching trip can't resurrect a berthed barge.
+    # Latest line per barge by id: trips are entered as they happen, and the
+    # newest trip is not necessarily on the newest LDUD document.
     cur.execute("""
-        SELECT * FROM (
-            SELECT DISTINCT ON (UPPER(TRIM(l.barge_name)))
-                   TRIM(l.barge_name)                AS name,
-                   l.cargo_name,
-                   COALESCE(l.discharge_quantity, 0) AS qty,
-                   l.aweigh_gull_island_empty        AS since,
-                   l.amf_at_port, l.along_side_berth, l.commence_discharge_berth,
-                   l.completed_discharge_berth, l.cast_off_berth, l.cast_off_port
-            FROM ldud_barge_lines l
-            JOIN ldud_header h ON h.id = l.ldud_id
-            WHERE COALESCE(TRIM(l.barge_name), '') <> ''
-              AND COALESCE(h.operation_type, '') <> 'Export'
-            ORDER BY UPPER(TRIM(l.barge_name)),
-                     l.ldud_id DESC, l.trip_number DESC NULLS LAST, l.id DESC
-        ) t
-        WHERE COALESCE(TRIM(t.since::text), '') <> ''
-          AND COALESCE(TRIM(t.amf_at_port::text), '') = ''
-          AND COALESCE(TRIM(t.along_side_berth::text), '') = ''
-          AND COALESCE(TRIM(t.commence_discharge_berth::text), '') = ''
-          AND COALESCE(TRIM(t.completed_discharge_berth::text), '') = ''
-          AND COALESCE(TRIM(t.cast_off_berth::text), '') = ''
-          AND COALESCE(TRIM(t.cast_off_port::text), '') = ''
-        ORDER BY t.since
+        SELECT DISTINCT ON (UPPER(TRIM(l.barge_name)))
+               TRIM(l.barge_name)                AS name,
+               l.cargo_name,
+               COALESCE(l.discharge_quantity, 0) AS qty,
+               l.aweigh_gull_island_empty, l.aweigh_gull_island,
+               l.completed_loading, l.cast_off_mv,
+               l.amf_at_port, l.along_side_berth, l.commence_discharge_berth,
+               l.completed_discharge_berth, l.cast_off_berth, l.cast_off_port
+        FROM ldud_barge_lines l
+        JOIN ldud_header h ON h.id = l.ldud_id
+        WHERE COALESCE(TRIM(l.barge_name), '') <> ''
+          AND COALESCE(h.operation_type, '') <> 'Export'
+        ORDER BY UPPER(TRIM(l.barge_name)), l.id DESC
     """)
-    upcoming = [{'type': 'BARGE', 'name': r['name'], 'cargo': r['cargo_name'] or '',
-                 'qty': float(r['qty'] or 0), 'since': _fmt_since(r['since'])}
-                for r in cur.fetchall()]
+    upcoming = []
+    for r in cur.fetchall():
+        since = _val(r, 'aweigh_gull_island_empty', 'aweigh_gull_island')
+        loaded = _val(r, 'completed_loading', 'cast_off_mv')
+        if since and loaded and not _val(r, *_BARGE_AT_PORT):
+            upcoming.append({'type': 'BARGE', 'name': r['name'], 'cargo': r['cargo_name'] or '',
+                             'qty': float(r['qty'] or 0), 'since': _fmt_since(since)})
 
     cur.execute("""
-        SELECT * FROM (
-            SELECT DISTINCT ON (UPPER(TRIM(h.mbc_name)))
-                   TRIM(h.mbc_name)              AS name,
-                   h.cargo_name,
-                   COALESCE(h.bl_quantity, 0)    AS qty,
-                   d.departure_gull_island       AS since,
-                   d.arrived_yellow_crane, d.vessel_arrival_port, d.vessel_all_made_fast,
-                   d.unloading_commenced, d.unloading_completed,
-                   d.vessel_cast_off, d.sailed_out_load_port
-            FROM mbc_discharge_port_lines d
-            JOIN mbc_header h ON h.id = d.mbc_id
-            WHERE COALESCE(TRIM(h.mbc_name), '') <> ''
-            ORDER BY UPPER(TRIM(h.mbc_name)), d.mbc_id DESC, d.id DESC
-        ) t
-        WHERE COALESCE(TRIM(t.since::text), '') <> ''
-          AND COALESCE(TRIM(t.arrived_yellow_crane::text), '') = ''
-          AND COALESCE(TRIM(t.vessel_arrival_port::text), '') = ''
-          AND COALESCE(TRIM(t.vessel_all_made_fast::text), '') = ''
-          AND COALESCE(TRIM(t.unloading_commenced::text), '') = ''
-          AND COALESCE(TRIM(t.unloading_completed::text), '') = ''
-          AND COALESCE(TRIM(t.vessel_cast_off::text), '') = ''
-          AND COALESCE(TRIM(t.sailed_out_load_port::text), '') = ''
-        ORDER BY t.since
+        SELECT DISTINCT ON (UPPER(TRIM(h.mbc_name)))
+               TRIM(h.mbc_name)           AS name,
+               h.cargo_name,
+               COALESCE(h.bl_quantity, 0) AS qty,
+               d.departure_gull_island,
+               d.arrived_yellow_crane, d.vessel_arrival_port, d.vessel_all_made_fast,
+               d.unloading_commenced, d.cleaning_commenced, d.cleaning_completed,
+               d.unloading_completed, d.vessel_cast_off, d.sailed_out_load_port
+        FROM mbc_discharge_port_lines d
+        JOIN mbc_header h ON h.id = d.mbc_id
+        WHERE COALESCE(TRIM(h.mbc_name), '') <> ''
+        ORDER BY UPPER(TRIM(h.mbc_name)), d.id DESC
     """)
-    upcoming += [{'type': 'MBC', 'name': r['name'], 'cargo': r['cargo_name'] or '',
-                  'qty': float(r['qty'] or 0), 'since': _fmt_since(r['since'])}
-                 for r in cur.fetchall()]
+    for r in cur.fetchall():
+        since = _val(r, 'departure_gull_island')
+        if since and not _val(r, *_MBC_AT_PORT):
+            upcoming.append({'type': 'MBC', 'name': r['name'], 'cargo': r['cargo_name'] or '',
+                             'qty': float(r['qty'] or 0), 'since': _fmt_since(since)})
 
     conn.close()
+    upcoming.sort(key=lambda u: u['since'])
     return upcoming
 
 
