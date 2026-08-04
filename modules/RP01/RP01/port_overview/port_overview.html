@@ -105,7 +105,9 @@ html, body {
 }
 
 /* ── IMAGE COLUMN ── */
-#image-col { width:520px; flex-shrink:0; overflow:hidden; }
+/* width is set by fitStage() to the image's own width — a fixed width would
+   letterbox the portrait image and waste the gutters. */
+#image-col { width:460px; flex-shrink:0; overflow:hidden; }
 .image-panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow-md); animation:fadeUp .4s ease both; height:100%; display:flex; flex-direction:column; }
 .panel-hdr {
   padding:12px 16px; font-family:'Space Grotesk',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase;
@@ -136,6 +138,24 @@ html, body {
 .vessel:hover { filter:drop-shadow(0 0 7px rgba(25,85,224,.9)); transform:scale(1.12); }
 .vessel.waiting { background:linear-gradient(160deg,#43e6f1,#0891b2); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(8,145,178,.5)); }
 .vessel.completed { background:linear-gradient(160deg,#facc15,#ca8a04); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(234,179,8,.55)); }
+/* ── UPCOMING STRIP ── */
+.upcoming {
+  display:none; flex-wrap:wrap; gap:5px; align-items:center; flex-shrink:0;
+  padding:8px 12px; background:var(--surface-2); border-bottom:1px solid var(--border);
+  max-height:88px; overflow-y:auto;
+}
+.up-lbl {
+  width:100%; font-family:'Space Grotesk',sans-serif; font-size:9px; font-weight:700;
+  letter-spacing:.7px; text-transform:uppercase; color:var(--text3);
+}
+.up-pill {
+  display:inline-flex; align-items:center; gap:5px; font-size:10px; font-weight:600; color:var(--text2);
+  background:var(--surface); border:1px solid var(--border-2); border-radius:20px; padding:3px 9px;
+}
+.up-pill::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--amber); flex-shrink:0; }
+.up-pill.MBC::before { background:var(--ocean); }
+.up-pill small { font-family:'JetBrains Mono',monospace; font-weight:500; color:var(--text3); }
+
 /* Chips sit outboard (the empty water side) and stack in one column per berth.
    JS owns the transform, so hover must not touch it or the chip leaves its row. */
 .vessel-name {
@@ -287,6 +307,7 @@ html, body {
   <div id="image-col">
     <div class="image-panel">
       <div class="panel-hdr"><span>Berth Layout</span><span id="occupiedCount" class="muted">—</span></div>
+      <div class="upcoming" id="upcomingBox"></div>
       <div class="image-inner" id="berthViewport">
         <div id="berthStage">
           <img id="berthImg" src="{{ url_for('static', filename='img/Clean_berths.png') }}" alt="Port berths">
@@ -397,12 +418,17 @@ function fmtMins(m) {
    so widths, heights and rotations survive any resize. */
 let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layout.image_size
 
+const MAX_IMG_COL = 520;  // don't let a tall window starve the right column
+
 function fitStage() {
   const vp = document.getElementById('berthViewport');
   const st = document.getElementById('berthStage');
-  const s = Math.min(vp.clientWidth / IMG_SIZE[0], vp.clientHeight / IMG_SIZE[1]);
+  // Height drives the fit (portrait image), and panel height doesn't depend on
+  // column width — so writing the width back can't feed back into this.
+  const s = Math.min(MAX_IMG_COL / IMG_SIZE[0], vp.clientHeight / IMG_SIZE[1]);
   st.style.width  = IMG_SIZE[0] * s + 'px';
   st.style.height = IMG_SIZE[1] * s + 'px';
+  document.getElementById('image-col').style.width = (IMG_SIZE[0] * s + 2) + 'px';  // +2 panel borders
 }
 new ResizeObserver(fitStage).observe(document.getElementById('berthViewport'));
 
@@ -475,6 +501,17 @@ function renderBerths(layout) {
 
   document.getElementById('occupiedCount').textContent =
     `${occupied}/${(layout.berths || []).length} occupied`;
+}
+
+/* ── UPCOMING (sailed from Gull Island, nothing logged since) ── */
+function renderUpcoming(list) {
+  const box = document.getElementById('upcomingBox');
+  if (!list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'flex';
+  box.innerHTML = `<div class="up-lbl">Upcoming · ${list.length}</div>` + list.map(u =>
+    `<span class="up-pill ${u.type}" title="${u.type}${u.cargo ? ' · ' + u.cargo : ''}${u.since ? ' · aweigh ' + u.since : ''}">
+       ${u.name}${u.qty ? ` <small>${fmtNum(u.qty)}</small>` : ''}</span>`
+  ).join('');
 }
 
 /* ── VESSEL DETAIL CARD ── */
@@ -590,6 +627,7 @@ function loadData() {
   fetch('/api/module/RP01/port-overview/data')
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(d => {
+      renderUpcoming(d.upcoming || []);   // before renderBerths: it resizes the stage
       renderBerths(d.layout || {});
       renderCards(d.cargo_cards || {});
       renderDelays(d.delays || []);
