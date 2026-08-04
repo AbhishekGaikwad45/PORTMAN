@@ -1611,6 +1611,10 @@
     // Current live items fetched from server (used for save snapshot)
     let _currentItems = [];
 
+    // ── Auto-save debounce timer handle ─────────────────────────────────────────
+    let _autoSaveTimer = null;
+    const AUTO_SAVE_DELAY_MS = 2000; // 2 seconds after last change
+
     // ══════════════════════════════════════════════════════════════════════════════
     //  SAVE STATUS HELPERS
     // ══════════════════════════════════════════════════════════════════════════════
@@ -1623,8 +1627,19 @@
 
     function markUnsaved() {
         _unsaved = true;
-        setSaveStatus('unsaved', '● Unsaved changes');
+        setSaveStatus('unsaved', '● Unsaved — auto-saving in 2s…');
         document.getElementById('saveReportBtn').disabled = false;
+
+        // ── Schedule auto-save (debounced) ──
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = setTimeout(() => {
+            // Only auto-save if a date is selected (report has been previewed)
+            const reportDate = document.getElementById('report-date').value;
+            if (reportDate && _unsaved) {
+                setSaveStatus('saving', '⏳ Auto-saving…');
+                saveReport();
+            }
+        }, AUTO_SAVE_DELAY_MS);
     }
 
     function markSaved(updatedAt) {
@@ -3201,6 +3216,10 @@
     //  RESET
     // ══════════════════════════════════════════════════════════════════════════════
     function resetReport() {
+        // Cancel any pending auto-save before clearing state
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = null;
+
         document.getElementById('reportContent').style.display = 'none';
         document.getElementById('saveStatusBadge').style.display = 'none';
         document.getElementById('savedDateBadge').style.display = 'none';
