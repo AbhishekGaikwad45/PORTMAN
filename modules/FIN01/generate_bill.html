@@ -682,14 +682,6 @@ async function generateBill() {
         return;
     }
 
-    // Cargo and other-service lines cannot be mixed in the same bill
-    const hasCargoLines   = lines.some(l => l.line_type === 'cargo_handling');
-    const hasServiceLines = lines.some(l => l.line_type === 'service_record');
-    if (hasCargoLines && hasServiceLines) {
-        alert('Cargo handling lines and other service lines cannot be combined in the same bill.\nPlease create separate bills for each type.');
-        return;
-    }
-
     const customerOpt = document.getElementById('customerId').selectedOptions[0];
     const agId = document.getElementById('agreementId').value;
     const subtotal = lines.reduce((s, l) => s + l.line_amount, 0);
