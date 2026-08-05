@@ -11,9 +11,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   /* ── palette ── */
-  --bg:        #EEF2F8;
-  --bg-grad:   radial-gradient(1000px 420px at 100% -8%, #E1ECFF 0%, transparent 55%),
-               radial-gradient(800px 380px at -5% 15%, #E3FBF7 0%, transparent 50%), #EEF2F8;
+  --bg:        #D6E9FB;
+  --bg-grad:   radial-gradient(1000px 420px at 100% -8%, #C7E0FC 0%, transparent 55%),
+               radial-gradient(800px 380px at -5% 15%, #CFF0F7 0%, transparent 50%), #D6E9FB;
   --surface:   #FFFFFF;
   --surface-2: #F7F9FC;
   --border:    #E4E9F1;
@@ -255,13 +255,19 @@ html, body {
 .muted { color:var(--text3); font-size:11px; }
 
 /* Tide + Notes row */
-.split-row { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.split-row { flex:1; min-height:0; display:grid; grid-template-columns:0.8fr 1.8fr; gap:14px; }
 .split-row .panel { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
 .split-row .panel-body { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
 .tide-table { width:100%; border-collapse:collapse; }
 .tide-table th { font-family:'Space Grotesk',sans-serif; font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text3); text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); }
 .tide-table td { font-size:11.5px; padding:8px; border-bottom:1px solid var(--surface-2); color:var(--text2); }
-.tide-table tr:hover td { background:var(--surface-2); }
+.tide-table tr { transition:background .15s; }
+.tide-table tr:hover td {
+  background:linear-gradient(90deg, var(--ocean-lt), var(--teal-lt) 130%);
+}
+.tide-table tr:hover td:first-child {
+  box-shadow:inset 3px 0 0 var(--ocean);
+}
 .tide-table td:nth-child(3) { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:600; }
 .tide-tag { display:inline-flex; align-items:center; gap:4px; font-size:9.5px; font-weight:800; padding:3px 9px; border-radius:20px; }
 .tide-tag.hw { background:linear-gradient(120deg,var(--green-lt),#D5F5E5); color:var(--green); }
@@ -348,19 +354,8 @@ html, body {
 
     <div class="cards-row" id="cardsRow"></div>
 
-    <div class="panel delay-panel">
-      <div class="panel-hdr">
-        <span>Top Delays — Today</span>
-        <button id="delayToggle" class="mini-btn">Show All</button>
-      </div>
-      <div class="panel-body">
-        <div id="delayHeadline" class="delay-headline"></div>
-        <div id="delayAll" class="delay-all" style="display:none"></div>
-      </div>
-    </div>
-
     <div class="split-row">
-      <div class="panel">
+      <div class="panel" id="tidePanel">
         <div class="panel-hdr"><span>Tide Table</span></div>
         <div class="panel-body" style="padding:0 16px 14px">
           <table class="tide-table">
@@ -377,6 +372,17 @@ html, body {
             <tbody id="mbcBody"></tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <div class="panel delay-panel">
+      <div class="panel-hdr">
+        <span>Top Delays — Today</span>
+        <button id="delayToggle" class="mini-btn">Show All</button>
+      </div>
+      <div class="panel-body">
+        <div id="delayHeadline" class="delay-headline"></div>
+        <div id="delayAll" class="delay-all" style="display:none"></div>
       </div>
     </div>
 
@@ -627,7 +633,7 @@ function renderCards(cards) {
     div.style.setProperty('--kpi-accent-lt', CARD_ACCENTS_LT[key] || 'var(--ocean-lt)');
     div.style.animationDelay = (idx * 0.05) + 's';
     div.innerHTML = `
-      <div class="kpi-label"><span>${c.label}</span><span class="kpi-icon-wrap">${CARD_ICONS[key] || ''}</span></div>
+      <div class="kpi-label"><span>${key === 'all_time' ? 'CUMULATIVE VALUE' : c.label}</span><span class="kpi-icon-wrap">${CARD_ICONS[key] || ''}</span></div>
       <div class="kpi-total">${fmtNum(c.total)} <span class="kpi-unit">MT</span></div>
       ${targetBlock}
       <div class="kpi-breakdown">${breakdown}</div>`;
