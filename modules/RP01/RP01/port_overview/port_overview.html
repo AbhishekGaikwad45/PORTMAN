@@ -94,6 +94,19 @@ html, body {
   padding:7px 13px; border-radius:20px; cursor:pointer; transition:all .15s; white-space:nowrap;
   position:relative; z-index:1; backdrop-filter:blur(4px);
 }
+
+.hdr-shift {
+  display:flex; flex-direction:column; align-items:flex-end; gap:1px;
+  position:relative; z-index:1; padding-right:12px; border-right:1px solid rgba(255,255,255,.18);
+}
+.hdr-shift-lbl {
+  font-family:'Space Grotesk',sans-serif; font-size:8.5px; font-weight:700; letter-spacing:1px;
+  text-transform:uppercase; color:rgba(255,255,255,.55);
+}
+.hdr-shift-name {
+  font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; color:#fff;
+}
+
 .hdr-btn:hover { border-color:#fff; background:rgba(255,255,255,.2); }
 .hdr-btn.active { border-color:#3EF0C8; color:var(--ocean-deep); background:#3EF0C8; }
 
@@ -248,7 +261,7 @@ html, body {
   background:linear-gradient(120deg,var(--amber),#E08E1F); padding:5px 13px; border-radius:20px;
   box-shadow:0 4px 12px rgba(194,118,10,.28);
 }
-.delay-all { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; max-height:90px; overflow-y:auto; }
+.delay-all { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; max-height:20px; overflow-y:auto; }
 .delay-row { display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:6px 4px; color:var(--text2); border-bottom:1px solid var(--surface-2); border-radius:6px; }
 .delay-row:hover { background:var(--surface-2); }
 .delay-row span:last-child { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:600; }
@@ -325,6 +338,10 @@ html, body {
   <div class="hdr-tag">RP01</div>
   <div class="hdr-live"><div class="hdr-live-dot"></div>Port Overview</div>
   <div class="hdr-flex"></div>
+  <div class="hdr-shift" id="hdr-shift">
+    <span class="hdr-shift-lbl">Shift In-Charge</span>
+    <span class="hdr-shift-name" id="hdr-shift-name">—</span>
+  </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
     <div class="hdr-clock" id="hdr-clock">--:--:--</div>
     <div class="hdr-date"  id="hdr-date"></div>
@@ -333,7 +350,6 @@ html, body {
   <button class="hdr-btn" id="fs-btn" onclick="toggleFS()">⛶ Fullscreen</button>
   <button class="hdr-btn" onclick="reload()">⟳ Refresh</button>
 </header>
-
 <div id="app">
 
   <div id="image-col">
@@ -723,7 +739,7 @@ function loadData() {
       renderDelays(d.delays || []);
       renderTide(d.tide || []);
       renderMBCStatus(d.mbc_status || []);
-      // renderNotes(d.notes || []);
+      document.getElementById('hdr-shift-name').textContent = d.shift_incharge || '—';
       document.getElementById('ftr-upd').textContent = d.as_of || '—';
     })
     .catch(e => console.error('Port overview error:', e));
