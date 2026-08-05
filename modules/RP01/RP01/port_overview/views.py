@@ -534,7 +534,13 @@ def _cumulative_by_type(today_s):
 
 
 def _top_delays_today():
-    """Today's delays (all shifts), summed per (equipment, reason) and ranked."""
+    """Today's delays (all shifts), summed per (equipment/system, reason) and ranked.
+
+    Maintenance delays are tied to a system (RMHS component), not a piece of
+    loading/unloading equipment, so for those rows use system_name instead
+    of equipment_name — mirrors the Equipment vs System distinction in the
+    Shift Report delay sheet.
+    """
     today_s = date.today().strftime('%Y-%m-%d')
     delays = _fetch_delays(today_s, 'ALL')
     totals = {}
@@ -542,8 +548,12 @@ def _top_delays_today():
         name = (d.get('delay_name') or '(blank)').strip()
         if name.lower() in ('idle', 'unloading'):
             continue
-        equip = (d.get('equipment_name') or '').strip()
-        key = f"{equip} — {name}" if equip else name
+        delay_type = (d.get('delay_type') or '').strip().lower().replace(' ', '')
+        if delay_type == 'maintenancedelays':
+            source = (d.get('system_name') or '').strip()
+        else:
+            source = (d.get('equipment_name') or '').strip()
+        key = f"{source} — {name}" if source else name
         totals[key] = totals.get(key, 0) + int(d.get('total_minutes') or 0)
     ranked = [{'delay_name': k, 'minutes': v} for k, v in totals.items() if v > 0]
     ranked.sort(key=lambda x: x['minutes'], reverse=True)
