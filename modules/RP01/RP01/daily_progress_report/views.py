@@ -5842,6 +5842,7 @@ LEFT JOIN ldud_vessel_operations lco
             ["SR.NO.", "M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "arrived_mumbai"],
         )
+        
 
         cur.execute("""
             SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
@@ -5888,12 +5889,45 @@ LEFT JOIN ldud_vessel_operations lco
             "arrived_dharamtar": _parse_flexible(r["vessel_arrival_port"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
 
+        # >>> ADD THIS: render the MBC arrived table (was being built but never shown)
+        simple_table(
+            "MBC ARRIVED AT DHARAMTAR",
+            mbc_arrived_rows,
+            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived  @ Dharamtar"],
+            ["mbc_name", "cargo", "bl_qty", "load_port", "arrived_dharamtar"],
+        )
+
+        # >>> ADD THIS: the query that builds upcoming_rows was missing entirely
+        cur.execute("""
+            SELECT vn.id, vh.vessel_name,
+                   STRING_AGG(DISTINCT TRIM(vcd.cargo_name), ', ' ORDER BY TRIM(vcd.cargo_name)) AS cargo,
+                   SUM(COALESCE(vcd.bl_quantity, 0)) AS bl_quantity,
+                   vh.load_port, vn.eta
+            FROM vcn_nominations vn
+            LEFT JOIN vcn_header vh ON vh.id = vn.vcn_id
+            LEFT JOIN vcn_cargo_declaration vcd ON vcd.vcn_id = vh.id
+            WHERE DATE(vn.eta) >= %s
+            GROUP BY vn.id, vh.vessel_name, vh.load_port, vn.eta
+            ORDER BY vn.eta
+        """, (report_date,))
+
+        upcoming_rows = [{
+            "vessel_name": r["vessel_name"] or "",
+            "cargo": r["cargo"] or "",
+            "bl_qty": int(r["bl_quantity"] or 0),
+            "load_port": r["load_port"] or "",
+            "eta_mumbai": _parse_flexible(r["eta"], "%d-%m-%Y %H:%M"),
+        } for r in cur.fetchall()]
+
         simple_table(
             "VESSELS EXPECTED AT MUMBAI",
             upcoming_rows,
             ["SR.NO.","M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
+        # =====================================================
+        # MBC EXPECTED AT MUMBAI
+        # =====================================================
 
         cur.execute("""
             SELECT
@@ -5903,18 +5937,17 @@ LEFT JOIN ldud_vessel_operations lco
                 mh.load_port,
                 lpl.eta
             FROM mbc_header mh
-            LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
-            LEFT JOIN mbc_load_port_lines lpl ON lpl.mbc_id = mh.id
+            LEFT JOIN mbc_discharge_port_lines dpl
+                ON dpl.mbc_id = mh.id
+            LEFT JOIN mbc_load_port_lines lpl
+                ON lpl.mbc_id = mh.id
             WHERE
-                -- Reached load port
                 NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
-
-                -- Not yet arrived at Gull Island
                 AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
-
                 AND DATE(NULLIF(TRIM(dpl.reached_load_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
-            ORDER BY NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+            ORDER BY
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
         """, (report_date, report_date))
 
         mbc_expected_rows = [{
@@ -5928,7 +5961,7 @@ LEFT JOIN ldud_vessel_operations lco
         simple_table(
             "MBC EXPECTED AT MUMBAI",
             mbc_expected_rows,
-            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
+            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load Port", "ETA @ Mumbai"],
             ["mbc_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
 
