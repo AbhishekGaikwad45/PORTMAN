@@ -2793,7 +2793,6 @@ def mbc_expected_report():
     print("REPORT DATE:", report_date)
 
     if not report_date:
-
         return jsonify({
             "success": False,
             "message": "Report date required"
@@ -2807,17 +2806,11 @@ def mbc_expected_report():
         query = """
 
         SELECT
-
             mh.id,
-
             mh.mbc_name,
-
             mh.cargo_name,
-
             mh.bl_quantity,
-
             mh.load_port,
-
             lpl.eta
 
         FROM mbc_header mh
@@ -2830,14 +2823,14 @@ def mbc_expected_report():
 
         WHERE
 
-            -- Reached load port
-            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+            -- Cast off from load port
+            NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
 
             -- Not yet arrived at Gull Island
             AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+                NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2845,8 +2838,7 @@ def mbc_expected_report():
                 %s::date
 
         ORDER BY
-
-            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+            NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp
 
         """
 
@@ -2871,20 +2863,18 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
+            eta_gull = _parse_flexible_dt(
+                row["eta"],
+                "%d-%m-%Y %H:%M"
+            )
 
             data.append({
 
                 "mbc_no": sr_no,
-
                 "mbc_name": row["mbc_name"] or "",
-
                 "cargo": row["cargo_name"] or "",
-
                 "bl_qty": int(row["bl_quantity"] or 0),
-
                 "load_port": row["load_port"] or "",
-
                 "eta_mumbai": eta_gull
 
             })
@@ -2894,7 +2884,6 @@ def mbc_expected_report():
         return jsonify({
 
             "success": True,
-
             "data": data
 
         })
@@ -2907,7 +2896,6 @@ def mbc_expected_report():
         return jsonify({
 
             "success": False,
-
             "message": str(e)
 
         })
