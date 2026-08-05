@@ -4937,7 +4937,8 @@ def daily_progress_report_excel():
         def compute_ww_hours(ldud_id, discharge_started, discharge_completed, day_label):
             """Gross hours for the 8am(day_label)->8am(day_label+1) window,
             clipped to [discharge_started, discharge_completed or ongoing],
-            minus overlapping Mother Vessel Agent / Force Majeure / MBP delay time."""
+            minus overlapping Mother Vessel Agent / Force Majeure / MBP delay time,
+            with crane-count weighting (matches monthly_cargo_report)."""
             if discharge_started is None:
                 return None
 
@@ -4949,17 +4950,31 @@ def daily_progress_report_excel():
             gross_start = max(discharge_started, day_win_start)
             gross_end = min(discharge_completed, day_win_end) if discharge_completed else day_win_end
 
-            gross_seconds = (gross_end - gross_start).total_seconds()
-            gross_hours = max(gross_seconds / 3600, 0)
+            gross_hours = max((gross_end - gross_start).total_seconds() / 3600, 0)
             gross_hours = min(gross_hours, 24)
 
             deduction_hours = 0
-            for delay_start, delay_end, _crane_count in delay_map.get(ldud_id, []):
+            for delay_start, delay_end, crane_count in delay_map.get(ldud_id, []):
                 clip_start = max(delay_start, day_win_start)
                 clip_end = min(delay_end, day_win_end)
-                overlap = (clip_end - clip_start).total_seconds() / 3600
-                if overlap > 0:
-                    deduction_hours += overlap
+                overlap_hours = (clip_end - clip_start).total_seconds() / 3600
+
+                if overlap_hours <= 0:
+                    continue
+
+                if crane_count == 1:
+                    adjusted_hours = overlap_hours / 4
+                elif crane_count == 2:
+                    adjusted_hours = overlap_hours / 2
+                elif crane_count == 3:
+                    adjusted_hours = overlap_hours * 3 / 4
+                else:  # 4 cranes (or crane_count == 0 / unspecified)
+                    adjusted_hours = overlap_hours
+
+                deduction_hours += adjusted_hours
+
+            # Do not allow deduction greater than gross working hours
+            deduction_hours = min(deduction_hours, gross_hours)
 
             return max(gross_hours - deduction_hours, 0)
 
@@ -5835,10 +5850,35 @@ LEFT JOIN ldud_vessel_operations lco
             LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
             WHERE
                 NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
+
+                -- Discharge must NOT have started yet — once
+                -- unloading_commenced is set, this MBC belongs in the
+                -- "MBC'S DISCHARGE COMPLETED" section, not "arrived".
+                AND NULLIF(TRIM(dpl.unloading_commenced), '') IS NULL
+
                 AND DATE(NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
+
+                -- Belt-and-braces: explicitly exclude any MBC that the
+                -- "MBC'S DISCHARGE COMPLETED" block above would already
+                -- show for this same report_date window (unloading
+                -- commenced OR completed falling inside window_start ->
+                -- window_end).
+                AND NOT (
+                    (
+                        NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                    )
+                    OR
+                    (
+                        NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                    )
+                )
             ORDER BY NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp
-        """, (report_date, report_date))
+        """, (report_date, report_date, window_start, window_end, window_start, window_end))
 
         mbc_arrived_rows = [{
             "mbc_name": r["mbc_name"] or "",
@@ -5849,34 +5889,6 @@ LEFT JOIN ldud_vessel_operations lco
         } for r in cur.fetchall()]
 
         simple_table(
-            "MBC ARRIVED AT DHARAMTAR",
-            mbc_arrived_rows,
-            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived  @ Dharamtar"],
-            ["mbc_name", "cargo", "bl_qty", "load_port", "arrived_dharamtar"],
-        )
-
-        cur.execute("""
-            SELECT vn.id, vh.vessel_name,
-                   STRING_AGG(DISTINCT TRIM(vcd.cargo_name), ', ' ORDER BY TRIM(vcd.cargo_name)) AS cargo,
-                   SUM(COALESCE(vcd.bl_quantity, 0)) AS bl_quantity,
-                   vh.load_port, vn.eta
-            FROM vcn_nominations vn
-            LEFT JOIN vcn_header vh ON vh.id = vn.vcn_id
-            LEFT JOIN vcn_cargo_declaration vcd ON vcd.vcn_id = vh.id
-            WHERE DATE(vn.eta) >= %s
-            GROUP BY vn.id, vh.vessel_name, vh.load_port, vn.eta
-            ORDER BY vn.eta
-        """, (report_date,))
-
-        upcoming_rows = [{
-            "vessel_name": r["vessel_name"] or "",
-            "cargo": r["cargo"] or "",
-            "bl_qty": int(r["bl_quantity"] or 0),
-            "load_port": r["load_port"] or "",
-            "eta_mumbai": _parse_flexible(r["eta"], "%d-%m-%Y %H:%M"),
-        } for r in cur.fetchall()]
-
-        simple_table(
             "VESSELS EXPECTED AT MUMBAI",
             upcoming_rows,
             ["SR.NO.","M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
@@ -5884,15 +5896,25 @@ LEFT JOIN ldud_vessel_operations lco
         )
 
         cur.execute("""
-            SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
-                   dpl.arrival_gull_island
+            SELECT
+                mh.mbc_name,
+                mh.cargo_name,
+                mh.bl_quantity,
+                mh.load_port,
+                lpl.eta
             FROM mbc_header mh
             LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
+            LEFT JOIN mbc_load_port_lines lpl ON lpl.mbc_id = mh.id
             WHERE
-                NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
-                AND DATE(NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp)
+                -- Reached load port
+                NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+
+                -- Not yet arrived at Gull Island
+                AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
+
+                AND DATE(NULLIF(TRIM(dpl.reached_load_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
-            ORDER BY NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+            ORDER BY NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
         """, (report_date, report_date))
 
         mbc_expected_rows = [{
@@ -5900,7 +5922,7 @@ LEFT JOIN ldud_vessel_operations lco
             "cargo": r["cargo_name"] or "",
             "bl_qty": int(r["bl_quantity"] or 0),
             "load_port": r["load_port"] or "",
-            "eta_mumbai": _parse_flexible(r["arrival_gull_island"], "%d-%m-%Y %H:%M"),
+            "eta_mumbai": _parse_flexible(r["eta"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
 
         simple_table(
