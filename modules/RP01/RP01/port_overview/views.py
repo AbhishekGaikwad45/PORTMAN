@@ -1,4 +1,5 @@
 import json
+import calendar
 from datetime import date, datetime, timedelta
 from functools import wraps
 
@@ -584,7 +585,8 @@ def port_overview_data():
     now = datetime.now()
     today = date.today()
     today_s = today.strftime('%Y-%m-%d')
-    yesterday_s = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    yesterday_date = today - timedelta(days=1)
+    yesterday_s = yesterday_date.strftime('%Y-%m-%d')
     month_start_s = today.replace(day=1).strftime('%Y-%m-%d')
 
     layout = _load_berth_layout()
@@ -603,6 +605,8 @@ def port_overview_data():
 #Accept
     target_base, target_effective = _fy_target_totals(current_fy_label)
     month_target = _month_target(current_fy_label, today.month)   # <<< NEW
+    today_target = _day_target(today)                             # <<< NEW
+    yesterday_target = _day_target(yesterday_date)                # <<< NEW
 
     cards = {
         'all_time':      {'label': 'All Time',              'by_type': all_time},
@@ -617,8 +621,16 @@ def port_overview_data():
             'by_type': _cargo_by_type(month_start_s, today_s),
             'target': month_target,          # <<< NEW
         },
-        'yesterday':     {'label': 'Yesterday',              'by_type': _cargo_by_type(yesterday_s, yesterday_s)},
-        'today':         {'label': 'Today',                  'by_type': _cargo_by_type(today_s, today_s)},
+        'yesterday':     {
+            'label': 'Yesterday',
+            'by_type': _cargo_by_type(yesterday_s, yesterday_s),
+            'target': yesterday_target,      # <<< NEW
+        },
+        'today':         {
+            'label': 'Today',
+            'by_type': _cargo_by_type(today_s, today_s),
+            'target': today_target,          # <<< NEW
+        },
     }
     for c in cards.values():
         c['total'] = round(sum(c['by_type'].values()), 2)
@@ -764,6 +776,19 @@ def _month_target(financial_year, month_num):
     base = row.get('base_target') or 0
     value = outlook if outlook not in (None, '') else base
     return round(value or 0, 2)
+
+
+def _day_target(d):
+    """Daily target for date d = that month's effective target / days in that month.
+
+    Handles the FY/month boundary itself (e.g. yesterday can fall in a
+    different month, or even a different FY, than today).
+    """
+    fy_start_year = d.year if d.month >= 4 else d.year - 1
+    fy = fy_label(fy_start_year)
+    month_total = _month_target(fy, d.month)
+    days_in_month = calendar.monthrange(d.year, d.month)[1]
+    return round(month_total / days_in_month, 2) if days_in_month else 0
 
 
 @bp.route('/module/RP01/port-overview/targets')
