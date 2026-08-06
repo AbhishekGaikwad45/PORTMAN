@@ -15,15 +15,16 @@
   /* dppl.png sits under the existing tints, washed out by the flat layer above
      it so panel text keeps its contrast. Raise that layer's alpha to fade the
      photo further, lower it to bring the photo forward. */
-  --bg-grad:   radial-gradient(1000px 420px at 100% -8%, #C7E0FC 0%, transparent 55%),
-               radial-gradient(800px 380px at -5% 15%, #CFF0F7 0%, transparent 50%),
-               linear-gradient(rgba(214,233,251,.55), rgba(214,233,251,.55)),
+  --bg-grad:   radial-gradient(1100px 460px at 100% -10%, rgba(199,224,252,.55) 0%, transparent 60%),
+               radial-gradient(900px 420px at -5% 12%, rgba(207,240,247,.45) 0%, transparent 55%),
+               linear-gradient(rgba(214,233,251,.26), rgba(214,233,251,.28)),
                url("{{ url_for('static', filename='img/dppl.png') }}") center center / cover no-repeat fixed,
                #D6E9FB;
   --surface:   #FFFFFF;
   /* Translucent surface for the cards/panels so dppl.png reads through them.
-     The berth layout keeps the solid --surface — the map needs full contrast. */
-  --surface-t: rgba(255,255,255,.74);
+     The berth layout keeps the solid --surface — the map needs full contrast.
+     Lowered further so the photo is clearly visible behind every panel. */
+  --surface-t: rgba(255,255,255,.62);
   --surface-2: #F7F9FC;
   --border:    #E4E9F1;
   --border-2:  #D2DAE6;
@@ -116,6 +117,34 @@ html, body {
   font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; color:#fff;
 }
 
+/* FY-end countdown badge: pulled out of the neutral hdr-shift mould entirely
+   into its own high-contrast pill, so "time pressure" reads at a glance
+   instead of sitting quietly next to the shift in-charge name. */
+.hdr-fyend {
+  flex-direction:row; align-items:center; gap:9px;
+  padding:6px 16px 6px 12px; border-radius:30px; border:1px solid rgba(255,214,120,.55);
+  background:linear-gradient(120deg, rgba(255,180,60,.30), rgba(255,140,20,.14));
+  box-shadow:0 3px 14px rgba(194,118,10,.32), inset 0 1px 0 rgba(255,255,255,.18);
+  animation: fyPulse 2.8s ease-in-out infinite;
+}
+@keyframes fyPulse {
+  0%,100% { box-shadow:0 3px 14px rgba(194,118,10,.28), inset 0 1px 0 rgba(255,255,255,.18); }
+  50%     { box-shadow:0 4px 22px rgba(255,180,60,.55), inset 0 1px 0 rgba(255,255,255,.25); }
+}
+.hdr-fyend-icon {
+  width:24px; height:24px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,.16); font-size:12px;
+}
+.hdr-fyend-text { display:flex; flex-direction:column; align-items:flex-start; gap:1px; }
+.hdr-fyend .hdr-shift-lbl {
+  color:rgba(255,236,200,.85); font-weight:800;
+}
+.hdr-fyend .hdr-shift-name {
+  font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:800; color:#FFEBC2;
+  letter-spacing:.2px; text-shadow:0 1px 8px rgba(255,180,60,.5);
+}
+
 .hdr-btn:hover { border-color:#fff; background:rgba(255,255,255,.2); }
 .hdr-btn.active { border-color:#3EF0C8; color:var(--ocean-deep); background:#3EF0C8; }
 
@@ -135,7 +164,7 @@ html, body {
   padding:12px 16px; font-family:'Space Grotesk',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase;
   /* Translucent so it doesn't sit as an opaque band inside a see-through panel.
      Over .image-panel (solid) it still renders opaque, so the map is unaffected. */
-  color:var(--text2); background:rgba(247,249,252,.66); border-bottom:1px solid var(--border);
+  color:var(--text2); background:rgba(247,249,252,.5); border-bottom:1px solid var(--border);
   display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0;
 }
 .panel-hdr span:first-child { display:flex; align-items:center; gap:7px; }
@@ -235,7 +264,7 @@ html, body {
   content:''; position:absolute; left:0; right:0; top:0; height:3px;
   background:linear-gradient(90deg, var(--kpi-accent, var(--ocean)), transparent 130%);
 }
-.kpi-card.hero { background:linear-gradient(165deg,rgba(255,246,229,.84) 0%,rgba(255,255,255,.74) 60%); border-color:var(--amber-bd); box-shadow:0 8px 22px rgba(194,118,10,.12); }
+.kpi-card.hero { background:linear-gradient(165deg,rgba(255,246,229,.72) 0%,rgba(255,255,255,.6) 60%); border-color:var(--amber-bd); box-shadow:0 8px 22px rgba(194,118,10,.14); }
 .kpi-label { display:flex; align-items:center; justify-content:space-between; font-family:'Space Grotesk',sans-serif; font-size:9.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--text3); margin-bottom:8px; }
 .kpi-icon-wrap {
   width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
@@ -360,6 +389,13 @@ html, body {
   <div class="hdr-tag">RP01</div>
   <div class="hdr-live"><div class="hdr-live-dot"></div>Port Overview</div>
   <div class="hdr-flex"></div>
+  <div class="hdr-shift hdr-fyend" id="hdr-fyend">
+    <span class="hdr-fyend-icon">⏳</span>
+    <span class="hdr-fyend-text">
+      <span class="hdr-shift-name" id="hdr-fyend-days">— days</span>
+      <span class="hdr-shift-lbl" id="hdr-fyend-lbl">left to hit FY target</span>
+    </span>
+  </div>
   <div class="hdr-shift" id="hdr-shift">
     <span class="hdr-shift-lbl">Shift In-Charge</span>
     <span class="hdr-shift-name" id="hdr-shift-name">—</span>
@@ -454,6 +490,29 @@ let cd = REFRESH;
   document.getElementById('hdr-date').textContent = `${D[n.getDay()]} ${p(n.getDate())} ${M[n.getMonth()]} ${n.getFullYear()}`;
   setTimeout(tick, 1000);
 })();
+
+/* ── FY-END COUNTDOWN ── */
+/* Indian FY runs Apr 1 → Mar 31. If we're in Jan/Feb/Mar, the FY ends THIS
+   calendar year; otherwise (Apr-Dec) it ends NEXT calendar year. Days are
+   counted to the end of Mar 31 (23:59:59), inclusive of today. */
+function fyEndInfo() {
+  const n = new Date();
+  const y = n.getFullYear(), m = n.getMonth() + 1; // m: 1-12
+  const fyStartYear = m >= 4 ? y : y - 1;
+  const fyEndYear   = fyStartYear + 1;
+  const fyEnd = new Date(fyEndYear, 2, 31, 23, 59, 59, 999); // March = month index 2
+  const label = `left to hit FY ${fyStartYear}-${String(fyEndYear).slice(-2)} target`;
+  const diffMs = fyEnd - n;
+  const days = Math.max(0, Math.ceil(diffMs / 86400000));
+  return { label, days };
+}
+function renderFYEnd() {
+  const { label, days } = fyEndInfo();
+  document.getElementById('hdr-fyend-lbl').textContent = label;
+  document.getElementById('hdr-fyend-days').textContent = `${days} day${days === 1 ? '' : 's'}`;
+}
+renderFYEnd();
+setInterval(renderFYEnd, 60 * 1000); // only changes daily, minute refresh is cheap
 
 /* ── FULLSCREEN ── */
 function toggleFS() {
