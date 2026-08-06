@@ -427,7 +427,10 @@ def revenue_report_data():
                 igst_rate
             FROM invoice_lines
             WHERE invoice_id = ih.id
-            ORDER BY id
+            ORDER BY
+                (hsn_sac IS NOT NULL AND hsn_sac <> '') DESC,
+                (sac_code IS NOT NULL AND sac_code <> '') DESC,
+                id
             LIMIT 1
         ) il ON TRUE
 
