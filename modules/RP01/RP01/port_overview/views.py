@@ -1,4 +1,5 @@
 import json
+import calendar
 from datetime import date, datetime, timedelta
 from functools import wraps
 
@@ -584,7 +585,8 @@ def port_overview_data():
     now = datetime.now()
     today = date.today()
     today_s = today.strftime('%Y-%m-%d')
-    yesterday_s = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    yesterday_date = today - timedelta(days=1)
+    yesterday_s = yesterday_date.strftime('%Y-%m-%d')
     month_start_s = today.replace(day=1).strftime('%Y-%m-%d')
 
     layout = _load_berth_layout()
@@ -602,7 +604,12 @@ def port_overview_data():
 
 #Accept
     target_base, target_effective = _fy_target_totals(current_fy_label)
-    month_target = _month_target(current_fy_label, today.month)   # <<< NEW
+    month_target = _month_target(current_fy_label, today.month)
+
+    today_target_month     = _daily_target_by_days_left(today, 'month')
+    today_target_fy        = _daily_target_by_days_left(today, 'fy')
+    yesterday_target_month = _daily_target_by_days_left(yesterday_date, 'month')
+    yesterday_target_fy    = _daily_target_by_days_left(yesterday_date, 'fy')
 
     cards = {
         'all_time':      {'label': 'All Time',              'by_type': all_time},
@@ -617,8 +624,18 @@ def port_overview_data():
             'by_type': _cargo_by_type(month_start_s, today_s),
             'target': month_target,          # <<< NEW
         },
-        'yesterday':     {'label': 'Yesterday',              'by_type': _cargo_by_type(yesterday_s, yesterday_s)},
-        'today':         {'label': 'Today',                  'by_type': _cargo_by_type(today_s, today_s)},
+        'yesterday':     {
+            'label': 'Yesterday',
+            'by_type': _cargo_by_type(yesterday_s, yesterday_s),
+            'target': yesterday_target_month,
+            'target_fy': yesterday_target_fy,
+        },
+        'today':         {
+            'label': 'Today',
+            'by_type': _cargo_by_type(today_s, today_s),
+            'target': today_target_month,
+            'target_fy': today_target_fy,
+        },
     }
     for c in cards.values():
         c['total'] = round(sum(c['by_type'].values()), 2)
@@ -765,6 +782,52 @@ def _month_target(financial_year, month_num):
     value = outlook if outlook not in (None, '') else base
     return round(value or 0, 2)
 
+
+def _achieved_between(start_s, end_s):
+    """Total actual quantity across all cargo types, start..end inclusive."""
+    by_type = _cargo_by_type(start_s, end_s)
+    return round(sum(by_type.values()), 2)
+
+
+def _days_left_in_month(d):
+    """Days from d to month-end, inclusive of d."""
+    days_in_month = calendar.monthrange(d.year, d.month)[1]
+    return days_in_month - d.day + 1
+
+
+def _days_left_in_fy(d):
+    """Days from d to FY-end (Mar 31), inclusive of d."""
+    fy_start_year = d.year if d.month >= 4 else d.year - 1
+    fy_end = date(fy_start_year + 1, 3, 31)
+    return (fy_end - d).days + 1
+
+
+def _daily_target_by_days_left(d, scope='month'):
+    """
+    Daily target for date d = (period target so far unachieved) / (days left
+    in the period, including d). scope is 'month' or 'fy'.
+    """
+    fy_start_year = d.year if d.month >= 4 else d.year - 1
+    fy = fy_label(fy_start_year)
+
+    if scope == 'month':
+        total_target = _month_target(fy, d.month)
+        period_start = d.replace(day=1)
+        days_left = _days_left_in_month(d)
+    else:  # 'fy'
+        total_target = _fy_target_totals(fy)[1]
+        period_start = date(fy_start_year, 4, 1)
+        days_left = _days_left_in_fy(d)
+
+    achieved_before_d = 0
+    if d > period_start:
+        achieved_before_d = _achieved_between(
+            period_start.strftime('%Y-%m-%d'),
+            (d - timedelta(days=1)).strftime('%Y-%m-%d')
+        )
+
+    remaining_target = total_target - achieved_before_d
+    return round(remaining_target / days_left, 2) if days_left else 0
 
 @bp.route('/module/RP01/port-overview/targets')
 @login_required
