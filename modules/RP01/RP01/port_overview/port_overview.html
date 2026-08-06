@@ -495,11 +495,26 @@ new ResizeObserver(() => { if (fitStage() && lastLayout) renderBerths(lastLayout
    — neighbouring berths' columns collided — so every chip goes in one list and
    gets pushed down until it clears the one above. */
 function placeLabels(labels, overlay) {
-  const PITCH = 18, X = 4;  // PITCH > chip height (~17px)
-  labels.sort((p, q) => p.y - q.y);
+  const X = 4, PAD = 6;
+  // Order by berth down the river, then by bank, so one berth's vessels stay a
+  // contiguous block and the extra gap reads as a berth boundary.
+  labels.sort((p, q) => p.berthY - q.berthY || p.slot - q.slot);
+  const breaks = labels.filter((L, i) => i && L.b !== labels[i - 1].b).length;
+
+  // Give up the berth gaps, then tighten the pitch, rather than run off the
+  // image — a chip drawn outside the stage is worse than a snug column.
+  const avail = stageH - 2 * PAD;
+  let pitch = 18, berthGap = 8;             // pitch > chip height (~17px)
+  if (labels.length * pitch + breaks * berthGap > avail) berthGap = 0;
+  if (labels.length * pitch > avail) pitch = avail / labels.length;
+
   let prev = -Infinity;
-  labels.forEach(L => { L.y = Math.max(L.y, prev + PITCH); prev = L.y; });
-  const spill = prev + PITCH / 2 - stageH;
+  labels.forEach((L, i) => {
+    const gap = (i && L.b !== labels[i - 1].b) ? pitch + berthGap : pitch;
+    L.y = Math.max(L.y, prev + gap);
+    prev = L.y;
+  });
+  const spill = prev + pitch / 2 - (stageH - PAD);
   if (spill > 0) labels.forEach(L => { L.y -= spill; });  // keep the column on the image
 
   labels.forEach(L => {
@@ -547,21 +562,24 @@ function renderBerths(layout) {
     const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
     const MBC_LEN = 80;                                             // MBCs are one fixed size
 
-    // Group by bank tier. The PBM01 box is the berth's water area, not the hull:
-    // A/S moors flush against the mooring face (+x, the blue edge in PBM01) and
-    // each extra bank steps outboard (-x, away from the jetty) by one beam.
-    const tiers = {};
-    assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
-
-    Object.entries(tiers).forEach(([t, list]) => {
-      const slot = (b.h || 60) / list.length;
-      list.forEach((a, i) => {
+    // The PBM01 box is the berth's water area, not the hull: A/S moors flush
+    // against the mooring face (+x, the blue edge in PBM01) and each further
+    // bank steps outboard (-x, away from the jetty) by one beam.
+    // Bank order comes from the recorded tier, but the *slot* is the position in
+    // this sorted list — there are only five bank codes (A/S..S/B), so a sixth
+    // vessel has tier 0 and would otherwise be drawn on top of the A/S hull.
+    // Walk outboard accumulating each hull's own beam. Multiplying the slot by
+    // one beam breaks as soon as beams differ: a narrow barge outboard of a wide
+    // MBC lands back on top of it.
+    let edge = (b.w || 60) / 2;  // mooring face, working outboard from here
+    assets.slice()
+      .sort((p, q) => (p.tier || 0) - (q.tier || 0))
+      .forEach((a, slot) => {
         const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
         const beam = Math.max(len * 0.3, 6);
-        const off = (b.w || 60) / 2 - beam / 2 - (+t) * (beam + 2);
-        const ex = b.cx + off * cos, ey = b.cy + off * sin;
-        const s = (i - (list.length - 1) / 2) * slot; // along-edge offset
-        const px = ex - s * sin, py = ey + s * cos;
+        const off = edge - beam / 2;
+        edge -= beam + 2;        // outboard edge of this hull, plus a gap
+        const px = b.cx + off * cos, py = b.cy + off * sin;
 
         const v = document.createElement('div');
         v.className = 'vessel' + (a.status === 'Discharge Completed' ? ' completed' : a.commenced ? '' : ' waiting');
@@ -576,11 +594,11 @@ function renderBerths(layout) {
         // Queue the label; placeLabels() de-collides them all together below.
         // The bank code says which hull it is once the chip sits away from it.
         labels.push({
-          y: py * sx, vx: px * sx, vy: py * sx, a: a, b: b,
+          y: py * sx, vx: px * sx, vy: py * sx, a: a, b: b, slot: slot,
+          berthY: (b.cy || 0) * sx,
           text: assets.length > 1 ? `<b>${a.position || 'A/S'}</b> ${a.name}` : a.name
         });
       });
-    });
   });
 
   placeLabels(labels, overlay);
