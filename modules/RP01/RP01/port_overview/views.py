@@ -604,9 +604,12 @@ def port_overview_data():
 
 #Accept
     target_base, target_effective = _fy_target_totals(current_fy_label)
-    month_target = _month_target(current_fy_label, today.month)   # <<< NEW
-    today_target = _day_target(today)                             # <<< NEW
-    yesterday_target = _day_target(yesterday_date)                # <<< NEW
+    month_target = _month_target(current_fy_label, today.month)
+
+    today_target_month     = _daily_target_by_days_left(today, 'month')
+    today_target_fy        = _daily_target_by_days_left(today, 'fy')
+    yesterday_target_month = _daily_target_by_days_left(yesterday_date, 'month')
+    yesterday_target_fy    = _daily_target_by_days_left(yesterday_date, 'fy')
 
     cards = {
         'all_time':      {'label': 'All Time',              'by_type': all_time},
@@ -624,12 +627,14 @@ def port_overview_data():
         'yesterday':     {
             'label': 'Yesterday',
             'by_type': _cargo_by_type(yesterday_s, yesterday_s),
-            'target': yesterday_target,      # <<< NEW
+            'target': yesterday_target_month,
+            'target_fy': yesterday_target_fy,
         },
         'today':         {
             'label': 'Today',
             'by_type': _cargo_by_type(today_s, today_s),
-            'target': today_target,          # <<< NEW
+            'target': today_target_month,
+            'target_fy': today_target_fy,
         },
     }
     for c in cards.values():
@@ -778,18 +783,51 @@ def _month_target(financial_year, month_num):
     return round(value or 0, 2)
 
 
-def _day_target(d):
-    """Daily target for date d = that month's effective target / days in that month.
+def _achieved_between(start_s, end_s):
+    """Total actual quantity across all cargo types, start..end inclusive."""
+    by_type = _cargo_by_type(start_s, end_s)
+    return round(sum(by_type.values()), 2)
 
-    Handles the FY/month boundary itself (e.g. yesterday can fall in a
-    different month, or even a different FY, than today).
+
+def _days_left_in_month(d):
+    """Days from d to month-end, inclusive of d."""
+    days_in_month = calendar.monthrange(d.year, d.month)[1]
+    return days_in_month - d.day + 1
+
+
+def _days_left_in_fy(d):
+    """Days from d to FY-end (Mar 31), inclusive of d."""
+    fy_start_year = d.year if d.month >= 4 else d.year - 1
+    fy_end = date(fy_start_year + 1, 3, 31)
+    return (fy_end - d).days + 1
+
+
+def _daily_target_by_days_left(d, scope='month'):
+    """
+    Daily target for date d = (period target so far unachieved) / (days left
+    in the period, including d). scope is 'month' or 'fy'.
     """
     fy_start_year = d.year if d.month >= 4 else d.year - 1
     fy = fy_label(fy_start_year)
-    month_total = _month_target(fy, d.month)
-    days_in_month = calendar.monthrange(d.year, d.month)[1]
-    return round(month_total / days_in_month, 2) if days_in_month else 0
 
+    if scope == 'month':
+        total_target = _month_target(fy, d.month)
+        period_start = d.replace(day=1)
+        days_left = _days_left_in_month(d)
+    else:  # 'fy'
+        total_target = _fy_target_totals(fy)[1]
+        period_start = date(fy_start_year, 4, 1)
+        days_left = _days_left_in_fy(d)
+
+    achieved_before_d = 0
+    if d > period_start:
+        achieved_before_d = _achieved_between(
+            period_start.strftime('%Y-%m-%d'),
+            (d - timedelta(days=1)).strftime('%Y-%m-%d')
+        )
+
+    remaining_target = total_target - achieved_before_d
+    return round(remaining_target / days_left, 2) if days_left else 0
 
 @bp.route('/module/RP01/port-overview/targets')
 @login_required
