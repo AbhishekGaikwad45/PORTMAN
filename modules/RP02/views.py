@@ -355,11 +355,11 @@ def revenue_report_data():
     params = []
 
     if month:
-        where.append("EXTRACT(MONTH FROM ih.invoice_date) = %s")
+        where.append("EXTRACT(MONTH FROM ih.invoice_date::date) = %s")
         params.append(int(month))
 
     if year:
-        where.append("EXTRACT(YEAR FROM ih.invoice_date) = %s")
+        where.append("EXTRACT(YEAR FROM ih.invoice_date::date) = %s")
         params.append(int(year))
 
     where_sql = "WHERE " + " AND ".join(where) if where else ""
@@ -397,8 +397,21 @@ def revenue_report_data():
             il.igst_rate
 
         FROM invoice_header ih
-        LEFT JOIN invoice_sap_staging iss
-            ON iss.invoice_id = ih.id
+
+        LEFT JOIN LATERAL (
+            SELECT
+                customer_code,
+                irn_number,
+                ack_number,
+                irn_date,
+                qr_code
+            FROM invoice_sap_staging
+            WHERE invoice_id = ih.id
+            ORDER BY
+                (irn_number IS NOT NULL AND irn_number <> '') DESC,
+                id DESC
+            LIMIT 1
+        ) iss ON TRUE
 
         LEFT JOIN LATERAL (
             SELECT
@@ -420,7 +433,7 @@ def revenue_report_data():
 
         {where_sql}
 
-        ORDER BY ih.invoice_date DESC NULLS LAST, ih.id DESC
+        ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
     """, params)
 
     rows = [dict(r) for r in cur.fetchall()]
@@ -460,7 +473,11 @@ def revenue_report_data():
             'qty': r.get('quantity'),
             'rate': r.get('rate'),
 
-            'tax_category': 'IGST' if igst > 0 else 'Intra-state',
+            'tax_category': (
+                'IGST' if igst > 0
+                else 'CGST+SGST' if (cgst > 0 or sgst > 0)
+                else ''
+            ),
             'tax_rate': tax_rate,
 
             'basic_value': basic,
@@ -477,6 +494,14 @@ def revenue_report_data():
 
             'irn': r.get('irn_number') or '',
             'irn_date': (
+                r.get('irn_date').strftime('%Y-%m-%d')
+                if r.get('irn_date')
+                else ''
+            ),
+            # invoice_sap_staging has no separate ack_date column — the IRN
+            # is generated at the moment of acknowledgment, so irn_date
+            # doubles as the ack date.
+            'ack_date': (
                 r.get('irn_date').strftime('%Y-%m-%d')
                 if r.get('irn_date')
                 else ''
