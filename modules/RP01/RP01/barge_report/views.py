@@ -310,6 +310,40 @@ DATE_COLUMNS = {
     'aweigh_gull_island_empty',
 }
 
+from datetime import datetime, date
+
+
+def _ensure_datetime(val):
+    """Coerce val into a real datetime object, or return None.
+
+    This was the missing piece causing the red-line error — the route
+    called it but it was never defined in your file. Add this alongside
+    your other helpers (_fmt, _tat, _fmt_datetime).
+    """
+    if val is None or val == "":
+        return None
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date):
+        return datetime(val.year, val.month, val.day)
+    if isinstance(val, str):
+        s = val.strip()
+        for fmt in (
+            "%d-%m-%Y %H:%M",
+            "%d-%m-%Y %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+        ):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+        return None
+    return None
+
+
 @bp.route('/api/module/RP01/barge-report/download')
 @login_required
 def barge_report_download():
@@ -323,7 +357,7 @@ def barge_report_download():
         return Response('Invalid ldud_ids', status=400)
 
     conn = get_db()
-    cur  = get_cursor(conn)
+    cur = get_cursor(conn)
     try:
         cur.execute("""
             SELECT
@@ -359,14 +393,23 @@ def barge_report_download():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    thin      = Side(style='thin', color='000000')
-    bdr       = Border(left=thin, right=thin, top=thin, bottom=thin)
-    hdr_fill  = PatternFill('solid', fgColor='C0C0C0')
-    hdr_font  = Font(name='Calibri', bold=True,  size=10)
+    thin = Side(style='thin', color='000000')
+    bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    hdr_fill = PatternFill('solid', fgColor='C0C0C0')   # grey — normal headers
+    hdr_font = Font(name='Calibri', bold=True, size=10)
     cell_font = Font(name='Calibri', bold=False, size=10)
+
+    # ── Colour for the duration / TAT ("hrs") columns, both header and
+    # data cells, so they stand out from the plain date/text columns.
+    HRS_HDR_FILL = PatternFill('solid', fgColor='FFD966')   # gold header
+    HRS_CELL_FILL = PatternFill('solid', fgColor='FFF2CC')  # pale yellow data cells
+    TAT_HDR_FILL = PatternFill('solid', fgColor='F4B183')   # orange header for the final TAT column
+    TAT_CELL_FILL = PatternFill('solid', fgColor='FCE4D6')  # pale orange data cells
+
     ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    lft = Alignment(horizontal='left',   vertical='center', wrap_text=True)
-    rgt = Alignment(horizontal='right',  vertical='center')
+    lft = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    rgt = Alignment(horizontal='right', vertical='center')
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -376,7 +419,10 @@ def barge_report_download():
     ws.row_dimensions[1].height = 24
     for col_idx, (label, _) in enumerate(_BARGE_COLUMNS, 1):
         c = ws.cell(1, col_idx, label)
-        c.font = hdr_font; c.fill = hdr_fill; c.border = bdr; c.alignment = ctr
+        c.font = hdr_font
+        c.fill = hdr_fill
+        c.border = bdr
+        c.alignment = ctr
         ws.column_dimensions[get_column_letter(col_idx)].width = max(14, len(label) + 2)
 
     for row_idx, row in enumerate(xl_rows, 2):
@@ -386,10 +432,102 @@ def barge_report_download():
             if val is None:
                 val = ""
             elif key in DATE_COLUMNS:
-                val = _fmt_datetime(val)
+                val = _fmt_datetime(val)   # Sheet 1 stays display-text, by design
             c = ws.cell(row_idx, col_idx, val)
-            c.font = cell_font; c.border = bdr
+            c.font = cell_font
+            c.border = bdr
             c.alignment = rgt if key == 'discharge_quantity' else lft
+
+    # ── SHEET 2: TAT Calculation (same rows, real formulas) ────────────
+    # (label, source_key, kind)
+    #   kind = 'text' | 'date' | 'number' | ('dur', end_col_letter, start_col_letter)
+    TAT_SHEET_COLUMNS = [
+        ('Doc No',                   'doc_num',                  'text'),
+        ('Vessel Name',              'vessel_name',              'text'),
+        ('Operation',                'operation_type',           'text'),
+        ('NOR Tendered',             'nor_tendered',              'date'),
+        ('Agent',                    'vessel_agent_name',        'text'),
+        ('Barge',                    'barge_name',                'text'),
+        ('Cargo',                    'cargo_name',                'text'),
+        ('MBPT/PLA',                 'bpt_bfl',                   'text'),
+        ('Qty (MT)',                 'discharge_quantity',      'number'),
+        ('Crane Loaded From',        'crane_loaded_from',         'text'),
+        ('Port Crane',               'port_crane',                'text'),
+        ('Trip Start',               'trip_start',                'date'),   # L
+        ('Alongside Vessel (MV)',    'along_side_vessel',         'date'),   # M
+        ('Empty Transit Time',       None,               ('dur', 'M', 'L')), # N
+        ('Loading Start',            'commenced_loading',         'date'),   # O
+        ('MV Waiting Time',          None,               ('dur', 'O', 'M')), # P
+        ('Loading End',              'completed_loading',         'date'),   # Q
+        ('Loading Time',             None,               ('dur', 'Q', 'O')), # R
+        ('Cast Off MV',              'cast_off_mv',                'date'),  # S
+        ('Loading Departure Time',   None,               ('dur', 'S', 'Q')), # T
+        ('Alongside Berth',          'along_side_berth',          'date'),   # U
+        ('Loaded Transit Time',      None,               ('dur', 'U', 'S')), # V
+        ('Jetty Waiting Time',       None,               ('dur', 'X', 'U')), # W
+        ('Discharge Start (Berth)',  'commence_discharge_berth',  'date'),   # X
+        ('Discharge End (Berth)',    'completed_discharge_berth', 'date'),   # Y
+        ('Unloading Time',           None,               ('dur', 'Y', 'X')), # Z
+        ('Cast Off Berth',           'cast_off_berth',            'date'),   # AA
+        ('Cast Off Port',            'cast_off_port',              'date'), # AB
+        ('Unloading Departure Time', None,               ('dur', 'AB', 'Y')),# AC
+        ('TAT (hrs)',                None,               ('dur', 'AA', 'L')),# AD
+    ]
+
+    # columns that are duration/"hrs" columns (get the gold/yellow treatment)
+    DUR_LABELS = {label for label, _, kind in TAT_SHEET_COLUMNS if isinstance(kind, tuple)}
+    TAT_LABEL = 'TAT (hrs)'   # the final total gets its own colour
+
+    ws2 = wb.create_sheet('TAT Calculation')
+    ws2.freeze_panes = 'A2'
+    ws2.row_dimensions[1].height = 24
+
+    for col_idx, (label, _, _) in enumerate(TAT_SHEET_COLUMNS, 1):
+        c = ws2.cell(1, col_idx, label)
+        c.font = hdr_font
+        c.border = bdr
+        c.alignment = ctr
+        if label == TAT_LABEL:
+            c.fill = TAT_HDR_FILL
+        elif label in DUR_LABELS:
+            c.fill = HRS_HDR_FILL
+        else:
+            c.fill = hdr_fill
+        ws2.column_dimensions[get_column_letter(col_idx)].width = max(14, len(label) + 2)
+
+    for row_idx, row in enumerate(xl_rows, 2):
+        for col_idx, (label, key, kind) in enumerate(TAT_SHEET_COLUMNS, 1):
+            c = ws2.cell(row_idx, col_idx)
+            c.font = cell_font
+            c.border = bdr
+            c.alignment = lft
+
+            if kind == 'text':
+                c.value = row.get(key) or ""
+
+            elif kind == 'number':
+                c.value = row.get(key)
+                c.alignment = rgt
+
+            elif kind == 'date':
+                dt = _ensure_datetime(row.get(key))
+                if dt is not None:
+                    c.value = dt                          # real datetime -> real Excel date
+                    c.number_format = 'dd-mm-yyyy hh:mm'
+                else:
+                    c.value = ""
+                    if row.get(key):
+                        # There was a value but we couldn't parse it — flag
+                        # it visually instead of silently writing bad text.
+                        c.fill = PatternFill('solid', fgColor='FFFF00')
+
+            elif isinstance(kind, tuple) and kind[0] == 'dur':
+                _, end_col, start_col = kind
+                end_ref, start_ref = f'{end_col}{row_idx}', f'{start_col}{row_idx}'
+                c.value = f'=({end_ref}-{start_ref})*24'
+                c.number_format = '0.00'
+                c.alignment = rgt
+                c.fill = TAT_CELL_FILL if label == TAT_LABEL else HRS_CELL_FILL
 
     buf = io.BytesIO()
     wb.save(buf)

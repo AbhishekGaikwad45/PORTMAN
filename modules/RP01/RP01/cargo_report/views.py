@@ -985,44 +985,31 @@ else '',
         # row of each group, with 0 on the rest, so values legitimately differ.
         merge_start = data_start
 
-        for row_no in range(data_start + 1, data_start + len(rows) + 1):
-
+        for row_no in range(data_start + 1, data_start + len(rows)):
             prev_key = header_keys[row_no - 1 - data_start]
             curr_key = header_keys[row_no - data_start]
 
             if prev_key != curr_key:
-
                 if row_no - merge_start > 1:
-
                     ws.merge_cells(
                         start_row=merge_start,
                         start_column=8,
                         end_row=row_no - 1,
                         end_column=8
                     )
-
-                    ws.cell(
-                        row=merge_start,
-                        column=8
-                    ).alignment = align_ctr
-
+                    ws.cell(row=merge_start, column=8).alignment = align_ctr
                 merge_start = row_no
 
         last_row = data_start + len(rows) - 1
 
         if last_row - merge_start >= 1:
-
             ws.merge_cells(
                 start_row=merge_start,
                 start_column=8,
                 end_row=last_row,
                 end_column=8
             )
-
-            ws.cell(
-                row=merge_start,
-                column=8
-            ).alignment = align_ctr
+            ws.cell(row=merge_start, column=8).alignment = align_ctr
 
         # ── Total row ─────────────────────────────────────────
         total_row = data_start + len(rows)

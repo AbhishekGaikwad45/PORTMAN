@@ -248,6 +248,20 @@ def _todays_notes():
             notes = []
     return notes or []
 
+def _current_shift_incharge():
+    """Shift in-charge for the current shift, from barge_position_report."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT shift_incharge FROM barge_position_report
+        WHERE report_date = %s AND shift = %s
+    """, (date.today().strftime('%Y-%m-%d'), _current_shift_code()))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return ''
+    return (row['shift_incharge'] or '').strip()
+
 
 def _cargo_by_type(start_date_s, end_date_s):
     """Live cargo-type breakdown from LUEU for a date range (inclusive)."""
@@ -534,7 +548,13 @@ def _cumulative_by_type(today_s):
 
 
 def _top_delays_today():
-    """Today's delays (all shifts), summed per (equipment, reason) and ranked."""
+    """Today's delays (all shifts), summed per (equipment/system, reason) and ranked.
+
+    Maintenance delays are tied to a system (RMHS component), not a piece of
+    loading/unloading equipment, so for those rows use system_name instead
+    of equipment_name — mirrors the Equipment vs System distinction in the
+    Shift Report delay sheet.
+    """
     today_s = date.today().strftime('%Y-%m-%d')
     delays = _fetch_delays(today_s, 'ALL')
     totals = {}
@@ -542,8 +562,12 @@ def _top_delays_today():
         name = (d.get('delay_name') or '(blank)').strip()
         if name.lower() in ('idle', 'unloading'):
             continue
-        equip = (d.get('equipment_name') or '').strip()
-        key = f"{equip} — {name}" if equip else name
+        delay_type = (d.get('delay_type') or '').strip().lower().replace(' ', '')
+        if delay_type == 'maintenancedelays':
+            source = (d.get('system_name') or '').strip()
+        else:
+            source = (d.get('equipment_name') or '').strip()
+        key = f"{source} — {name}" if source else name
         totals[key] = totals.get(key, 0) + int(d.get('total_minutes') or 0)
     ranked = [{'delay_name': k, 'minutes': v} for k, v in totals.items() if v > 0]
     ranked.sort(key=lambda x: x['minutes'], reverse=True)
@@ -616,6 +640,7 @@ def port_overview_data():
         'layout':      layout,
         'tide':        _fetch_tide_data(now, now),
         'notes':       _todays_notes(),
+        'shift_incharge':  _current_shift_incharge(),
         'cargo_cards': cards,
         'upcoming':    _upcoming_arrivals(),
         'delays':      _top_delays_today(),

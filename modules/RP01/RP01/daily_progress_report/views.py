@@ -2793,7 +2793,6 @@ def mbc_expected_report():
     print("REPORT DATE:", report_date)
 
     if not report_date:
-
         return jsonify({
             "success": False,
             "message": "Report date required"
@@ -2807,17 +2806,11 @@ def mbc_expected_report():
         query = """
 
         SELECT
-
             mh.id,
-
             mh.mbc_name,
-
             mh.cargo_name,
-
             mh.bl_quantity,
-
             mh.load_port,
-
             lpl.eta
 
         FROM mbc_header mh
@@ -2830,14 +2823,14 @@ def mbc_expected_report():
 
         WHERE
 
-            -- Reached load port
-            NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+            -- Cast off from load port
+            NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
 
             -- Not yet arrived at Gull Island
             AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
 
             AND DATE(
-                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+                NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp
             )
             BETWEEN
                 (%s::date - INTERVAL '1 day')
@@ -2845,8 +2838,7 @@ def mbc_expected_report():
                 %s::date
 
         ORDER BY
-
-            NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+            NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp
 
         """
 
@@ -2871,20 +2863,18 @@ def mbc_expected_report():
 
         for row in rows:
 
-            eta_gull = _parse_flexible_dt(row["eta"], "%d-%m-%Y %H:%M")
+            eta_gull = _parse_flexible_dt(
+                row["eta"],
+                "%d-%m-%Y %H:%M"
+            )
 
             data.append({
 
                 "mbc_no": sr_no,
-
                 "mbc_name": row["mbc_name"] or "",
-
                 "cargo": row["cargo_name"] or "",
-
                 "bl_qty": int(row["bl_quantity"] or 0),
-
                 "load_port": row["load_port"] or "",
-
                 "eta_mumbai": eta_gull
 
             })
@@ -2894,7 +2884,6 @@ def mbc_expected_report():
         return jsonify({
 
             "success": True,
-
             "data": data
 
         })
@@ -2907,7 +2896,6 @@ def mbc_expected_report():
         return jsonify({
 
             "success": False,
-
             "message": str(e)
 
         })
@@ -4937,7 +4925,8 @@ def daily_progress_report_excel():
         def compute_ww_hours(ldud_id, discharge_started, discharge_completed, day_label):
             """Gross hours for the 8am(day_label)->8am(day_label+1) window,
             clipped to [discharge_started, discharge_completed or ongoing],
-            minus overlapping Mother Vessel Agent / Force Majeure / MBP delay time."""
+            minus overlapping Mother Vessel Agent / Force Majeure / MBP delay time,
+            with crane-count weighting (matches monthly_cargo_report)."""
             if discharge_started is None:
                 return None
 
@@ -4949,17 +4938,31 @@ def daily_progress_report_excel():
             gross_start = max(discharge_started, day_win_start)
             gross_end = min(discharge_completed, day_win_end) if discharge_completed else day_win_end
 
-            gross_seconds = (gross_end - gross_start).total_seconds()
-            gross_hours = max(gross_seconds / 3600, 0)
+            gross_hours = max((gross_end - gross_start).total_seconds() / 3600, 0)
             gross_hours = min(gross_hours, 24)
 
             deduction_hours = 0
-            for delay_start, delay_end, _crane_count in delay_map.get(ldud_id, []):
+            for delay_start, delay_end, crane_count in delay_map.get(ldud_id, []):
                 clip_start = max(delay_start, day_win_start)
                 clip_end = min(delay_end, day_win_end)
-                overlap = (clip_end - clip_start).total_seconds() / 3600
-                if overlap > 0:
-                    deduction_hours += overlap
+                overlap_hours = (clip_end - clip_start).total_seconds() / 3600
+
+                if overlap_hours <= 0:
+                    continue
+
+                if crane_count == 1:
+                    adjusted_hours = overlap_hours / 4
+                elif crane_count == 2:
+                    adjusted_hours = overlap_hours / 2
+                elif crane_count == 3:
+                    adjusted_hours = overlap_hours * 3 / 4
+                else:  # 4 cranes (or crane_count == 0 / unspecified)
+                    adjusted_hours = overlap_hours
+
+                deduction_hours += adjusted_hours
+
+            # Do not allow deduction greater than gross working hours
+            deduction_hours = min(deduction_hours, gross_hours)
 
             return max(gross_hours - deduction_hours, 0)
 
@@ -5439,6 +5442,47 @@ LEFT JOIN ldud_vessel_operations lco
         """, {"live_start": live_start, "data_date": data_date, "month_start": cargo_month_start})
         cargo_live_rows = cur.fetchall()
 
+        # ---------------------------------------------------------------
+        # Per-equipment totals (day / month), summed across ALL cargo
+        # types. Same query as barge_discharge_report() uses to feed
+        # the UI's "Total" / "Total - This Month" columns.
+        # ---------------------------------------------------------------
+        cur.execute(f"""
+            SELECT
+                {EQUIP_EXPR} AS equipment,
+                SUM(CASE WHEN entry_date::date = %(data_date)s::date
+                    THEN quantity ELSE 0 END) AS day_total,
+                SUM(CASE WHEN entry_date::date BETWEEN %(month_start)s::date AND %(data_date)s::date
+                    THEN quantity ELSE 0 END) AS month_total
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND quantity IS NOT NULL
+            GROUP BY {EQUIP_EXPR}
+        """, {"data_date": data_date, "month_start": cargo_month_start})
+        cargo_equipment_totals_rows = cur.fetchall()
+
+        # ---------------------------------------------------------------
+        # PRIOR-FY category weights only (entry_date < live_start) — used
+        # ONLY as a distribution shape to split the hardcoded baseline
+        # (FY2012-13 through FY2025-2026) proportionally across each
+        # cargo_type's individual categories. Same query as
+        # barge_discharge_report().
+        # ---------------------------------------------------------------
+        cur.execute("""
+            SELECT
+                COALESCE(vc.cargo_type, 'Others') AS cargo_type,
+                COALESCE(vc.cargo_category, 'Others') AS cargo_category,
+                SUM(COALESCE(l.quantity, 0)) AS weight_total
+            FROM lueu_lines l
+            LEFT JOIN vessel_cargo vc
+                ON UPPER(TRIM(vc.cargo_name)) = UPPER(TRIM(l.cargo_name))
+            WHERE l.is_deleted IS NOT TRUE
+              AND l.quantity IS NOT NULL
+              AND NULLIF(BTRIM(l.entry_date), '') IS NOT NULL
+              AND TO_DATE(BTRIM(l.entry_date), 'YYYY-MM-DD') < %(live_start)s::date
+            GROUP BY vc.cargo_type, vc.cargo_category
+        """, {"live_start": live_start})
+        cargo_cumulative_rows = cur.fetchall()
+
         cargo_hierarchy = {}
         for r in master_cargo_rows:
             ctype = r['cargo_type']
@@ -5474,6 +5518,17 @@ LEFT JOIN ldud_vessel_operations lco
             equipment_rows.setdefault(equip, {k: 0 for k in all_keys})
             equipment_rows[equip][key] = int(r['day_qty'] or 0)
 
+        # ---------------------------------------------------------------
+        # Per-equipment Total / Total-This-Month, seeded with the full
+        # equipment list (zeros) same as barge_discharge_report().
+        # ---------------------------------------------------------------
+        equipment_totals = {r['equipment']: {"total_day": 0, "total_month": 0} for r in master_equipment_rows}
+        for r in cargo_equipment_totals_rows:
+            equipment_totals[r['equipment']] = {
+                "total_day": int(r['day_total'] or 0),
+                "total_month": int(r['month_total'] or 0),
+            }
+
         historic_totals = {}
         for r in cargo_historic_rows:
             key = cat_key(r['cargo_type'], r['cargo_category'])
@@ -5493,6 +5548,52 @@ LEFT JOIN ldud_vessel_operations lco
                 year_totals[key] = hist_val
                 month_totals.setdefault(key, 0)
 
+        # ---------------------------------------------------------------
+        # Total Cumulative till date = hardcoded baseline (through Mar
+        # 2026, one number per cargo_type) split proportionally across
+        # that type's categories using prior-FY weights, PLUS the current
+        # FY total (year_totals) for that category. Same logic and same
+        # baseline numbers as barge_discharge_report().
+        # ---------------------------------------------------------------
+        weight_by_category = {}
+        weight_by_type = {}
+        for r in cargo_cumulative_rows:
+            ctype = r['cargo_type']
+            key = cat_key(ctype, r['cargo_category'])
+            qty = float(r['weight_total'] or 0)
+            weight_by_category[key] = qty
+            weight_by_type[ctype] = weight_by_type.get(ctype, 0) + qty
+
+        BASELINE_TILL_MAR_2026 = {
+            "IBRM": 116229319,
+            "FLUXES": 24038328,
+            "CBRM": 52438887,
+            "CLINKER": 3453541,
+            "SLAG": 1439086,
+            "FINISH GOODS": 157549,
+            "OTHER": 354512,
+            "OTHERS": 354512,
+        }
+
+        cumulative_totals = {}
+        for ctype, ccats in cargo_hierarchy.items():
+            baseline_type_total = BASELINE_TILL_MAR_2026.get(ctype.strip().upper())
+            type_weight = weight_by_type.get(ctype, 0)
+
+            for ccat in ccats:
+                key = cat_key(ctype, ccat)
+                current_fy_amt = year_totals.get(key, 0)
+
+                if baseline_type_total and type_weight > 0:
+                    cat_weight = weight_by_category.get(key, 0)
+                    share = baseline_type_total * (cat_weight / type_weight)
+                elif baseline_type_total:
+                    share = baseline_type_total / len(ccats) if ccats else 0
+                else:
+                    share = 0
+
+                cumulative_totals[key] = int(round(share)) + int(current_fy_amt)
+
         cargo_columns = [
             cat_key(ctype, ccat)
             for ctype, ccats in cargo_hierarchy.items()
@@ -5505,6 +5606,9 @@ LEFT JOIN ldud_vessel_operations lco
         }
 
         if cargo_columns:
+            total_col = 3 + len(cargo_columns)
+            month_total_col = total_col + 1
+
             type_row = row_no
             cname_row = row_no + 1
             cur_col = 3
@@ -5517,6 +5621,10 @@ LEFT JOIN ldud_vessel_operations lco
                     header(cname_row, cur_col, ccat)
                     cur_col += 1
 
+            # "Total" / "Total - This Month" header columns
+            header(cname_row, total_col, 'Total')
+            header(cname_row, month_total_col, 'Total - This Month')
+
             row_no = cname_row + 1
             for equipment, qty_map in equipment_rows.items():
                 caption(row_no, 1, equipment, span=2)
@@ -5524,6 +5632,10 @@ LEFT JOIN ldud_vessel_operations lco
                 for key in cargo_columns:
                     data(row_no, cur_col, qty_map.get(key, 0))
                     cur_col += 1
+
+                eq_totals = equipment_totals.get(equipment, {"total_day": 0, "total_month": 0})
+                data(row_no, total_col, eq_totals["total_day"])
+                data(row_no, month_total_col, eq_totals["total_month"])
                 row_no += 1
 
             caption(row_no, 1, 'Total For The Day', span=2, font=header_font)
@@ -5531,6 +5643,8 @@ LEFT JOIN ldud_vessel_operations lco
             for key in cargo_columns:
                 header(row_no, cur_col, sum(qm.get(key, 0) for qm in equipment_rows.values()))
                 cur_col += 1
+            header(row_no, total_col, sum(v["total_day"] for v in equipment_totals.values()))
+            header(row_no, month_total_col, sum(v["total_month"] for v in equipment_totals.values()))
             row_no += 1
 
             caption(row_no, 1, 'Total Receipts for the Month', span=2, font=header_font)
@@ -5538,6 +5652,8 @@ LEFT JOIN ldud_vessel_operations lco
             for key in cargo_columns:
                 header(row_no, cur_col, month_totals.get(key, 0))
                 cur_col += 1
+            header(row_no, total_col, '')
+            header(row_no, month_total_col, sum(v["total_month"] for v in equipment_totals.values()))
             row_no += 1
 
             fy_label = f"FY {str(fy_start_year)[-2:]}-{str(fy_start_year + 1)[-2:]}"
@@ -5546,6 +5662,18 @@ LEFT JOIN ldud_vessel_operations lco
             for key in cargo_columns:
                 header(row_no, cur_col, year_totals.get(key, 0))
                 cur_col += 1
+            header(row_no, total_col, sum(year_totals.values()))
+            header(row_no, month_total_col, '')
+            row_no += 1
+
+            # ---- Total Cumulative till date ----
+            caption(row_no, 1, 'Total Cumulative till date', span=2, font=header_font)
+            cur_col = 3
+            for key in cargo_columns:
+                header(row_no, cur_col, cumulative_totals.get(key, 0))
+                cur_col += 1
+            header(row_no, total_col, sum(cumulative_totals.values()))
+            header(row_no, month_total_col, '')
             row_no += 2
         else:
             caption(row_no, 1, 'No barge discharge recorded for this window', span=2)
@@ -5702,6 +5830,7 @@ LEFT JOIN ldud_vessel_operations lco
             ["SR.NO.", "M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "Arrived @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "arrived_mumbai"],
         )
+        
 
         cur.execute("""
             SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
@@ -5710,10 +5839,35 @@ LEFT JOIN ldud_vessel_operations lco
             LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
             WHERE
                 NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
+
+                -- Discharge must NOT have started yet — once
+                -- unloading_commenced is set, this MBC belongs in the
+                -- "MBC'S DISCHARGE COMPLETED" section, not "arrived".
+                AND NULLIF(TRIM(dpl.unloading_commenced), '') IS NULL
+
                 AND DATE(NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
+
+                -- Belt-and-braces: explicitly exclude any MBC that the
+                -- "MBC'S DISCHARGE COMPLETED" block above would already
+                -- show for this same report_date window (unloading
+                -- commenced OR completed falling inside window_start ->
+                -- window_end).
+                AND NOT (
+                    (
+                        NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                    )
+                    OR
+                    (
+                        NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                    )
+                )
             ORDER BY NULLIF(TRIM(dpl.vessel_arrival_port), '')::timestamp
-        """, (report_date, report_date))
+        """, (report_date, report_date, window_start, window_end, window_start, window_end))
 
         mbc_arrived_rows = [{
             "mbc_name": r["mbc_name"] or "",
@@ -5723,6 +5877,7 @@ LEFT JOIN ldud_vessel_operations lco
             "arrived_dharamtar": _parse_flexible(r["vessel_arrival_port"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
 
+        # >>> ADD THIS: render the MBC arrived table (was being built but never shown)
         simple_table(
             "MBC ARRIVED AT DHARAMTAR",
             mbc_arrived_rows,
@@ -5730,6 +5885,7 @@ LEFT JOIN ldud_vessel_operations lco
             ["mbc_name", "cargo", "bl_qty", "load_port", "arrived_dharamtar"],
         )
 
+        # >>> ADD THIS: the query that builds upcoming_rows was missing entirely
         cur.execute("""
             SELECT vn.id, vh.vessel_name,
                    STRING_AGG(DISTINCT TRIM(vcd.cargo_name), ', ' ORDER BY TRIM(vcd.cargo_name)) AS cargo,
@@ -5757,17 +5913,29 @@ LEFT JOIN ldud_vessel_operations lco
             ["SR.NO.","M.Vessel Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
             ["vessel_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
+        # =====================================================
+        # MBC EXPECTED AT MUMBAI
+        # =====================================================
 
         cur.execute("""
-            SELECT mh.mbc_name, mh.cargo_name, mh.bl_quantity, mh.load_port,
-                   dpl.arrival_gull_island
+            SELECT
+                mh.mbc_name,
+                mh.cargo_name,
+                mh.bl_quantity,
+                mh.load_port,
+                lpl.eta
             FROM mbc_header mh
-            LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
+            LEFT JOIN mbc_discharge_port_lines dpl
+                ON dpl.mbc_id = mh.id
+            LEFT JOIN mbc_load_port_lines lpl
+                ON lpl.mbc_id = mh.id
             WHERE
-                NULLIF(TRIM(dpl.arrival_gull_island), '') IS NOT NULL
-                AND DATE(NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp)
+                NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+                AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
+                AND DATE(NULLIF(TRIM(dpl.reached_load_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
-            ORDER BY NULLIF(TRIM(dpl.arrival_gull_island), '')::timestamp
+            ORDER BY
+                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
         """, (report_date, report_date))
 
         mbc_expected_rows = [{
@@ -5775,13 +5943,13 @@ LEFT JOIN ldud_vessel_operations lco
             "cargo": r["cargo_name"] or "",
             "bl_qty": int(r["bl_quantity"] or 0),
             "load_port": r["load_port"] or "",
-            "eta_mumbai": _parse_flexible(r["arrival_gull_island"], "%d-%m-%Y %H:%M"),
+            "eta_mumbai": _parse_flexible(r["eta"], "%d-%m-%Y %H:%M"),
         } for r in cur.fetchall()]
 
         simple_table(
             "MBC EXPECTED AT MUMBAI",
             mbc_expected_rows,
-            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load  Port", "ETA @ Mumbai"],
+            ["SR.NO.", "MBC Name", "Cargo", "B/L Qty. (MT)", "Load Port", "ETA @ Mumbai"],
             ["mbc_name", "cargo", "bl_qty", "load_port", "eta_mumbai"],
         )
 
