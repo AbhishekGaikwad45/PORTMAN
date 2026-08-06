@@ -163,19 +163,22 @@ html, body {
 .vessel.waiting { background:linear-gradient(160deg,#43e6f1,#0891b2); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(8,145,178,.5)); }
 .vessel.completed { background:linear-gradient(160deg,#facc15,#ca8a04); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(234,179,8,.55)); }
 /* ── UPCOMING TILE (floats over the image, top-left is water/land) ── */
+/* Scales with --lbl too, so it keeps the same footprint on the map at any zoom. */
 .upcoming {
-  display:none; position:absolute; left:8px; top:8px; z-index:5;
-  flex-direction:column; gap:3px; max-width:calc(100% - 16px); max-height:42%; overflow-y:auto;
-  padding:7px 10px; border-radius:var(--r-md);
+  display:none; position:absolute; z-index:5;
+  left:calc(8px * var(--lbl,1)); top:calc(8px * var(--lbl,1));
+  flex-direction:column; gap:calc(3px * var(--lbl,1));
+  max-width:calc(100% - 16px * var(--lbl,1)); max-height:42%; overflow-y:auto;
+  padding:calc(7px * var(--lbl,1)) calc(10px * var(--lbl,1)); border-radius:var(--r-md);
   background:rgba(11,26,46,.6); backdrop-filter:blur(7px);
   border:1px solid rgba(255,255,255,.16); box-shadow:0 6px 18px rgba(0,0,0,.35);
 }
 .up-lbl {
-  font-family:'Space Grotesk',sans-serif; font-size:8px; font-weight:700;
+  font-family:'Space Grotesk',sans-serif; font-size:calc(8px * var(--lbl,1)); font-weight:700;
   letter-spacing:.9px; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:2px;
 }
-.up-pill { display:flex; align-items:center; gap:6px; font-size:9.5px; font-weight:600; color:#fff; white-space:nowrap; }
-.up-pill::before { content:''; width:5px; height:5px; border-radius:50%; background:#FBBF24; flex-shrink:0; }
+.up-pill { display:flex; align-items:center; gap:calc(6px * var(--lbl,1)); font-size:calc(9.5px * var(--lbl,1)); font-weight:600; color:#fff; white-space:nowrap; }
+.up-pill::before { content:''; width:calc(5px * var(--lbl,1)); height:calc(5px * var(--lbl,1)); border-radius:50%; background:#FBBF24; flex-shrink:0; }
 .up-pill.MBC::before { background:#43E6F1; }
 .up-pill small { font-family:'JetBrains Mono',monospace; font-weight:500; color:rgba(255,255,255,.58); margin-left:auto; padding-left:8px; }
 
@@ -184,8 +187,13 @@ html, body {
    chip's centre, so the -50% must stay in CSS — hover mustn't touch transform. */
 .vessel-name {
   position:absolute; transform:translateY(-50%);
-  font-family:'Inter',sans-serif; font-size:8.5px; font-weight:700; color:#0F1A2B; background:rgba(255,255,255,.94);
-  padding:2px 7px; border-radius:20px; white-space:nowrap; cursor:pointer; line-height:1.3;
+  font-family:'Inter',sans-serif; font-weight:700; color:#0F1A2B; background:rgba(255,255,255,.94);
+  /* --lbl (set on #berthStage by fitStage) ties the chip to the image's scale,
+     so browser zoom can't grow the column relative to the map. */
+  font-size:calc(8.5px * var(--lbl,1));
+  padding:calc(2px * var(--lbl,1)) calc(7px * var(--lbl,1));
+  border-radius:calc(20px * var(--lbl,1));
+  white-space:nowrap; cursor:pointer; line-height:1.3;
   box-shadow:0 2px 6px rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.7); transition:box-shadow .15s;
 }
 .vessel-name:hover { box-shadow:0 0 0 2px var(--ocean), 0 2px 6px rgba(0,0,0,.28); }
@@ -483,7 +491,13 @@ function fmtMins(m) {
 let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layout.image_size
 
 const MAX_IMG_COL = 520;  // don't let a tall window starve the right column
+const LBL_REF = 460;      // stage width the chip sizes below were drawn against
 let stageW = 0, stageH = 0, lastLayout = null;
+
+// Chips are sized in `--lbl` units so they scale with the image, exactly like
+// the hulls' % sizing. Browser zoom shrinks the stage in CSS px while a fixed
+// px font does not, which is what pushed the column off the image at >100%.
+const lblScale = () => stageW / LBL_REF;
 
 function fitStage() {
   const vp = document.getElementById('berthViewport');
@@ -496,6 +510,7 @@ function fitStage() {
   stageW = w; stageH = h;
   st.style.width  = w + 'px';
   st.style.height = h + 'px';
+  st.style.setProperty('--lbl', (w / LBL_REF).toFixed(4));
   document.getElementById('image-col').style.width = (w + 2) + 'px';  // +2 panel borders
   return true;
 }
@@ -507,7 +522,7 @@ new ResizeObserver(() => { if (fitStage() && lastLayout) renderBerths(lastLayout
    — neighbouring berths' columns collided — so every chip goes in one list and
    gets pushed down until it clears the one above. */
 function placeLabels(labels, overlay) {
-  const X = 4, PAD = 6;
+  const k = lblScale(), X = 4 * k, PAD = 6 * k;
   // Order by berth down the river, then by bank, so one berth's vessels stay a
   // contiguous block and the extra gap reads as a berth boundary.
   labels.sort((p, q) => p.berthY - q.berthY || p.slot - q.slot);
@@ -516,7 +531,7 @@ function placeLabels(labels, overlay) {
   // Give up the berth gaps, then tighten the pitch, rather than run off the
   // image — a chip drawn outside the stage is worse than a snug column.
   const avail = stageH - 2 * PAD;
-  let pitch = 18, berthGap = 8;             // pitch > chip height (~17px)
+  let pitch = 18 * k, berthGap = 8 * k;     // pitch > chip height (~17px at k=1)
   if (labels.length * pitch + breaks * berthGap > avail) berthGap = 0;
   if (labels.length * pitch > avail) pitch = avail / labels.length;
 
