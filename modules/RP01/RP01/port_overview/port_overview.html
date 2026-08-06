@@ -155,20 +155,22 @@ html, body {
 .up-pill.MBC::before { background:#43E6F1; }
 .up-pill small { font-family:'JetBrains Mono',monospace; font-weight:500; color:rgba(255,255,255,.58); margin-left:auto; padding-left:8px; }
 
-/* Chips sit outboard (the empty water side) and stack in one column per berth.
-   JS owns the transform, so hover must not touch it or the chip leaves its row. */
+/* All chips share one left-edge column (see placeLabels) with a leader line to
+   the hull. Left-aligned so a long name can't run off the image. `top` is the
+   chip's centre, so the -50% must stay in CSS — hover mustn't touch transform. */
 .vessel-name {
-  position:absolute;
+  position:absolute; transform:translateY(-50%);
   font-family:'Inter',sans-serif; font-size:8.5px; font-weight:700; color:#0F1A2B; background:rgba(255,255,255,.94);
   padding:2px 7px; border-radius:20px; white-space:nowrap; cursor:pointer; line-height:1.3;
   box-shadow:0 2px 6px rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.7); transition:box-shadow .15s;
 }
-.vessel-name::after {  /* arrow tip, pointing back across the banks */
-  content:''; position:absolute; left:100%; top:50%; margin-top:-4px;
-  border:4px solid transparent; border-left-color:rgba(255,255,255,.94);
-}
 .vessel-name:hover { box-shadow:0 0 0 2px var(--ocean), 0 2px 6px rgba(0,0,0,.28); }
 .vessel-name b { color:var(--ocean); }
+.vessel-lead {
+  position:absolute; height:1px; transform-origin:0 50%; pointer-events:none;
+  background:linear-gradient(90deg, rgba(255,255,255,.85), rgba(255,255,255,.3));
+  box-shadow:0 0 2px rgba(0,0,0,.55);
+}
 #vesselCard {
   position:fixed; z-index:2000; width:230px; background:var(--surface);
   border:1px solid var(--border-2); border-radius:var(--r-md); box-shadow:var(--shadow-lg);
@@ -447,6 +449,7 @@ function fmtMins(m) {
 let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layout.image_size
 
 const MAX_IMG_COL = 520;  // don't let a tall window starve the right column
+let stageW = 0, stageH = 0, lastLayout = null;
 
 function fitStage() {
   const vp = document.getElementById('berthViewport');
@@ -454,18 +457,62 @@ function fitStage() {
   // Height drives the fit (portrait image), and panel height doesn't depend on
   // column width — so writing the width back can't feed back into this.
   const s = Math.min(MAX_IMG_COL / IMG_SIZE[0], vp.clientHeight / IMG_SIZE[1]);
-  st.style.width  = IMG_SIZE[0] * s + 'px';
-  st.style.height = IMG_SIZE[1] * s + 'px';
-  document.getElementById('image-col').style.width = (IMG_SIZE[0] * s + 2) + 'px';  // +2 panel borders
+  const w = IMG_SIZE[0] * s, h = IMG_SIZE[1] * s;
+  if (w === stageW && h === stageH) return false;
+  stageW = w; stageH = h;
+  st.style.width  = w + 'px';
+  st.style.height = h + 'px';
+  document.getElementById('image-col').style.width = (w + 2) + 'px';  // +2 panel borders
+  return true;
 }
-new ResizeObserver(fitStage).observe(document.getElementById('berthViewport'));
+// Labels are laid out in stage px, so a resize has to re-run the placement.
+new ResizeObserver(() => { if (fitStage() && lastLayout) renderBerths(lastLayout); })
+  .observe(document.getElementById('berthViewport'));
+
+/* One global label column down the left edge. Per-berth stacking wasn't enough
+   — neighbouring berths' columns collided — so every chip goes in one list and
+   gets pushed down until it clears the one above. */
+function placeLabels(labels, overlay) {
+  const PITCH = 18, X = 4;  // PITCH > chip height (~17px)
+  labels.sort((p, q) => p.y - q.y);
+  let prev = -Infinity;
+  labels.forEach(L => { L.y = Math.max(L.y, prev + PITCH); prev = L.y; });
+  const spill = prev + PITCH / 2 - stageH;
+  if (spill > 0) labels.forEach(L => { L.y -= spill; });  // keep the column on the image
+
+  labels.forEach(L => {
+    const c = document.createElement('div');
+    c.className = 'vessel-name';
+    c.innerHTML = L.text;
+    c.style.left = X + 'px';
+    c.style.top  = L.y + 'px';
+    c.addEventListener('click', ev => { ev.stopPropagation(); showVesselCard(L.a, L.b, ev); });
+    overlay.appendChild(c);
+    L.el = c;
+  });
+  // Leaders second: a chip's width is only known once it's in the document.
+  labels.forEach(L => {
+    const x0 = X + L.el.offsetWidth + 2, dx = L.vx - x0, dy = L.vy - L.y;
+    if (dx <= 0) return;
+    const ln = document.createElement('div');
+    ln.className = 'vessel-lead';
+    ln.style.left  = x0 + 'px';
+    ln.style.top   = L.y + 'px';
+    ln.style.width = Math.hypot(dx, dy) + 'px';
+    ln.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    overlay.appendChild(ln);
+  });
+}
 
 function renderBerths(layout) {
+  lastLayout = layout;
   const overlay = document.getElementById('berthOverlay');
   overlay.innerHTML = '';
   const [iw, ih] = layout.image_size && layout.image_size[0] ? layout.image_size : IMG_SIZE;
   IMG_SIZE = [iw, ih];
   fitStage();
+  const sx = stageW / iw;   // uniform image px -> stage px
+  const labels = [];
   let occupied = 0;
 
   (layout.berths || []).forEach(b => {
@@ -483,12 +530,6 @@ function renderBerths(layout) {
     // each extra bank steps outboard (-x, away from the jetty) by one beam.
     const tiers = {};
     assets.forEach(a => (tiers[a.tier || 0] = tiers[a.tier || 0] || []).push(a));
-
-    // One label column outboard of the whole bank, on the empty water side.
-    // Rows are pitched in CSS px so a 5-high bank can't overlap at any zoom.
-    const lx = b.cx - (b.w / 2 + 5) * cos;
-    const ly = b.cy - (b.w / 2 + 5) * sin;
-    let k = 0;
 
     Object.entries(tiers).forEach(([t, list]) => {
       const slot = (b.h || 60) / list.length;
@@ -510,22 +551,17 @@ function renderBerths(layout) {
         v.addEventListener('click', ev => { ev.stopPropagation(); showVesselCard(a, b, ev); });
         overlay.appendChild(v);
 
-        // Right-aligned chip in the outboard column; the bank code says which
-        // hull it belongs to once the chip no longer sits beside it.
-        const c = document.createElement('div');
-        c.className = 'vessel-name';
-        c.innerHTML = assets.length > 1
-          ? `<b>${a.position || 'A/S'}</b> ${a.name}`
-          : a.name;
-        c.style.left = (lx / iw * 100) + '%';
-        c.style.top  = (ly / ih * 100) + '%';
-        c.style.transform =
-          `translate(calc(-100% - 5px), calc(-50% + ${(k++ - (assets.length - 1) / 2) * 18}px))`;
-        c.addEventListener('click', ev => { ev.stopPropagation(); showVesselCard(a, b, ev); });
-        overlay.appendChild(c);
+        // Queue the label; placeLabels() de-collides them all together below.
+        // The bank code says which hull it is once the chip sits away from it.
+        labels.push({
+          y: py * sx, vx: px * sx, vy: py * sx, a: a, b: b,
+          text: assets.length > 1 ? `<b>${a.position || 'A/S'}</b> ${a.name}` : a.name
+        });
       });
     });
   });
+
+  placeLabels(labels, overlay);
 
   document.getElementById('occupiedCount').textContent =
     `${occupied}/${(layout.berths || []).length} occupied`;
