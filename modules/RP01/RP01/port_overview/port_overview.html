@@ -749,22 +749,94 @@ function renderCards(cards) {
     // vanished even though the API returned a correct value. Check for
     // presence instead of truthiness so 0-targets still render.
     if (c.target !== undefined && c.target !== null) {
-      const pct = c.target > 0 ? Math.round((c.total / c.target) * 100) : 0;
-      const achieved = c.target > 0 && c.total >= c.target;
-      const arrowColor = achieved ? 'var(--green)' : 'var(--coral)';
-      const arrow = achieved
+
+    const monthTarget = c.target || 0;
+    const yearTarget = c.target_fy || 0;
+
+    // Today card shows month target progress.
+    const target = key === "today" ? monthTarget : c.target;
+
+    const pct = target > 0
+        ? Math.round((c.total / target) * 100)
+        : 0;
+
+    const achieved = target > 0 && c.total >= target;
+
+    const arrowColor = achieved ? "var(--green)" : "var(--coral)";
+
+    const arrow = achieved
         ? `<svg class="pct-arrow" viewBox="0 0 24 24" fill="none" stroke="${arrowColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>`
         : `<svg class="pct-arrow" viewBox="0 0 24 24" fill="none" stroke="${arrowColor}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="6 13 12 19 18 13"/></svg>`;
-      // diff = target - actual. Positive = still short of target (shortfall).
-      // Negative (i.e. actual > target) = surplus over target.
-      const diff = c.target - c.total;
-      const diffLabel = diff > 0 ? 'Shortfall' : 'Surplus';
-      const diffColor = diff > 0 ? 'var(--coral)' : 'var(--green)';
-      targetBlock = `
-        <div class="kpi-target"><span>Target</span><span>${fmtNum(c.target)} MT</span></div>
-        <div class="kpi-progress"><div class="kpi-progress-fill" style="width:${Math.min(100, pct)}%; background:${arrowColor}"></div></div>
-        <div class="kpi-progress-pct">${arrow}<span style="color:${arrowColor}">${pct}% achieved</span></div>
-        <div class="kpi-diff" style="color:${diffColor}"><span>${diffLabel}</span><span>${fmtNum(Math.abs(diff))} MT</span></div>`;
+
+    const diff = target - c.total;
+    const diffLabel = diff > 0 ? "Shortfall" : "Surplus";
+    const diffColor = diff > 0 ? "var(--coral)" : "var(--green)";
+
+    if (key === "today") {
+
+        targetBlock = `
+            <div class="kpi-target">
+                <span>Required Daily</span>
+                <span></span>
+            </div>
+
+            <div class="kpi-row">
+                <span>Month</span>
+                <span>${fmtNum(monthTarget)} MT</span>
+            </div>
+
+            <div class="kpi-row">
+                <span>Year</span>
+                <span>${fmtNum(yearTarget)} MT</span>
+            </div>
+
+            <div class="kpi-progress">
+                <div class="kpi-progress-fill"
+                     style="width:${Math.min(100,pct)}%;background:${arrowColor}">
+                </div>
+            </div>
+
+            <div class="kpi-progress-pct">
+                ${arrow}
+                <span style="color:${arrowColor}">
+                    ${pct}% achieved
+                </span>
+            </div>
+
+            <div class="kpi-diff" style="color:${diffColor}">
+                <span>${diffLabel}</span>
+                <span>${fmtNum(Math.abs(diff))} MT</span>
+            </div>
+        `;
+
+    } else {
+
+        targetBlock = `
+            <div class="kpi-target">
+                <span>Target</span>
+                <span>${fmtNum(c.target)} MT</span>
+            </div>
+
+            <div class="kpi-progress">
+                <div class="kpi-progress-fill"
+                     style="width:${Math.min(100,pct)}%;background:${arrowColor}">
+                </div>
+            </div>
+
+            <div class="kpi-progress-pct">
+                ${arrow}
+                <span style="color:${arrowColor}">
+                    ${pct}% achieved
+                </span>
+            </div>
+
+            <div class="kpi-diff" style="color:${diffColor}">
+                <span>${diffLabel}</span>
+                <span>${fmtNum(Math.abs(diff))} MT</span>
+            </div>
+        `;
+    }
+
     }
 
     const div = document.createElement('div');

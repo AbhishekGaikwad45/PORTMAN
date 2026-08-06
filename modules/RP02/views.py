@@ -6,6 +6,10 @@ from database import get_user_permissions
 from . import bp
 from . import model
 
+from datetime import datetime, date
+
+from database import get_db, get_cursor
+
 
 def login_required(f):
     @wraps(f)
@@ -319,3 +323,170 @@ def billing_dashboard_export():
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': f'attachment; filename="{fname}"'},
     )
+
+
+#Revenue Regisrter
+
+
+@bp.route('/module/RP02/revenue/')
+def revenue_report():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    return render_template(
+        'rp02_revenue_report.html',
+        username=session.get('username'),
+        module_code='RP02'
+    )
+
+
+@bp.route('/api/module/RP02/revenue/data')
+def revenue_report_data():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    month = request.args.get('month')
+    year = request.args.get('year')
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    where = []
+    params = []
+
+    if month:
+        where.append("EXTRACT(MONTH FROM ih.invoice_date) = %s")
+        params.append(int(month))
+
+    if year:
+        where.append("EXTRACT(YEAR FROM ih.invoice_date) = %s")
+        params.append(int(year))
+
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    cur.execute(f"""
+        SELECT
+            ih.id,
+            ih.invoice_number,
+            ih.invoice_date,
+            ih.customer_name,
+            ih.customer_gl_code,
+            ih.customer_gstin,
+            ih.sap_document_number,
+            ih.subtotal AS basic_value,
+            ih.sgst_amount,
+            ih.cgst_amount,
+            ih.igst_amount,
+            ih.total_amount AS invoice_value,
+
+            iss.customer_code,
+            iss.irn_number,
+            iss.ack_number,
+            iss.irn_date,
+            iss.qr_code,
+
+            il.rate,
+            il.quantity,
+            il.uom,
+            il.sac_code,
+            il.hsn_sac,
+            il.gl_code,
+            il.service_name,
+            il.cgst_rate,
+            il.sgst_rate,
+            il.igst_rate
+
+        FROM invoice_header ih
+        LEFT JOIN invoice_sap_staging iss
+            ON iss.invoice_id = ih.id
+
+        LEFT JOIN LATERAL (
+            SELECT
+                rate,
+                quantity,
+                uom,
+                sac_code,
+                hsn_sac,
+                gl_code,
+                service_name,
+                cgst_rate,
+                sgst_rate,
+                igst_rate
+            FROM invoice_lines
+            WHERE invoice_id = ih.id
+            ORDER BY id
+            LIMIT 1
+        ) il ON TRUE
+
+        {where_sql}
+
+        ORDER BY ih.invoice_date DESC NULLS LAST, ih.id DESC
+    """, params)
+
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    out = []
+
+    for r in rows:
+        inv_date = r.get('invoice_date')
+
+        basic = float(r.get('basic_value') or 0)
+        sgst = float(r.get('sgst_amount') or 0)
+        cgst = float(r.get('cgst_amount') or 0)
+        igst = float(r.get('igst_amount') or 0)
+        inv_val = float(r.get('invoice_value') or 0)
+
+        cgst_rate = float(r.get('cgst_rate') or 0)
+        sgst_rate = float(r.get('sgst_rate') or 0)
+        igst_rate = float(r.get('igst_rate') or 0)
+
+        tax_rate = igst_rate if igst_rate > 0 else (cgst_rate + sgst_rate)
+
+        out.append({
+            'invoice_no': r.get('invoice_number') or '',
+            'group_type': '',
+            'revenue_type_1': '',
+            'revenue_type_2': '',
+            'cargo_volume': '',
+
+            'date': str(inv_date)[:10] if inv_date else '',
+
+            'cust_code': r.get('customer_code') or '',
+            'customer_name': r.get('customer_name') or '',
+            'gl_code': r.get('gl_code') or '',
+            'grouping': '',
+
+            'qty': r.get('quantity'),
+            'rate': r.get('rate'),
+
+            'tax_category': 'IGST' if igst > 0 else 'Intra-state',
+            'tax_rate': tax_rate,
+
+            'basic_value': basic,
+            'sgst': sgst,
+            'cgst': cgst,
+            'igst': igst,
+            'invoice_value': inv_val,
+
+            'gstin': r.get('customer_gstin') or '',
+            'sap_doc_no': r.get('sap_document_number') or '',
+
+            'sac_code': r.get('sac_code') or '',
+            'hsn_code': r.get('hsn_sac') or '',
+
+            'irn': r.get('irn_number') or '',
+            'irn_date': (
+                r.get('irn_date').strftime('%Y-%m-%d')
+                if r.get('irn_date')
+                else ''
+            ),
+            'ack_no': r.get('ack_number') or '',
+            'barcode': r.get('qr_code') or '',
+            'tds_tcs': '',
+            'net_receivable': '',
+            'days': '',
+            'bucket': ''
+        })
+
+    return jsonify({'data': out})
