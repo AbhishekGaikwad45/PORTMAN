@@ -379,11 +379,11 @@ def revenue_report_data():
             ih.igst_amount,
             ih.total_amount AS invoice_value,
 
-            iss.customer_code,
-            iss.irn_number,
-            iss.ack_number,
-            iss.irn_date,
-            iss.qr_code,
+            -- IRN / Ack / QR live on invoice_header itself (confirmed populated),
+            -- NOT on invoice_sap_staging (which is empty for these fields).
+            ih.gst_irn,
+            ih.gst_ack_number,
+            ih.gst_ack_date,
 
             il.rate,
             il.quantity,
@@ -397,21 +397,6 @@ def revenue_report_data():
             il.igst_rate
 
         FROM invoice_header ih
-
-        LEFT JOIN LATERAL (
-            SELECT
-                customer_code,
-                irn_number,
-                ack_number,
-                irn_date,
-                qr_code
-            FROM invoice_sap_staging
-            WHERE invoice_id = ih.id
-            ORDER BY
-                (irn_number IS NOT NULL AND irn_number <> '') DESC,
-                id DESC
-            LIMIT 1
-        ) iss ON TRUE
 
         LEFT JOIN LATERAL (
             SELECT
@@ -468,7 +453,7 @@ def revenue_report_data():
 
             'date': str(inv_date)[:10] if inv_date else '',
 
-            'cust_code': r.get('customer_code') or '',
+            'cust_code': r.get('customer_gl_code') or '',
             'customer_name': r.get('customer_name') or '',
             'gl_code': r.get('gl_code') or '',
             'grouping': '',
@@ -495,22 +480,18 @@ def revenue_report_data():
             'sac_code': r.get('sac_code') or '',
             'hsn_code': r.get('hsn_sac') or '',
 
-            'irn': r.get('irn_number') or '',
+            'irn': r.get('gst_irn') or '',
             'irn_date': (
-                r.get('irn_date').strftime('%Y-%m-%d')
-                if r.get('irn_date')
+                r.get('gst_ack_date').strftime('%Y-%m-%d')
+                if r.get('gst_ack_date')
                 else ''
             ),
-            # invoice_sap_staging has no separate ack_date column — the IRN
-            # is generated at the moment of acknowledgment, so irn_date
-            # doubles as the ack date.
             'ack_date': (
-                r.get('irn_date').strftime('%Y-%m-%d')
-                if r.get('irn_date')
+                r.get('gst_ack_date').strftime('%Y-%m-%d')
+                if r.get('gst_ack_date')
                 else ''
             ),
-            'ack_no': r.get('ack_number') or '',
-            'barcode': r.get('qr_code') or '',
+            'ack_no': r.get('gst_ack_number') or '',
             'tds_tcs': '',
             'net_receivable': '',
             'days': '',
