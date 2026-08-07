@@ -486,7 +486,7 @@ def get_service_types():
     cur = get_cursor(conn)
     cur.execute('''
         SELECT s.id, s.service_name, s.service_code, s.sac_code, s.uom, s.gl_code,
-               s.gst_rate_id,
+               s.gst_rate_id, COALESCE(s.requires_hsn_input, 0) as requires_hsn_input,
                COALESCE(g.cgst_rate, 0) as cgst_rate,
                COALESCE(g.sgst_rate, 0) as sgst_rate,
                COALESCE(g.igst_rate, 0) as igst_rate,
