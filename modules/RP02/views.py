@@ -365,69 +365,81 @@ def revenue_report_data():
     where_sql = "WHERE " + " AND ".join(where) if where else ""
 
     cur.execute(f"""
-        SELECT
-            ih.id,
-            ih.invoice_number,
-            ih.invoice_date,
-            ih.customer_name,
-            ih.customer_gl_code,
-            ih.customer_gstin,
-            ih.sap_document_number,
-            ih.subtotal AS basic_value,
-            ih.sgst_amount,
-            ih.cgst_amount,
-            ih.igst_amount,
-            ih.total_amount AS invoice_value,
+SELECT
+    ih.id,
+    ih.invoice_number,
+    ih.invoice_date,
+    ih.customer_name,
+    vc.sap_customer_code,
+    ih.customer_gl_code,
+    ih.customer_gstin,
+    ih.sap_document_number,
+    ih.subtotal AS basic_value,
+    ih.sgst_amount,
+    ih.cgst_amount,
+    ih.igst_amount,
+    ih.total_amount AS invoice_value,
 
-            -- IRN / Ack / QR live on invoice_header itself (confirmed populated),
-            -- NOT on invoice_sap_staging (which is empty for these fields).
-            ih.gst_irn,
-            ih.gst_ack_number,
-            ih.gst_ack_date,
+    ih.gst_irn,
+    ih.gst_ack_number,
+    ih.gst_ack_date,
 
-            il.rate,
-            il.quantity,
-            il.uom,
-            il.sac_code,
-            il.hsn_sac,
-            il.gl_code,
-            il.service_name,
-            il.cgst_rate,
-            il.sgst_rate,
-            il.igst_rate
+    il.rate,
+    il.quantity,
+    il.uom,
+    il.sac_code,
+    il.hsn_sac,
+    il.gl_code,
+    il.service_name,
 
-        FROM invoice_header ih
+    (
+        SELECT fl.service_description
+        FROM fdcn_lines fl
+        WHERE TRIM(fl.gl_code) = TRIM(il.gl_code)
+        ORDER BY fl.id DESC
+        LIMIT 1
+    ) AS grouping,
 
-        LEFT JOIN LATERAL (
-            SELECT
-                rate,
-                quantity,
-                uom,
-                sac_code,
-                hsn_sac,
-                gl_code,
-                service_name,
-                cgst_rate,
-                sgst_rate,
-                igst_rate
-            FROM invoice_lines
-            WHERE invoice_id = ih.id
-            ORDER BY
-                (hsn_sac IS NOT NULL AND hsn_sac <> '') DESC,
-                (sac_code IS NOT NULL AND sac_code <> '') DESC,
-                id
-            LIMIT 1
-        ) il ON TRUE
+    il.cgst_rate,
+    il.sgst_rate,
+    il.igst_rate
 
-        {where_sql}
+FROM invoice_header ih
 
-        ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
-    """, params)
+LEFT JOIN vessel_customers vc
+    ON TRIM(LOWER(vc.name)) = TRIM(LOWER(ih.customer_name))
+
+LEFT JOIN LATERAL (
+    SELECT
+        rate,
+        quantity,
+        uom,
+        sac_code,
+        hsn_sac,
+        gl_code,
+        service_name,
+        cgst_rate,
+        sgst_rate,
+        igst_rate
+    FROM invoice_lines
+    WHERE invoice_id = ih.id
+    ORDER BY
+        (hsn_sac IS NOT NULL AND hsn_sac <> '') DESC,
+        (sac_code IS NOT NULL AND sac_code <> '') DESC,
+        id
+    LIMIT 1
+) il ON TRUE
+
+{where_sql}
+
+ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
+""", params)
 
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
 
     out = []
+    today = datetime.today().date()
 
     for r in rows:
         inv_date = r.get('invoice_date')
@@ -444,6 +456,60 @@ def revenue_report_data():
 
         tax_rate = igst_rate if igst_rate > 0 else (cgst_rate + sgst_rate)
 
+        gl_code = str(r.get('gl_code') or '').strip()
+
+        hsn_code = (
+            r.get('sac_code')
+            if gl_code == '4101071000'
+            else (r.get('hsn_sac') or '')
+        )
+
+        tds_percent = {
+            '4101076010': 2.0,
+            '4101076030': 2.0,
+            '4201090080': 2.0,
+            '4101076100': 2.0,
+            '4101071000': 0.1,
+            '4201090210': 10.0,
+            '4101076020': 2.0
+        }
+
+        tds_rate = tds_percent.get(gl_code, 0)
+        tds_amount = round((basic * tds_rate) / 100, 2)
+        net_receivable = round(inv_val - tds_amount, 2)
+
+        if inv_date:
+            if hasattr(inv_date, "year"):
+                invoice_date = inv_date
+            else:
+                invoice_date = datetime.strptime(
+                    str(inv_date)[:10], "%Y-%m-%d"
+                ).date()
+
+            days = (today - invoice_date).days
+        else:
+            days = ""
+        
+        # Bucket based on Days
+        if days == "":
+            bucket = ""
+        elif 0 <= days <= 30:
+            bucket = "0-30 days"
+        elif 31 <= days <= 60:
+            bucket = "31-60 days"
+        elif 61 <= days <= 90:
+            bucket = "61-90 days"
+        elif 91 <= days <= 180:
+            bucket = "91-180 days"
+        elif 181 <= days <= 365:
+            bucket = "181-365 days"
+        elif 366 <= days <= 730:
+            bucket = "1-2 years"
+        elif 731 <= days <= 1095:
+            bucket = "2-3 years"
+        else:
+            bucket = "> 3 years"
+
         out.append({
             'invoice_no': r.get('invoice_number') or '',
             'group_type': '',
@@ -453,10 +519,10 @@ def revenue_report_data():
 
             'date': str(inv_date)[:10] if inv_date else '',
 
-            'cust_code': r.get('customer_gl_code') or '',
+            'cust_code': r.get('sap_customer_code') or r.get('customer_gl_code') or '',
             'customer_name': r.get('customer_name') or '',
-            'gl_code': r.get('gl_code') or '',
-            'grouping': '',
+            'gl_code': gl_code,
+            'grouping': r.get('service_name') or '',
 
             'qty': r.get('quantity'),
             'rate': r.get('rate'),
@@ -478,7 +544,7 @@ def revenue_report_data():
             'sap_doc_no': r.get('sap_document_number') or '',
 
             'sac_code': r.get('sac_code') or '',
-            'hsn_code': r.get('hsn_sac') or '',
+            'hsn_code': hsn_code,
 
             'irn': r.get('gst_irn') or '',
             'irn_date': (
@@ -492,10 +558,11 @@ def revenue_report_data():
                 else ''
             ),
             'ack_no': r.get('gst_ack_number') or '',
-            'tds_tcs': '',
-            'net_receivable': '',
-            'days': '',
-            'bucket': ''
+
+            'tds_tcs': tds_amount,
+            'net_receivable': net_receivable,
+            'days': days,
+            'bucket': bucket,
         })
 
     return jsonify({'data': out})
