@@ -543,9 +543,8 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
             'gstin': r.get('customer_gstin') or '',
             'sap_doc_no': r.get('sap_document_number') or '',
 
-            'sac_code': r.get('sac_code') or '',
+            'sac_code': '' if hsn_code else (r.get('sac_code') or ''),
             'hsn_code': hsn_code,
-
             'irn': r.get('gst_irn') or '',
             'irn_date': (
                 r.get('gst_ack_date').strftime('%Y-%m-%d')
