@@ -618,11 +618,13 @@ def port_overview_data():
             'by_type': current_fy_by_type,
             'target': target_base,
             'target_effective': target_effective,
+            'required_daily': today_target_fy,          # <-- NEW: daily rate needed to hit FY target
         },
         'current_month': {
             'label': today.strftime('%b %Y'),
             'by_type': _cargo_by_type(month_start_s, today_s),
-            'target': month_target,          # <<< NEW
+            'target': month_target,
+            'required_daily': today_target_month,        # <-- NEW: daily rate needed to hit month target
         },
         'yesterday':     {
             'label': 'Yesterday',
