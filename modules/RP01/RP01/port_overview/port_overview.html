@@ -288,6 +288,19 @@ html, body {
 .kpi-row span:last-child { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:500; }
 .kpi-empty { font-size:10.5px; color:var(--text3); }
 
+/* Required-daily footer: shown on the Month and FY cards only, to state the
+   daily pace still needed to hit that card's own target. Kept visually
+   distinct from kpi-breakdown (a dashed divider + accent-colored value) so
+   it reads as a footer callout rather than another cargo-type row. */
+.kpi-required-footer {
+  display:flex; justify-content:space-between; align-items:baseline;
+  margin-top:9px; padding-top:8px; border-top:1px dashed var(--border-2);
+  font-size:10.5px; font-weight:600; color:var(--text2);
+}
+.kpi-required-footer span:last-child {
+  font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--kpi-accent, var(--ocean));
+}
+
 /* Panels */
 .panel { background:var(--surface-t); backdrop-filter:blur(9px); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow-sm); animation:fadeUp .45s ease both; flex-shrink:0; }
 .panel-body { padding:14px 16px; }
@@ -748,7 +761,9 @@ function renderCards(cards) {
     // no target entered yet) is falsy in JS, so the whole block silently
     // vanished even though the API returned a correct value. Check for
     // presence instead of truthiness so 0-targets still render.
-    if (c.target !== undefined && c.target !== null) {
+    // Today card no longer shows target/required-daily/shortfall at all —
+    // that block is skipped entirely for key === 'today'.
+    if (key !== 'today' && key !== 'yesterday' && c.target !== undefined && c.target !== null) {
 
     const monthTarget = c.target || 0;
     const yearTarget = c.target_fy || 0;
@@ -772,72 +787,40 @@ function renderCards(cards) {
     const diffLabel = diff > 0 ? "Shortfall" : "Surplus";
     const diffColor = diff > 0 ? "var(--coral)" : "var(--green)";
 
-    if (key === "today") {
+    targetBlock = `
+        <div class="kpi-target">
+            <span>Target</span>
+            <span>${fmtNum(c.target)} MT</span>
+        </div>
 
-        targetBlock = `
-            <div class="kpi-target">
-                <span>Required Daily</span>
-                <span></span>
+        <div class="kpi-progress">
+            <div class="kpi-progress-fill"
+                 style="width:${Math.min(100,pct)}%;background:${arrowColor}">
             </div>
+        </div>
 
-            <div class="kpi-row">
-                <span>Month</span>
-                <span>${fmtNum(monthTarget)} MT</span>
-            </div>
+        <div class="kpi-progress-pct">
+            ${arrow}
+            <span style="color:${arrowColor}">
+                ${pct}% achieved
+            </span>
+        </div>
 
-            <div class="kpi-row">
-                <span>Year</span>
-                <span>${fmtNum(yearTarget)} MT</span>
-            </div>
+        <div class="kpi-diff" style="color:${diffColor}">
+            <span>${diffLabel}</span>
+            <span>${fmtNum(Math.abs(diff))} MT</span>
+        </div>
+    `;
 
-            <div class="kpi-progress">
-                <div class="kpi-progress-fill"
-                     style="width:${Math.min(100,pct)}%;background:${arrowColor}">
-                </div>
-            </div>
-
-            <div class="kpi-progress-pct">
-                ${arrow}
-                <span style="color:${arrowColor}">
-                    ${pct}% achieved
-                </span>
-            </div>
-
-            <div class="kpi-diff" style="color:${diffColor}">
-                <span>${diffLabel}</span>
-                <span>${fmtNum(Math.abs(diff))} MT</span>
-            </div>
-        `;
-
-    } else {
-
-        targetBlock = `
-            <div class="kpi-target">
-                <span>Target</span>
-                <span>${fmtNum(c.target)} MT</span>
-            </div>
-
-            <div class="kpi-progress">
-                <div class="kpi-progress-fill"
-                     style="width:${Math.min(100,pct)}%;background:${arrowColor}">
-                </div>
-            </div>
-
-            <div class="kpi-progress-pct">
-                ${arrow}
-                <span style="color:${arrowColor}">
-                    ${pct}% achieved
-                </span>
-            </div>
-
-            <div class="kpi-diff" style="color:${diffColor}">
-                <span>${diffLabel}</span>
-                <span>${fmtNum(Math.abs(diff))} MT</span>
-            </div>
-        `;
     }
 
-    }
+    // Required-daily footer — Month and FY cards only. Reuses the same
+    // day-rate figure the Today card already shows (c.required_daily is
+    // set server-side from the same _daily_target_by_days_left() call),
+    // just surfaced in this card's own context instead.
+    const requiredFooter = (key === 'current_month' || key === 'current_fy') && c.required_daily != null
+      ? `<div class="kpi-required-footer"><span>Required Daily</span><span>${fmtNum(c.required_daily)} MT</span></div>`
+      : '';
 
     const div = document.createElement('div');
     div.className = 'kpi-card' + (key === 'current_fy' ? ' hero' : '');
@@ -848,7 +831,8 @@ function renderCards(cards) {
       <div class="kpi-label"><span>${key === 'all_time' ? 'CUMULATIVE VALUE' : c.label}</span><span class="kpi-icon-wrap">${CARD_ICONS[key] || ''}</span></div>
       <div class="kpi-total">${fmtNum(c.total)} <span class="kpi-unit">MT</span></div>
       ${targetBlock}
-      <div class="kpi-breakdown">${breakdown}</div>`;
+      <div class="kpi-breakdown">${breakdown}</div>
+      ${requiredFooter}`;
     row.appendChild(div);
   });
 }
