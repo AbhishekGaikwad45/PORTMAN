@@ -12,18 +12,12 @@
 :root {
   /* ── palette ── */
   --bg:        #D6E9FB;
-  /* dppl.png sits under the existing tints, washed out by the flat layer above
-     it so panel text keeps its contrast. Raise that layer's alpha to fade the
-     photo further, lower it to bring the photo forward. */
   --bg-grad:   radial-gradient(1100px 460px at 100% -10%, rgba(199,224,252,.55) 0%, transparent 60%),
                radial-gradient(900px 420px at -5% 12%, rgba(207,240,247,.45) 0%, transparent 55%),
                linear-gradient(rgba(214,233,251,.26), rgba(214,233,251,.28)),
                url("{{ url_for('static', filename='img/dppl.png') }}") center center / cover no-repeat fixed,
                #D6E9FB;
   --surface:   #FFFFFF;
-  /* Translucent surface for the cards/panels so dppl.png reads through them.
-     The berth layout keeps the solid --surface — the map needs full contrast.
-     Lowered further so the photo is clearly visible behind every panel. */
   --surface-t: rgba(255,255,255,.62);
   --surface-2: #F7F9FC;
   --border:    #E4E9F1;
@@ -117,9 +111,6 @@ html, body {
   font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; color:#fff;
 }
 
-/* FY-end countdown badge: pulled out of the neutral hdr-shift mould entirely
-   into its own high-contrast pill, so "time pressure" reads at a glance
-   instead of sitting quietly next to the shift in-charge name. */
 .hdr-fyend {
   flex-direction:row; align-items:center; gap:9px;
   padding:6px 16px 6px 12px; border-radius:30px; border:1px solid rgba(255,214,120,.55);
@@ -156,14 +147,10 @@ html, body {
 }
 
 /* ── IMAGE COLUMN ── */
-/* width is set by fitStage() to the image's own width — a fixed width would
-   letterbox the portrait image and waste the gutters. */
 #image-col { width:460px; flex-shrink:0; overflow:hidden; }
 .image-panel { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow-md); animation:fadeUp .4s ease both; height:100%; display:flex; flex-direction:column; }
 .panel-hdr {
   padding:12px 16px; font-family:'Space Grotesk',sans-serif; font-size:10.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase;
-  /* Translucent so it doesn't sit as an opaque band inside a see-through panel.
-     Over .image-panel (solid) it still renders opaque, so the map is unaffected. */
   color:var(--text2); background:rgba(247,249,252,.5); border-bottom:1px solid var(--border);
   display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0;
 }
@@ -173,15 +160,10 @@ html, body {
   background:linear-gradient(135deg,var(--ocean),var(--teal));
 }
 .panel-hdr .muted { font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:0; text-transform:none; font-size:10.5px; color:var(--ocean); background:var(--ocean-lt); padding:2px 8px; border-radius:20px; }
-/* The stage is sized to the *drawn* image rect (see fitStage), never the
-   container — otherwise object-fit letterboxing shifts the overlay and scales
-   x/y differently, which drifts and shears the vessels on every resize. */
 .image-inner { width:100%; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; }
 #berthStage { position:relative; flex:none; }
 #berthStage img { width:100%; height:100%; display:block; }
 .overlay { position:absolute; inset:0; }
-/* Status colours mirror the Barge Position berth cards:
-   green = under discharge, cyan = waiting, amber = discharged but not cast off. */
 .vessel {
   position:absolute; background:linear-gradient(160deg,#32df6e,#15803d); cursor:pointer;
   clip-path:polygon(50% 0, 100% 15%, 100% 100%, 0 100%, 0 15%);
@@ -191,8 +173,6 @@ html, body {
 .vessel:hover { filter:drop-shadow(0 0 7px rgba(25,85,224,.9)); transform:scale(1.12); }
 .vessel.waiting { background:linear-gradient(160deg,#43e6f1,#0891b2); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(8,145,178,.5)); }
 .vessel.completed { background:linear-gradient(160deg,#facc15,#ca8a04); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(234,179,8,.55)); }
-/* ── UPCOMING TILE (floats over the image, top-left is water/land) ── */
-/* Scales with --lbl too, so it keeps the same footprint on the map at any zoom. */
 .upcoming {
   display:none; position:absolute; z-index:5;
   left:calc(8px * var(--lbl,1)); top:calc(8px * var(--lbl,1));
@@ -211,14 +191,9 @@ html, body {
 .up-pill.MBC::before { background:#43E6F1; }
 .up-pill small { font-family:'JetBrains Mono',monospace; font-weight:500; color:rgba(255,255,255,.58); margin-left:auto; padding-left:8px; }
 
-/* All chips share one left-edge column (see placeLabels) with a leader line to
-   the hull. Left-aligned so a long name can't run off the image. `top` is the
-   chip's centre, so the -50% must stay in CSS — hover mustn't touch transform. */
 .vessel-name {
   position:absolute; transform:translateY(-50%);
   font-family:'Inter',sans-serif; font-weight:700; color:#0F1A2B; background:rgba(255,255,255,.94);
-  /* --lbl (set on #berthStage by fitStage) ties the chip to the image's scale,
-     so browser zoom can't grow the column relative to the map. */
   font-size:calc(8.5px * var(--lbl,1));
   padding:calc(2px * var(--lbl,1)) calc(7px * var(--lbl,1));
   border-radius:calc(20px * var(--lbl,1));
@@ -254,6 +229,17 @@ html, body {
   padding:15px 16px; box-shadow:var(--shadow-sm); overflow:hidden;
   transition:transform .18s ease, box-shadow .18s ease; animation:fadeUp .4s ease both;
 }
+.kpi-shift-row {
+  display:flex; gap:6px; margin-top:9px; padding-top:8px;
+  border-top:1px dashed var(--border-2);
+}
+.shift-pill {
+  flex:1; text-align:center; font-size:9.5px; font-weight:600; color:var(--text2);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:4px 6px;
+}
+.shift-pill b {
+  display:block; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text); margin-top:2px;
+}
 .kpi-card:hover { transform:translateY(-3px); box-shadow:var(--shadow-md); }
 .kpi-card::before {
   content:''; position:absolute; left:0; right:0; top:0; height:3px;
@@ -288,10 +274,6 @@ html, body {
 .kpi-row span:last-child { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:500; }
 .kpi-empty { font-size:10.5px; color:var(--text3); }
 
-/* Required-daily footer: shown on the Month and FY cards only, to state the
-   daily pace still needed to hit that card's own target. Kept visually
-   distinct from kpi-breakdown (a dashed divider + accent-colored value) so
-   it reads as a footer callout rather than another cargo-type row. */
 .kpi-required-footer {
   display:flex; justify-content:space-between; align-items:baseline;
   margin-top:9px; padding-top:8px; border-top:1px dashed var(--border-2);
@@ -331,7 +313,7 @@ html, body {
 .split-row .panel { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
 .split-row .panel-body { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
 .tide-table { width:100%; border-collapse:collapse; }
-.tide-table th { font-family:'Space Grotesk',sans-serif; font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text3); text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(255,255,255,.88); }  /* sticky: must still mask rows scrolling under it */
+.tide-table th { font-family:'Space Grotesk',sans-serif; font-size:9.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text3); text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(255,255,255,.88); }
 .tide-table td { font-size:11.5px; padding:8px; border-bottom:1px solid var(--surface-2); color:var(--text2); }
 .tide-table tr { transition:background .15s; }
 .tide-table tr:hover td {
@@ -500,9 +482,6 @@ let cd = REFRESH;
 })();
 
 /* ── FY-END COUNTDOWN ── */
-/* Indian FY runs Apr 1 → Mar 31. If we're in Jan/Feb/Mar, the FY ends THIS
-   calendar year; otherwise (Apr-Dec) it ends NEXT calendar year. Days are
-   counted to the end of Mar 31 (23:59:59), inclusive of today. */
 function fyEndInfo() {
   const n = new Date();
   const y = n.getFullYear(), m = n.getMonth() + 1; // m: 1-12
@@ -520,7 +499,7 @@ function renderFYEnd() {
   document.getElementById('hdr-fyend-days').textContent = `${days} day${days === 1 ? '' : 's'}`;
 }
 renderFYEnd();
-setInterval(renderFYEnd, 60 * 1000); // only changes daily, minute refresh is cheap
+setInterval(renderFYEnd, 60 * 1000);
 
 /* ── FULLSCREEN ── */
 function toggleFS() {
@@ -552,25 +531,17 @@ function fmtMins(m) {
 }
 
 /* ── BERTH OVERLAY (vessels only) ── */
-/* Same coordinate space as the PBM01 picker: overlay % == image %. Keeping the
-   stage at the image's own aspect ratio makes the x and y scale factors equal,
-   so widths, heights and rotations survive any resize. */
 let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layout.image_size
 
-const MAX_IMG_COL = 520;  // don't let a tall window starve the right column
-const LBL_REF = 460;      // stage width the chip sizes below were drawn against
+const MAX_IMG_COL = 520;
+const LBL_REF = 460;
 let stageW = 0, stageH = 0, lastLayout = null;
 
-// Chips are sized in `--lbl` units so they scale with the image, exactly like
-// the hulls' % sizing. Browser zoom shrinks the stage in CSS px while a fixed
-// px font does not, which is what pushed the column off the image at >100%.
 const lblScale = () => stageW / LBL_REF;
 
 function fitStage() {
   const vp = document.getElementById('berthViewport');
   const st = document.getElementById('berthStage');
-  // Height drives the fit (portrait image), and panel height doesn't depend on
-  // column width — so writing the width back can't feed back into this.
   const s = Math.min(MAX_IMG_COL / IMG_SIZE[0], vp.clientHeight / IMG_SIZE[1]);
   const w = IMG_SIZE[0] * s, h = IMG_SIZE[1] * s;
   if (w === stageW && h === stageH) return false;
@@ -578,27 +549,19 @@ function fitStage() {
   st.style.width  = w + 'px';
   st.style.height = h + 'px';
   st.style.setProperty('--lbl', (w / LBL_REF).toFixed(4));
-  document.getElementById('image-col').style.width = (w + 2) + 'px';  // +2 panel borders
+  document.getElementById('image-col').style.width = (w + 2) + 'px';
   return true;
 }
-// Labels are laid out in stage px, so a resize has to re-run the placement.
 new ResizeObserver(() => { if (fitStage() && lastLayout) renderBerths(lastLayout); })
   .observe(document.getElementById('berthViewport'));
 
-/* One global label column down the left edge. Per-berth stacking wasn't enough
-   — neighbouring berths' columns collided — so every chip goes in one list and
-   gets pushed down until it clears the one above. */
 function placeLabels(labels, overlay) {
   const k = lblScale(), X = 4 * k, PAD = 6 * k;
-  // Order by berth down the river, then by bank, so one berth's vessels stay a
-  // contiguous block and the extra gap reads as a berth boundary.
   labels.sort((p, q) => p.berthY - q.berthY || p.slot - q.slot);
   const breaks = labels.filter((L, i) => i && L.b !== labels[i - 1].b).length;
 
-  // Give up the berth gaps, then tighten the pitch, rather than run off the
-  // image — a chip drawn outside the stage is worse than a snug column.
   const avail = stageH - 2 * PAD;
-  let pitch = 18 * k, berthGap = 8 * k;     // pitch > chip height (~17px at k=1)
+  let pitch = 18 * k, berthGap = 8 * k;
   if (labels.length * pitch + breaks * berthGap > avail) berthGap = 0;
   if (labels.length * pitch > avail) pitch = avail / labels.length;
 
@@ -609,7 +572,7 @@ function placeLabels(labels, overlay) {
     prev = L.y;
   });
   const spill = prev + pitch / 2 - (stageH - PAD);
-  if (spill > 0) labels.forEach(L => { L.y -= spill; });  // keep the column on the image
+  if (spill > 0) labels.forEach(L => { L.y -= spill; });
 
   labels.forEach(L => {
     const c = document.createElement('div');
@@ -630,7 +593,7 @@ function renderBerths(layout) {
   const [iw, ih] = layout.image_size && layout.image_size[0] ? layout.image_size : IMG_SIZE;
   IMG_SIZE = [iw, ih];
   fitStage();
-  const sx = stageW / iw;   // uniform image px -> stage px
+  const sx = stageW / iw;
   const labels = [];
   let occupied = 0;
 
@@ -641,26 +604,17 @@ function renderBerths(layout) {
 
     const th = (b.angle || 0) * Math.PI / 180;
     const cos = Math.cos(th), sin = Math.sin(th);
-    const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
-    const MBC_LEN = 80;                                             // MBCs are one fixed size
+    const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80);
+    const MBC_LEN = 80;
 
-    // The PBM01 box is the berth's water area, not the hull: A/S moors flush
-    // against the mooring face (+x, the blue edge in PBM01) and each further
-    // bank steps outboard (-x, away from the jetty) by one beam.
-    // Bank order comes from the recorded tier, but the *slot* is the position in
-    // this sorted list — there are only five bank codes (A/S..S/B), so a sixth
-    // vessel has tier 0 and would otherwise be drawn on top of the A/S hull.
-    // Walk outboard accumulating each hull's own beam. Multiplying the slot by
-    // one beam breaks as soon as beams differ: a narrow barge outboard of a wide
-    // MBC lands back on top of it.
-    let edge = (b.w || 60) / 2;  // mooring face, working outboard from here
+    let edge = (b.w || 60) / 2;
     assets.slice()
       .sort((p, q) => (p.tier || 0) - (q.tier || 0))
       .forEach((a, slot) => {
         const len  = a.type === 'MBC' ? MBC_LEN : bargeLen;
         const beam = Math.max(len * 0.3, 6);
         const off = edge - beam / 2;
-        edge -= beam + 2;        // outboard edge of this hull, plus a gap
+        edge -= beam + 2;
         const px = b.cx + off * cos, py = b.cy + off * sin;
 
         const v = document.createElement('div');
@@ -673,9 +627,6 @@ function renderBerths(layout) {
         v.addEventListener('click', ev => { ev.stopPropagation(); showVesselCard(a, b, ev); });
         overlay.appendChild(v);
 
-        // Queue the label; placeLabels() de-collides them all together below.
-        // The berth name (plus bank code when the berth is banked) is what ties
-        // the chip to its hull now that there are no leader lines.
         labels.push({
           y: py * sx, a: a, b: b, slot: slot, berthY: (b.cy || 0) * sx,
           text: `<b>${b.label || ''}</b> ` +
@@ -744,6 +695,26 @@ const CARD_ICONS = {
   current_fy:    '<svg class="kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
   all_time:      '<svg class="kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>'
 };
+
+// Fixed display order for cargo-type breakdown rows — never re-sorted by
+// quantity, so IBRM/CBRM/FLUXES/etc. always appear in the same sequence
+// regardless of which had more tonnage that day. Matches TARGET_CATEGORIES
+// order in port_overview/views.py. Anything not in this list (e.g. 'Finish
+// Goods', 'Others') is appended after, alphabetically.
+const CARGO_TYPE_ORDER = ['IBRM', 'CBRM', 'FLUXES', 'CLINKER', 'SLAG'];
+
+function sortByCargoOrder(entries) {
+  const rank = (name) => {
+    const idx = CARGO_TYPE_ORDER.indexOf(String(name || '').toUpperCase());
+    return idx === -1 ? CARGO_TYPE_ORDER.length : idx;
+  };
+  return entries.slice().sort((a, b) => {
+    const ra = rank(a[0]), rb = rank(b[0]);
+    if (ra !== rb) return ra - rb;
+    return String(a[0]).localeCompare(String(b[0])); // tie-break for the "rest" bucket
+  });
+}
+
 function renderCards(cards) {
   const row = document.getElementById('cardsRow');
   row.innerHTML = '';
@@ -751,24 +722,17 @@ function renderCards(cards) {
   order.forEach((key, idx) => {
     const c = cards[key];
     if (!c) return;
-    const entries = Object.entries(c.by_type || {}).sort((a, b) => b[1] - a[1]);
+    const entries = sortByCargoOrder(Object.entries(c.by_type || {}));
     const breakdown = entries.length
       ? entries.map(([k, v]) => `<div class="kpi-row"><span>${k}</span><span>${fmtNum(v)}</span></div>`).join('')
       : '<div class="kpi-empty">No data</div>';
 
     let targetBlock = '';
-    // FIX: was `if (c.target)` — a legitimate target of 0 (e.g. a month with
-    // no target entered yet) is falsy in JS, so the whole block silently
-    // vanished even though the API returned a correct value. Check for
-    // presence instead of truthiness so 0-targets still render.
-    // Today card no longer shows target/required-daily/shortfall at all —
-    // that block is skipped entirely for key === 'today'.
     if (key !== 'today' && key !== 'yesterday' && c.target !== undefined && c.target !== null) {
 
     const monthTarget = c.target || 0;
     const yearTarget = c.target_fy || 0;
 
-    // Today card shows month target progress.
     const target = key === "today" ? monthTarget : c.target;
 
     const pct = target > 0
@@ -814,13 +778,23 @@ function renderCards(cards) {
 
     }
 
-    // Required-daily footer — Month and FY cards only. Reuses the same
-    // day-rate figure the Today card already shows (c.required_daily is
-    // set server-side from the same _daily_target_by_days_left() call),
-    // just surfaced in this card's own context instead.
     const requiredFooter = (key === 'current_month' || key === 'current_fy') && c.required_daily != null
       ? `<div class="kpi-required-footer"><span>Required Daily</span><span>${fmtNum(c.required_daily)} MT</span></div>`
       : '';
+
+    // Shift-wise discharge for Today / Yesterday, using the same
+    // per-shift totals the Shift Report's "Shift Wise Discharge" table
+    // is built from (see _fetch_shift_pivot / _build_shift_wise_table in
+    // shift_report/views.py) — surfaced here via cargo_cards[key].by_shift.
+    let shiftBlock = '';
+    if ((key === 'today' || key === 'yesterday') && c.by_shift && Object.keys(c.by_shift).length) {
+      shiftBlock = `<div class="kpi-shift-row">${
+        Object.entries(c.by_shift)
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([s, v]) => `<span class="shift-pill">Shift ${s}<b>${fmtNum(v)}</b></span>`)
+          .join('')
+      }</div>`;
+    }
 
     const div = document.createElement('div');
     div.className = 'kpi-card' + (key === 'current_fy' ? ' hero' : '');
@@ -832,7 +806,8 @@ function renderCards(cards) {
       <div class="kpi-total">${fmtNum(c.total)} <span class="kpi-unit">MT</span></div>
       ${targetBlock}
       <div class="kpi-breakdown">${breakdown}</div>
-      ${requiredFooter}`;
+      ${requiredFooter}
+      ${shiftBlock}`;
     row.appendChild(div);
   });
 }

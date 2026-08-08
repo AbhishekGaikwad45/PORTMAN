@@ -8,7 +8,7 @@ from flask import render_template, session, redirect, url_for, jsonify
 from .. import bp
 from database import get_db, get_cursor
 from ..daily_ops.model import fy_label
-from ..shift_report.views import _fetch_delays
+from ..shift_report.views import _fetch_delays, _fetch_shift_pivot
 from ..Barge_Position_Report.views import _fetch_tide_data, _fetch_all_barges
 from flask import render_template, session, redirect, url_for, jsonify, request
 
@@ -547,6 +547,17 @@ def _cumulative_by_type(today_s):
 
     return current_fy, cumulative
 
+def _shift_totals(date_s):
+    """Total quantity per shift for a single date — reuses the shift-wise
+    discharge pivot logic from the Shift Report (_fetch_shift_pivot), just
+    collapsed across cargo since the card only needs a per-shift total."""
+    pivot = _fetch_shift_pivot(date_s, 'ALL')
+    totals = {}
+    for cargo, shifts in pivot['data'].items():
+        for shift, qty in shifts.items():
+            totals[shift] = totals.get(shift, 0) + qty
+    return {s: round(totals.get(s, 0), 2) for s in pivot['shifts'] if totals.get(s, 0)}
+
 
 def _top_delays_today():
     """Today's delays (all shifts), summed per (equipment/system, reason) and ranked.
@@ -601,8 +612,6 @@ def port_overview_data():
     # exactly — no _compute_fy_throughput, no daily_ops_cutoff dependency.
     current_fy_by_type, all_time = _cumulative_by_type(today_s)
 
-
-#Accept
     target_base, target_effective = _fy_target_totals(current_fy_label)
     month_target = _month_target(current_fy_label, today.month)
 
@@ -618,23 +627,25 @@ def port_overview_data():
             'by_type': current_fy_by_type,
             'target': target_base,
             'target_effective': target_effective,
-            'required_daily': today_target_fy,          # <-- NEW: daily rate needed to hit FY target
+            'required_daily': today_target_fy,
         },
         'current_month': {
             'label': today.strftime('%b %Y'),
             'by_type': _cargo_by_type(month_start_s, today_s),
             'target': month_target,
-            'required_daily': today_target_month,        # <-- NEW: daily rate needed to hit month target
+            'required_daily': today_target_month,
         },
         'yesterday':     {
             'label': 'Yesterday',
             'by_type': _cargo_by_type(yesterday_s, yesterday_s),
+            'by_shift': _shift_totals(yesterday_s),
             'target': yesterday_target_month,
             'target_fy': yesterday_target_fy,
         },
         'today':         {
             'label': 'Today',
             'by_type': _cargo_by_type(today_s, today_s),
+            'by_shift': _shift_totals(today_s),
             'target': today_target_month,
             'target_fy': today_target_fy,
         },
@@ -642,6 +653,8 @@ def port_overview_data():
     for c in cards.values():
         c['total'] = round(sum(c['by_type'].values()), 2)
         c['by_type'] = {k: round(v, 2) for k, v in c['by_type'].items() if v > 0}
+        if 'by_shift' in c:
+            c['by_shift'] = {k: round(v, 2) for k, v in c['by_shift'].items() if v > 0}
 
     # MBC Status — same live data used everywhere else in RP01, fetched
     # fresh on every dashboard refresh so it never drifts from mbc_master.
@@ -666,8 +679,6 @@ def port_overview_data():
         'mbc_status':  mbc_status,
         'as_of':       now.strftime('%Y-%m-%d %H:%M:%S'),
     })
-
-#ACCEPTED
 
 # ---------------------------------------------------------------------------
 # Targets (FY monthly ABP + Outlook, with category-wise breakdown)
