@@ -855,9 +855,40 @@ function mbcStatusClass(status) {
   if (s.startsWith('EMPTY'))           return 'empty';
   return 'na';
 }
+// Fixed priority order for MBC Status rows — Dharamtar-side statuses first
+// (discharge in progress, then loaded/empty waiting there), working back
+// through Gull Island to Jaigad/load-port, rather than the qty/name order
+// the API returns. Ties (same status, multiple MBCs) fall back to name.
+const MBC_STATUS_ORDER = [
+  'UNDER DISCHARGE AT DHARAMTAR',
+  'LOADED : WAITING AT DHARAMTAR',
+  'EMPTY : WAITING AT DHARAMTAR',
+  'LOADED : ON THE WAY TO DHARAMTAR',
+  'LOADED : WAITING AT GULL',
+  'LOADED : ON THE WAY TO GULL',
+  'EMPTY : ON THE WAY TO JAIGAD',
+  'EMPTY : WAITING AT JAIGAD',
+  'UNDER LOADING',
+  'LOADED : WAITING AT LOAD PORT',
+  'EMPTY : WAITING AT LOAD PORT',
+  'NA'
+];
+
+function sortByMbcStatusOrder(rows) {
+  const rank = (status) => {
+    const idx = MBC_STATUS_ORDER.indexOf(String(status || '').toUpperCase());
+    return idx === -1 ? MBC_STATUS_ORDER.length : idx;
+  };
+  return rows.slice().sort((a, b) => {
+    const ra = rank(a.mbc_status), rb = rank(b.mbc_status);
+    if (ra !== rb) return ra - rb;
+    return String(a.mbc_name || '').localeCompare(String(b.mbc_name || ''));
+  });
+}
+
 function renderMBCStatus(rows) {
   const body = document.getElementById('mbcBody');
-  rows = rows || [];
+  rows = sortByMbcStatusOrder(rows || []);
   document.getElementById('mbcCount').textContent = `${rows.length} MBCs`;
 
   if (!rows.length) {
