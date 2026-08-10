@@ -342,16 +342,30 @@ def get_lueu_barge_progress(ldud_id):
     conn.close()
     return {'total': round(total, 3), 'barges': barges}
 
-
-def get_next_trip_number(ldud_id, barge_name):
+def get_next_trip_number(ldud_id, barge_name, exclude_id=None, cur=None):
     """Get the next trip number for a barge in this LDUD"""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute('''SELECT MAX(trip_number) FROM ldud_barge_lines
-                            WHERE ldud_id=%s AND barge_name=%s''', (ldud_id, barge_name))
-    result = cur.fetchone()['max']
-    conn.close()
-    return (result or 0) + 1
+    bname = (barge_name or '').strip()
+    if not bname:
+        return 1
+    close_cur = False
+    if cur is None:
+        conn = get_db()
+        cur = get_cursor(conn)
+        close_cur = True
+    try:
+        query = '''SELECT MAX(trip_number) FROM ldud_barge_lines
+                   WHERE ldud_id=%s AND TRIM(UPPER(barge_name)) = TRIM(UPPER(%s))'''
+        params = [ldud_id, bname]
+        if exclude_id:
+            query += ' AND id != %s'
+            params.append(exclude_id)
+        cur.execute(query, params)
+        row = cur.fetchone()
+        result = row['max'] if row else None
+        return (result or 0) + 1
+    finally:
+        if close_cur:
+            conn.close()
 
 def save_barge_line(data):
     _clean_empty(data)
@@ -367,13 +381,27 @@ def save_barge_line(data):
 
 
 def _save_barge_line_inner(data, conn, cur):
-    if data.get('id'):
-        # Check if barge_name changed, if so recalculate trip number
-        cur.execute('SELECT barge_name FROM ldud_barge_lines WHERE id=%s', (data['id'],))
+    barge_name = (data.get('barge_name') or '').strip() or None
+    row_id = data.get('id')
+
+    if row_id:
+        # Check existing row in DB
+        cur.execute('SELECT barge_name, trip_number FROM ldud_barge_lines WHERE id=%s', (row_id,))
         existing = cur.fetchone()
         trip_number = data.get('trip_number')
-        if existing and existing['barge_name'] != data.get('barge_name') and data.get('barge_name'):
-            trip_number = get_next_trip_number(data.get('ldud_id'), data.get('barge_name'))
+        existing_barge = (existing['barge_name'] or '').strip() if existing else ''
+        new_barge = barge_name or ''
+
+        if new_barge:
+            # Recalculate trip_number if:
+            # 1. No trip_number is set, OR
+            # 2. Existing barge_name in DB was empty/NULL (first time assigning barge to placeholder row), OR
+            # 3. Existing barge_name changed to a different barge name
+            if not trip_number or not existing_barge or existing_barge.upper() != new_barge.upper():
+                trip_number = get_next_trip_number(data.get('ldud_id'), new_barge, exclude_id=row_id, cur=cur)
+
+        if not trip_number:
+            trip_number = 1
 
         cur.execute('''UPDATE ldud_barge_lines SET trip_number=%s, hold_name=%s, barge_name=%s, contractor_name=%s, cargo_name=%s,
                       bpt_bfl=%s, along_side_vessel=%s, commenced_loading=%s, completed_loading=%s, cast_off_mv=%s,
@@ -381,7 +409,7 @@ def _save_barge_line_inner(data, conn, cur):
                       completed_discharge_berth=%s, cast_off_berth=%s, cast_off_berth_nt=%s, discharge_quantity=%s,
                       crane_loaded_from=%s, trip_start=%s, amf_at_port=%s, cast_off_port=%s, port_crane=%s,
                       cast_off_loading_berth=%s, anchored_gull_island_empty=%s, aweigh_gull_island_empty=%s WHERE id=%s''',
-                   [trip_number, data.get('hold_name'), data.get('barge_name'), data.get('contractor_name'), data.get('cargo_name'),
+                   [trip_number, data.get('hold_name'), barge_name, data.get('contractor_name'), data.get('cargo_name'),
                     data.get('bpt_bfl'), data.get('along_side_vessel'), data.get('commenced_loading'),
                     data.get('completed_loading'), data.get('cast_off_mv'), data.get('anchored_gull_island'),
                     data.get('aweigh_gull_island'), data.get('along_side_berth'), data.get('commence_discharge_berth'),
@@ -389,15 +417,14 @@ def _save_barge_line_inner(data, conn, cur):
                     data.get('discharge_quantity'), data.get('crane_loaded_from'), data.get('trip_start'),
                     data.get('amf_at_port'), data.get('cast_off_port'), data.get('port_crane'),
                     data.get('cast_off_loading_berth'), data.get('anchored_gull_island_empty'),
-                    data.get('aweigh_gull_island_empty'), data['id']])
-        row_id = data['id']
+                    data.get('aweigh_gull_island_empty'), row_id])
     else:
         # Use explicit trip_number if provided (e.g. cloning a row for multiple cargo on same trip)
         trip_number = data.get('trip_number')
         if not trip_number:
             trip_number = 1
-            if data.get('barge_name'):
-                trip_number = get_next_trip_number(data['ldud_id'], data.get('barge_name'))
+            if barge_name:
+                trip_number = get_next_trip_number(data['ldud_id'], barge_name, cur=cur)
 
         cur.execute('''INSERT INTO ldud_barge_lines (ldud_id, trip_number, hold_name, barge_name, contractor_name, cargo_name,
                       bpt_bfl, along_side_vessel, commenced_loading, completed_loading, cast_off_mv,
@@ -406,7 +433,7 @@ def _save_barge_line_inner(data, conn, cur):
                       crane_loaded_from, trip_start, amf_at_port, cast_off_port, port_crane,
                       cast_off_loading_berth, anchored_gull_island_empty, aweigh_gull_island_empty)
                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
-                   [data['ldud_id'], trip_number, data.get('hold_name'), data.get('barge_name'), data.get('contractor_name'), data.get('cargo_name'),
+                   [data['ldud_id'], trip_number, data.get('hold_name'), barge_name, data.get('contractor_name'), data.get('cargo_name'),
                     data.get('bpt_bfl'), data.get('along_side_vessel'), data.get('commenced_loading'),
                     data.get('completed_loading'), data.get('cast_off_mv'), data.get('anchored_gull_island'),
                     data.get('aweigh_gull_island'), data.get('along_side_berth'), data.get('commence_discharge_berth'),
