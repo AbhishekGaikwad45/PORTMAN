@@ -403,6 +403,16 @@ def _fetch_mbc_status(report_date=None):
                 THEN
                     'UNDER DISCHARGE AT DHARAMTAR'
 
+                /* Empty : Waiting at Jaigad (returned) — vessel has sailed
+                   out from the discharge port AND has already reached the
+                   load port again, so it's no longer "on the way". */
+                WHEN
+                    NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
+                    AND d.sailed_out_load_port IS NOT NULL
+                    AND d.reached_load_port IS NOT NULL
+                THEN
+                    'EMPTY : WAITING AT JAIGAD'
+
                 /* Empty : On the way to Jaigad */
                 WHEN
                     NULLIF(TRIM(d.unloading_completed), '') IS NOT NULL
