@@ -188,6 +188,26 @@ html, body {
   filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(21,128,61,.55));
   transition:filter .15s, transform .15s;
 }
+/* Berth marker: a rule down the berth's length with a tick capping each end,
+   sitting just past the mooring face on the jetty side. Rotated with the berth,
+   so its local +x points at the land — hence `left` puts the name on that side. */
+.berth-mark {
+  position:absolute; width:calc(1.6px * var(--lbl,1)); pointer-events:none;
+  background:rgba(255,255,255,.85); box-shadow:0 0 3px rgba(0,0,0,.7);
+}
+.berth-mark::before, .berth-mark::after {   /* start / end of the berth */
+  content:''; position:absolute; left:calc(-3.2px * var(--lbl,1));
+  width:calc(8px * var(--lbl,1)); height:calc(1.6px * var(--lbl,1));
+  background:rgba(255,255,255,.85); box-shadow:0 0 3px rgba(0,0,0,.7);
+}
+.berth-mark::before { top:0; }
+.berth-mark::after  { bottom:0; }
+.berth-mark span {
+  position:absolute; left:calc(6px * var(--lbl,1)); top:50%; transform:translateY(-50%);
+  font-family:'Space Grotesk',sans-serif; font-size:calc(8px * var(--lbl,1));
+  font-weight:700; letter-spacing:.4px; color:#fff; white-space:nowrap;
+  text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 6px rgba(0,0,0,.7);
+}
 .vessel:hover { filter:drop-shadow(0 0 7px rgba(25,85,224,.9)); transform:scale(1.12); }
 .vessel.waiting { background:linear-gradient(160deg,#43e6f1,#0891b2); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(8,145,178,.5)); }
 .vessel.completed { background:linear-gradient(160deg,#facc15,#ca8a04); filter:drop-shadow(0 1px 3px rgba(0,0,0,.5)) drop-shadow(0 0 6px rgba(234,179,8,.55)); }
@@ -622,12 +642,25 @@ function renderBerths(layout) {
   let occupied = 0;
 
   (layout.berths || []).forEach(b => {
+    const th = (b.angle || 0) * Math.PI / 180;
+    const cos = Math.cos(th), sin = Math.sin(th);
+
+    // Berth marker on the jetty side (+x, past the mooring face) — the vessels
+    // bank the other way, so this side is clear. Drawn for empty berths too.
+    const mx = b.cx + ((b.w || 60) / 2 + 3) * cos;
+    const my = b.cy + ((b.w || 60) / 2 + 3) * sin;
+    const mark = document.createElement('div');
+    mark.className = 'berth-mark';
+    mark.style.left   = (mx / iw * 100) + '%';
+    mark.style.top    = (my / ih * 100) + '%';
+    mark.style.height = ((b.h || 60) / ih * 100) + '%';   // spans the berth, ticks cap each end
+    mark.style.transform = `translate(-50%,-50%) rotate(${b.angle || 0}deg)`;
+    mark.innerHTML = `<span>${b.label || ''}</span>`;
+    overlay.appendChild(mark);
+
     const assets = b.assets || [];
     if (!assets.length) return;
     occupied++;
-
-    const th = (b.angle || 0) * Math.PI / 180;
-    const cos = Math.cos(th), sin = Math.sin(th);
     const bargeLen = Math.min(Math.max((b.h || 60) * 0.7, 14), 80); // barges scale with the berth
     const MBC_LEN = 80;                                             // MBCs are one fixed size
 
@@ -661,12 +694,10 @@ function renderBerths(layout) {
         overlay.appendChild(v);
 
         // Queue the label; placeLabels() de-collides them all together below.
-        // The berth name (plus bank code when the berth is banked) is what ties
-        // the chip to its hull now that there are no leader lines.
+        // Berth identity lives on the berth marker now, not in the chip.
         labels.push({
           y: py * sx, a: a, b: b, slot: slot, berthY: (b.cy || 0) * sx,
-          text: `<b>${b.label || ''}</b> ` +
-                (assets.length > 1 ? `${a.position || 'A/S'} ` : '') + a.name
+          text: assets.length > 1 ? `<b>${a.position || 'A/S'}</b> ${a.name}` : a.name
         });
       });
   });
