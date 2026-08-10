@@ -229,6 +229,16 @@ def _current_shift_code(now=None):
         return 'B'
     return 'C'
 
+def _operational_date(now=None):
+    """RP01's business day runs 6:00 AM -> 6:00 AM, not midnight -> midnight
+    (shift A starts at 6). Before 6 AM, cards/delays should still reflect
+    the previous calendar day, not an empty new one."""
+    now = now or datetime.now()
+    d = now.date()
+    if now.hour < 6:
+        d -= timedelta(days=1)
+    return d
+
 
 def _todays_notes():
     conn = get_db()
@@ -560,14 +570,9 @@ def _shift_totals(date_s):
 
 
 def _top_delays_today():
-    """Today's delays (all shifts), summed per (equipment/system, reason) and ranked.
-
-    Maintenance delays are tied to a system (RMHS component), not a piece of
-    loading/unloading equipment, so for those rows use system_name instead
-    of equipment_name — mirrors the Equipment vs System distinction in the
-    Shift Report delay sheet.
-    """
-    today_s = date.today().strftime('%Y-%m-%d')
+    """Today's delays (all shifts) for the current *operational* day
+    (6 AM -> 6 AM), summed per (equipment/system, reason) and ranked."""
+    today_s = _operational_date().strftime('%Y-%m-%d')
     delays = _fetch_delays(today_s, 'ALL')
     totals = {}
     for d in delays:
@@ -594,7 +599,7 @@ def _top_delays_today():
 @login_required
 def port_overview_data():
     now = datetime.now()
-    today = date.today()
+    today = _operational_date(now)          # was: date.today()
     today_s = today.strftime('%Y-%m-%d')
     yesterday_date = today - timedelta(days=1)
     yesterday_s = yesterday_date.strftime('%Y-%m-%d')
