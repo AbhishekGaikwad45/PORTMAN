@@ -555,6 +555,7 @@ let IMG_SIZE = [941, 1672]; // static/img/Clean_berths.png; refreshed from layou
 
 const MAX_IMG_COL = 520;
 const LBL_REF = 460;
+const BERTH_MARK_PAD = 16;  // image px from the mooring face out to the berth marker
 let stageW = 0, stageH = 0, lastLayout = null;
 
 const lblScale = () => stageW / LBL_REF;
@@ -623,8 +624,9 @@ function renderBerths(layout) {
 
     // Berth marker on the jetty side (+x, past the mooring face) — the vessels
     // bank the other way, so this side is clear. Drawn for empty berths too.
-    const mx = b.cx + ((b.w || 60) / 2 + 3) * cos;
-    const my = b.cy + ((b.w || 60) / 2 + 3) * sin;
+    // BERTH_MARK_PAD is in image px: raise it to push the markers further ashore.
+    const mx = b.cx + ((b.w || 60) / 2 + BERTH_MARK_PAD) * cos;
+    const my = b.cy + ((b.w || 60) / 2 + BERTH_MARK_PAD) * sin;
     const mark = document.createElement('div');
     mark.className = 'berth-mark';
     mark.style.left   = (mx / iw * 100) + '%';
