@@ -342,6 +342,17 @@ def get_lueu_barge_progress(ldud_id):
     conn.close()
     return {'total': round(total, 3), 'barges': barges}
 
+def _needs_new_trip(existing_barge, new_barge, trip_number):
+    """Should this row's trip_number be recalculated? Only when a barge is set
+    AND either the row has no number yet, the DB row had no barge (placeholder
+    row getting its first barge), or the barge actually changed."""
+    if not new_barge:
+        return False
+    return (not trip_number
+            or not existing_barge
+            or existing_barge.strip().upper() != new_barge.strip().upper())
+
+
 def get_next_trip_number(ldud_id, barge_name, exclude_id=None, cur=None):
     """Get the next trip number for a barge in this LDUD"""
     bname = (barge_name or '').strip()
@@ -353,6 +364,14 @@ def get_next_trip_number(ldud_id, barge_name, exclude_id=None, cur=None):
         cur = get_cursor(conn)
         close_cur = True
     try:
+        # The grid saves every dirty row in parallel (Promise.all in
+        # ldud01.html), so without this two rows for the same barge read the
+        # same MAX and both claim the next trip number. Serialise per
+        # (ldud_id, barge); the lock releases on commit/rollback of the
+        # caller's transaction, which is where the INSERT/UPDATE lands.
+        cur.execute('SELECT pg_advisory_xact_lock(%s, hashtext(%s))',
+                    (ldud_id, bname.upper()))
+
         query = '''SELECT MAX(trip_number) FROM ldud_barge_lines
                    WHERE ldud_id=%s AND TRIM(UPPER(barge_name)) = TRIM(UPPER(%s))'''
         params = [ldud_id, bname]
@@ -388,17 +407,14 @@ def _save_barge_line_inner(data, conn, cur):
         # Check existing row in DB
         cur.execute('SELECT barge_name, trip_number FROM ldud_barge_lines WHERE id=%s', (row_id,))
         existing = cur.fetchone()
-        trip_number = data.get('trip_number')
         existing_barge = (existing['barge_name'] or '').strip() if existing else ''
         new_barge = barge_name or ''
+        # Fall back to the number already on the row — a payload that omits
+        # trip_number must not silently renumber an unchanged row to MAX+1.
+        trip_number = data.get('trip_number') or (existing['trip_number'] if existing else None)
 
-        if new_barge:
-            # Recalculate trip_number if:
-            # 1. No trip_number is set, OR
-            # 2. Existing barge_name in DB was empty/NULL (first time assigning barge to placeholder row), OR
-            # 3. Existing barge_name changed to a different barge name
-            if not trip_number or not existing_barge or existing_barge.upper() != new_barge.upper():
-                trip_number = get_next_trip_number(data.get('ldud_id'), new_barge, exclude_id=row_id, cur=cur)
+        if _needs_new_trip(existing_barge, new_barge, trip_number):
+            trip_number = get_next_trip_number(data.get('ldud_id'), new_barge, exclude_id=row_id, cur=cur)
 
         if not trip_number:
             trip_number = 1
