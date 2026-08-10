@@ -105,7 +105,13 @@ SELECT
         ELSE dp.unloading_completed::text
     END AS discharge_completed,
 
-    'INDIA' AS flag
+    'INDIA' AS flag,
+
+    -- NEW: bill number(s) linked to this MBC header via bill_lines
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+
+    -- NEW: document status for MBC
+    COALESCE(h.doc_status, '-') AS status
 
 FROM mbc_header h
 
@@ -154,6 +160,22 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
+-- NEW: bill_lines aggregated to ONE row per MBC header, so it doesn't
+-- fan out the join like a raw join would. cargo_source_type = 'MBC'
+-- and cargo_source_id = mbc_header.id per the bill_lines mapping.
+-- bill_number itself lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'MBC'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = h.id
+
 WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
@@ -201,7 +223,9 @@ GROUP BY
     dp.unloading_commenced,
     dp.unloading_completed,
     v.nationality,
-    mbc.actual_discharge
+    mbc.actual_discharge,
+    bln.bill_numbers,
+    h.doc_status
 UNION ALL
 
 SELECT
@@ -231,7 +255,16 @@ SELECT
 
     la.last_discharge_completed::text AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW: bill number(s) linked to this MV/LDUD header via bill_lines.
+    -- cargo_source_type = 'VCN_IMPORT' and cargo_source_id = ldud_header.id
+    -- (confirmed: cargo_source_id matches lh.id, the same id already used
+    -- as the row id for the MV branch)
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+
+    -- NEW: document status for MV, sourced from vcn_header
+    COALESCE(vh.doc_status, '-') AS status
 
 FROM ldud_header lh
 
@@ -318,6 +351,22 @@ ON mv.match_display =
 AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
 
+-- NEW: bill_lines aggregated to ONE row per LDUD header. Per the
+-- earlier lookup, VCN_IMPORT bills key off cargo_source_id = lh.id
+-- (NOT vh.id), so join on lh.id here. bill_number itself lives on
+-- bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'VCN_IMPORT'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = lh.id
+
 WHERE la.first_discharge_started IS NOT NULL
 AND (
     (
@@ -364,7 +413,9 @@ GROUP BY
     la.first_discharge_started,
     la.last_discharge_completed,
     v.nationality,
-    mv.actual_discharge
+    mv.actual_discharge,
+    bln.bill_numbers,
+    vh.doc_status
 
 ORDER BY discharge_commenced DESC;
 """
@@ -441,6 +492,10 @@ ORDER BY discharge_commenced DESC;
 
     'customer_detail_id': row['customer_detail_id'] or '-',
     'flag': row['flag'] or '-',
+
+    # NEW
+    'bill_number': row['bill_number'] or 'NA',
+    'status': row['status'] or '-',
 })
 
 
@@ -573,7 +628,11 @@ SELECT
         ELSE dp.unloading_completed::text
     END AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(h.doc_status, '-') AS status
 
 FROM mbc_header h
 
@@ -622,6 +681,20 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
+-- NEW: bill_lines aggregated to ONE row per MBC header. bill_number
+-- lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'MBC'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = h.id
+
 WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
@@ -668,7 +741,9 @@ GROUP BY
     dp.unloading_commenced,
     dp.unloading_completed,
     v.nationality,
-    mbc.actual_discharge
+    mbc.actual_discharge,
+    bln.bill_numbers,
+    h.doc_status
 UNION ALL
 
 SELECT
@@ -697,7 +772,11 @@ SELECT
 
     la.last_discharge_completed::text AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(vh.doc_status, '-') AS status
 
 FROM ldud_header lh
 
@@ -784,6 +863,20 @@ ON mv.match_display =
 AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
 
+-- NEW: bill_lines aggregated to ONE row per LDUD header, keyed on lh.id.
+-- bill_number lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'VCN_IMPORT'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = lh.id
+
 WHERE la.first_discharge_started IS NOT NULL
 AND (
     (
@@ -829,7 +922,9 @@ GROUP BY
     la.first_discharge_started,
     la.last_discharge_completed,
     v.nationality,
-    mv.actual_discharge
+    mv.actual_discharge,
+    bln.bill_numbers,
+    vh.doc_status
 
 ORDER BY discharge_commenced DESC;
 """
@@ -875,13 +970,16 @@ ORDER BY discharge_commenced DESC;
         align_ctr  = Alignment(horizontal='center', vertical='center', wrap_text=True)
         align_left = Alignment(horizontal='left',   vertical='center', wrap_text=True)
 
+        # NEW: 'Bill No.' and 'Status' appended after Flag, at the end,
+        # so none of the existing hardcoded column indices (merges, totals,
+        # Actual Discharge alignment) below need to shift.
         headers = [
             'Sr No', 'M.Vessel Name', 'MV/MBC', 'Material PO',
             'Type', 'Cargo', 'B/L Qty.\n(MT)', 'Actual Discharge\n(MT)',
             'Load Port', 'Discharge\nCommence', 'Discharge\nCompleted',
-            'Consignee /\nCustomer', 'Flag'
+            'Consignee /\nCustomer', 'Flag', 'Bill No.', 'Status'
         ]
-        col_widths = [7, 40, 9, 16, 9, 16, 12, 24, 20, 22, 22, 22, 18]
+        col_widths = [7, 40, 9, 16, 9, 16, 12, 24, 20, 22, 22, 22, 18, 22, 14]
         num_cols   = len(headers)
 
         # ── Row 1: Title ──────────────────────────────────────
@@ -968,6 +1066,10 @@ else '',
 
     row['consignee'] or '',
     row['flag'] or '',
+
+    # NEW
+    row['bill_number'] or 'NA',
+    row['status'] or '-',
 ]
 
             for col, val in enumerate(values, start=1):
@@ -976,7 +1078,7 @@ else '',
                 cell.font      = font_data
                 cell.fill      = fill
                 cell.border    = bdr_thin
-                cell.alignment = align_ctr if col in [1, 3, 7, 8] else align_left
+                cell.alignment = align_ctr if col in [1, 3, 7, 8, 15] else align_left
             ws.row_dimensions[r].height = 20
 
         # ── Merge Actual Discharge column (H) ────────────────
@@ -1040,7 +1142,8 @@ else '',
         act_cell.border        = bdr_thin
         act_cell.number_format = '#,##0'
 
-        for col in [1, 2, 3, 4, 9, 10, 11, 12, 13]:
+        # NEW: 14, 15 (Bill No., Status) added to the plain-header-fill pass
+        for col in [1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15]:
             c        = ws.cell(row=total_row, column=col)
             c.fill   = fill_header
             c.border = bdr_thin
