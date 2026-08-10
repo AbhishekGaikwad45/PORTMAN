@@ -858,6 +858,28 @@
         background: #fff;
     }
 
+    .log-count-table {
+        border-collapse: collapse;
+        width: 180px;
+        background: #fff;
+    }
+
+    .log-count-table th,
+    .log-count-table td {
+        border: 1px solid #cbd5e1;
+        padding: 8px 12px;
+        height: 32px;
+        font-size: 12px;
+        text-align: center;
+        background: #fff;
+    }
+
+    .log-count-table th {
+        background: #f8fafc;
+        font-weight: 700;
+        color: #475569;
+    }
+
     .plan-input {
         width: 100%;
         border: none;
@@ -1052,7 +1074,7 @@
 
     <div class="filter-group">
         <label for="report-date">DATE</label>
-        <input type="date" id="report-date"
+        <input type="date" id="report-date" onchange="autoSelectShift(); applyDateRangeFilter();"
             style="height:34px;padding:6px 10px;border:1px solid #d9e2ec;border-radius:4px;background:#fff;font-size:13px;">
     </div>
 
@@ -1471,6 +1493,33 @@
                 <tr>
                     <td>STEEL PLANT</td>
                     <td id="steelPlantQty">0</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <table class="log-count-table">
+            <thead>
+                <tr>
+                    <th>SHIFT</th>
+                    <th>LOG COUNT</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>A</td>
+                    <td id="aLogCount">0</td>
+                </tr>
+                <tr>
+                    <td>B</td>
+                    <td id="bLogCount">0</td>
+                </tr>
+                <tr>
+                    <td>C</td>
+                    <td id="cLogCount">0</td>
+                </tr>
+                <tr class="total-row">
+                    <td>TOTAL</td>
+                    <td id="totalLogCount" style="font-weight:700;">0</td>
                 </tr>
             </tbody>
         </table>
@@ -2122,6 +2171,7 @@
                 logConsole.prepend(item);
             });
             document.getElementById('logCount').textContent = _movementLogs.length;
+            updateLogCountTable();
         }
         // ── Shift Plan ───────────────────────────────────────────────
         if (savedData.shift_plan) {
@@ -2676,6 +2726,7 @@
         <span>Shift Incharge: ${shiftIncharge}</span>`;
         document.getElementById("logConsole").prepend(item);
         document.getElementById("logCount").textContent = _movementLogs.length;
+        updateLogCountTable();
     }
 
     function showMovementLogs() {
@@ -3079,25 +3130,78 @@
         const reportDate = document.getElementById('report-date').value;
         const shifts = ['A', 'B', 'C'];
         const discharge = { A: 0, B: 0, C: 0 };
+        const logCounts = { A: 0, B: 0, C: 0 };
 
         for (const shift of shifts) {
             const params = new URLSearchParams({ date: reportDate, shift: shift });
-            const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
-            const data = await res.json();
+            let logsCount = 0;
+            try {
+                const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
+                const data = await res.json();
+                const logs = [...(data.barge_discharge || []), ...(data.mbc_discharge || [])];
+                let total = 0;
+                logs.forEach(row => {
+                    total += Number(row.actual_discharge || 0);
+                });
+                discharge[shift] = total;
+                logsCount = logs.length;
+            } catch (e) {
+                console.error('shift summary fetch error:', e);
+            }
 
-            let total = 0;
-            [...(data.barge_discharge || []), ...(data.mbc_discharge || [])].forEach(row => {
-                total += Number(row.actual_discharge || 0);
-            });
-            discharge[shift] = total;
+            const movCount = (_movementLogs || []).filter(l => {
+                const s = (l.shift || '').trim().toUpperCase();
+                return s === shift || s === (shift + ' SHIFT') || s.startsWith(shift);
+            }).length;
+
+            logCounts[shift] = logsCount > 0 ? logsCount : movCount;
         }
 
         document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
         document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
         document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
 
+        document.getElementById('aLogCount').textContent = logCounts.A.toLocaleString();
+        document.getElementById('bLogCount').textContent = logCounts.B.toLocaleString();
+        document.getElementById('cLogCount').textContent = logCounts.C.toLocaleString();
+        document.getElementById('totalLogCount').textContent = (logCounts.A + logCounts.B + logCounts.C).toLocaleString();
+
+        updateLogCountTable();
+
         calculateShiftDiff();
         updateSlagClinkerSummary();
+    }
+
+    function updateLogCountTable() {
+        const counts = { A: 0, B: 0, C: 0 };
+        (_movementLogs || []).forEach(l => {
+            const s = (l.shift || '').trim().toUpperCase();
+            if (s.startsWith('A')) counts.A++;
+            else if (s.startsWith('B')) counts.B++;
+            else if (s.startsWith('C')) counts.C++;
+        });
+
+        const curA = parseInt(document.getElementById('aLogCount').textContent || '0', 10) || 0;
+        const curB = parseInt(document.getElementById('bLogCount').textContent || '0', 10) || 0;
+        const curC = parseInt(document.getElementById('cLogCount').textContent || '0', 10) || 0;
+
+        const valA = Math.max(curA, counts.A);
+        const valB = Math.max(curB, counts.B);
+        const valC = Math.max(curC, counts.C);
+
+        document.getElementById('aLogCount').textContent = valA.toLocaleString();
+        document.getElementById('bLogCount').textContent = valB.toLocaleString();
+        document.getElementById('cLogCount').textContent = valC.toLocaleString();
+        document.getElementById('totalLogCount').textContent = (valA + valB + valC).toLocaleString();
+    }
+
+    function autoSelectShift() {
+        const dateInput = document.getElementById('report-date');
+        const shiftInput = document.getElementById('report-shift');
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (!dateInput.value || dateInput.value === todayStr) {
+            shiftInput.value = getCurrentShiftCode();
+        }
     }
 
     function updateSlagClinkerSummary() {

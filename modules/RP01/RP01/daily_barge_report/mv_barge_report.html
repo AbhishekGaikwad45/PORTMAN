@@ -639,28 +639,6 @@
     </div>
 
     <div class="filter-group">
-        <label for="column-filter">Column (Trip Start to Discharge End)</label>
-        <select id="column-filter" title="Select Column">
-            <option value="">-- Select Column --</option>
-            <option value="trip_start">Trip Start</option>
-            <option value="anchored_gull_island">Anchored Gull Island</option>
-            <option value="aweigh_gull_island">Aweigh Gull Island</option>
-            <option value="along_side_vessel">Alongside Vessel (MV)</option>
-            <option value="commenced_loading">Loading Start</option>
-            <option value="completed_loading">Loading End</option>
-            <option value="cast_off_mv">Cast Off MV</option>
-            <option value="anchored_gull_island_empty">Anch. Gull Island (Loaded)</option>
-            <option value="aweigh_gull_island_empty">Aweigh Gull Island (Loaded)</option>
-            <option value="amf_at_port">AMF at Port</option>
-            <option value="along_side_berth">Alongside Berth</option>
-            <option value="commence_discharge_berth">Discharge Start (Berth)</option>
-            <option value="completed_discharge_berth">Discharge End (Berth)</option>
-            <option value="cast_off_berth_nt">Cast Off Berth NT</option>
-            <option value="cast_off_port">Cast Off Port</option>
-        </select>
-    </div>
-
-    <div class="filter-group">
         <label for="status-filter">
             Filter Basis
         </label>
@@ -1336,6 +1314,28 @@
 
         return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
     }
+
+    function calcMbcTat(start, end) {
+        if (!start || !end) return '';
+        function parseDt(raw) {
+            if (!raw) return null;
+            raw = String(raw).trim();
+            const m = raw.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})/);
+            if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5]));
+            const dt = new Date(raw);
+            return isNaN(dt.getTime()) ? null : dt;
+        }
+        const sDt = parseDt(start);
+        const eDt = parseDt(end);
+        if (!sDt || !eDt) return '';
+        const diffMs = eDt - sDt;
+        if (diffMs < 0) return '';
+        const totalMins = Math.floor(diffMs / (1000 * 60));
+        const hours = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        return String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+    }
+
     function buildMbcColumns() {
 
         return [
@@ -1392,6 +1392,7 @@
             { title: 'Unloading Completed', field: 'unloading_completed', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'MBC Cast Off', field: 'mbc_cast_off', width: 160, formatter: mbcDateFormatter, editor: dateTimeEditor },
             { title: 'Sailed Out Load Port', field: 'sailed_out_load_port', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
+            { title: 'Reached Load Port', field: 'reached_load_port', width: 170, formatter: mbcDateFormatter, editor: dateTimeEditor },
             {
                 title: 'Unloaded By',
                 field: 'vessel_unloaded_by',
@@ -1412,7 +1413,15 @@
                 },
                 formatter: multiBadgeFormatter('#38a169'),
             },
-            { title: 'TAT', field: 'tat', width: 100 }
+            {
+                title: 'TAT',
+                field: 'tat',
+                width: 100,
+                formatter: function (cell) {
+                    const row = cell.getRow().getData();
+                    return calcMbcTat(row.trip_start, row.reached_load_port) || cell.getValue() || '';
+                }
+            }
         ];
     }
 
@@ -1605,7 +1614,8 @@
                         mbc_cast_off: row.mbc_cast_off,
                         sailed_out_load_port: row.sailed_out_load_port,
                         vessel_unloaded_by: row.vessel_unloaded_by,
-                        unloaded_berth: row.unloaded_berth
+                        unloaded_berth: row.unloaded_berth,
+                        reached_load_port: row.reached_load_port
                     })
                 })
                     .then(r => r.json())
@@ -1765,7 +1775,6 @@
         }
 
         const selectedToDate = document.getElementById('filter-to').value;
-        const selectedColumn = document.getElementById('column-filter').value;
 
         const params = new URLSearchParams();
 
@@ -1775,10 +1784,6 @@
 
         if (selectedToDate) {
             params.set('to_date', selectedToDate);
-        }
-
-        if (selectedColumn) {
-            params.set('column_filter', selectedColumn);
         }
 
         const selectedFilter = document.getElementById('status-filter').value;
@@ -1858,8 +1863,6 @@
         document.getElementById('filter-to').value =
             `${todayYear}-${todayMonth}-${todayDay}T06:00`;
 
-        document.getElementById('column-filter').value = '';
-
         document.getElementById('status-filter').value = 'all';
 
         updateDateTimeDisplay();
@@ -1897,7 +1900,6 @@
     function downloadAll() {
         const selectedDate = document.getElementById('filter-from').value;
         const selectedToDate = document.getElementById('filter-to').value;
-        const selectedColumn = document.getElementById('column-filter').value;
         const btn = document.getElementById('dl-all-btn');
         const loader = document.getElementById('download-loader');
 
@@ -1917,7 +1919,6 @@
         const params = new URLSearchParams();
         if (selectedDate) params.set('from_date', selectedDate);
         if (selectedToDate) params.set('to_date', selectedToDate);
-        if (selectedColumn) params.set('column_filter', selectedColumn);
         const selectedFilter =
             document.getElementById(
                 'status-filter'
@@ -1995,19 +1996,15 @@
         const wrapper = document.getElementById('shift-preview');
         wrapper.innerHTML = '';
 
-        // ── Equipment list (must match unloaded_by field values) ──────────────
-        const equipments = [
-            'Barge Unloader 1',
-            'Barge Unloader 2',
-            'SANY 285-Exavator',
-            'Sennebogen J1',
-            'Sennebogen J5',
-            'BUL-01',
-            'BUL-02',
-            'BUL-03',
-            'BUL-04',
-            'BUL-05'
-        ];
+        // ── Equipment list (dynamically fetched from VEM01 equipment master) ───
+        const equipments = (typeof EQUIPMENT_LIST !== 'undefined' && EQUIPMENT_LIST.length > 0)
+            ? EQUIPMENT_LIST
+            : [
+                'Barge Unloader 1', 'Barge Unloader 2',
+                'SANY 285-Exavator',
+                'Sennebogen J1', 'Sennebogen J5',
+                'BUL-01', 'BUL-02', 'BUL-03', 'BUL-04', 'BUL-05'
+            ];
 
         // ── Shift time definitions (24hr format) ──────────────────────────────
         const shiftDefs = [
@@ -2337,19 +2334,10 @@
         const wrapper = document.getElementById('shift-preview');
         wrapper.innerHTML = '';
 
-        // ── Equipment list — same order as backend ────────────────────────────
-        const equipments = [
-            'Barge Unloader 1',
-            'Barge Unloader 2',
-            'SANY 285-Exavator',
-            'Sennebogen J1',
-            'Sennebogen J5',
-            'BUL-01',
-            'BUL-02',
-            'BUL-03',
-            'BUL-04',
-            'BUL-05'
-        ];
+        // ── Equipment list — dynamic from VEM01 / API ─────────────────────────
+        const equipments = (typeof EQUIPMENT_LIST !== 'undefined' && EQUIPMENT_LIST.length > 0)
+            ? EQUIPMENT_LIST
+            : Object.keys(shiftMap['A Shift'] || shiftMap['B Shift'] || shiftMap['C Shift'] || {});
 
         // ── Shift order ───────────────────────────────────────────────────────
         const shiftKeys = ['A Shift', 'B Shift', 'C Shift'];
