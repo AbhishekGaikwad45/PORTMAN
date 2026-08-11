@@ -246,7 +246,7 @@ def _todays_notes():
     cur.execute("""
         SELECT notes FROM barge_position_report
         WHERE report_date = %s AND shift = %s
-    """, (date.today().strftime('%Y-%m-%d'), _current_shift_code()))
+    """, (_operational_date().strftime('%Y-%m-%d'), _current_shift_code()))
     row = cur.fetchone()
     conn.close()
     if not row:
@@ -266,7 +266,7 @@ def _current_shift_incharge():
     cur.execute("""
         SELECT shift_incharge FROM barge_position_report
         WHERE report_date = %s AND shift = %s
-    """, (date.today().strftime('%Y-%m-%d'), _current_shift_code()))
+    """, (_operational_date().strftime('%Y-%m-%d'), _current_shift_code()))
     row = cur.fetchone()
     conn.close()
     if not row:
