@@ -29,6 +29,9 @@ _ctr    = Alignment(horizontal='center', vertical='center', wrap_text=True)
 _left   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
 _right  = Alignment(horizontal='right',  vertical='center', wrap_text=True)
 
+# ── Report cutoff ────────────────────────────────────────────────────────
+REPORT_CUTOFF_DATE = datetime(2026, 5, 1, 0, 0, 0)
+
 
 def _fill(hex_color):
     return PatternFill('solid', fgColor=hex_color)
@@ -151,6 +154,7 @@ def _fetch_list(from_date, to_date):
         WHERE
             ll.is_deleted IS NOT TRUE
             AND ll.source_type = 'VCN'
+            AND TO_DATE(ll.entry_date, 'YYYY-MM-DD') >= '2026-05-01'::date
             AND TO_DATE(ll.entry_date, 'YYYY-MM-DD') <= %s::date
         GROUP BY
             ll.barge_name,
@@ -218,6 +222,7 @@ def _fetch_list(from_date, to_date):
         AND TRIM(l.barge_name) <> ''
         AND l.trip_start IS NOT NULL
         AND TRIM(l.trip_start) <> ''
+        AND l.trip_start::timestamp >= '2026-05-01 00:00:00'::timestamp
         AND l.trip_start::timestamp <= %s::timestamp
         AND (
             l.completed_discharge_berth IS NULL
@@ -289,7 +294,7 @@ def get_barge_status(row, from_dt, to_dt):
     vessel_side         = safe_dt(row.get('along_side_vessel'))
     qty_balance         = float(row.get('qty_balance') or 0)
 
-    if not trip_start:
+    if not trip_start or trip_start < REPORT_CUTOFF_DATE:
         return None
 
   
@@ -390,6 +395,10 @@ def _fetch_barge_data(barge_line_id):
         return {}
 
     data = dict(row)
+    trip_start = safe_dt(data.get('trip_start'))
+    if trip_start and trip_start < REPORT_CUTOFF_DATE:
+        conn.close()
+        return {}
 
     # Mother vessel name
     ldud_id = data.get('ldud_id')
@@ -1457,6 +1466,11 @@ def mv_barge_report_data():
             to_dt = datetime.fromisoformat(to_datetime)
         else:
             to_dt = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+        if to_dt < REPORT_CUTOFF_DATE:
+            return jsonify([])
+
+        if from_dt < REPORT_CUTOFF_DATE:
+            from_dt = REPORT_CUTOFF_DATE
     except Exception as e:
         print(f"Date parsing error: {e}")
         return jsonify({'error': 'Invalid date format'}), 400
@@ -1603,6 +1617,12 @@ def mv_barge_report_download_all():
                 microsecond=999999
             )
 
+        if to_dt < REPORT_CUTOFF_DATE:
+            return Response('No records found', status=404)
+
+        if from_dt < REPORT_CUTOFF_DATE:
+            from_dt = REPORT_CUTOFF_DATE
+
     except Exception:
         return jsonify(
             {'error': 'Invalid date format'}
@@ -1702,7 +1722,7 @@ def mv_barge_report_download_all():
         t  = safe_dt(row.get('trip_start') or row.get('reached_load_port') or row.get('commenced_loading') or row.get('mbc_arrival_port'))
         co = safe_dt(row.get('mbc_cast_off'))
         ud = safe_dt(row.get('unloading_completed'))
-        if not t or t > to_dt:
+        if not t or t < REPORT_CUTOFF_DATE or t > to_dt:
             continue
         if ud and ud < from_dt:
             continue
@@ -1727,40 +1747,45 @@ def mv_barge_report_download_all():
     conn = get_db()
     cur  = get_cursor(conn)
  
-    entry_date_from = from_dt.date()
+    entry_date_from = max(from_dt.date(), REPORT_CUTOFF_DATE.date())
     entry_date_to   = to_dt.date()
     if (to_dt - from_dt).total_seconds() <= 24 * 3600:
         entry_date_to = entry_date_from
+
+    if entry_date_to < REPORT_CUTOFF_DATE.date():
+        shift_rows = []
+        cur.close()
+        conn.close()
+    else:
+        cur.execute("""
+            SELECT
+                ll.shift,
+                ll.equipment_name               AS unloaded_by,
+                ll.barge_name,
+                ll.cargo_name,
+                COALESCE(ll.quantity, 0)        AS quantity,
+                ll.source_type,
+                CASE
+                    WHEN ll.source_type = 'VCN' THEN
+                        (SELECT h.vessel_name FROM ldud_header h
+                         WHERE h.vcn_id = ll.source_id LIMIT 1)
+                    WHEN ll.source_type = 'MBC' THEN
+                        (SELECT h.mbc_name FROM mbc_header h
+                         WHERE h.id = ll.source_id LIMIT 1)
+                    ELSE ''
+                END AS mv_name
+            FROM lueu_lines ll
+            WHERE
+                ll.is_deleted IS NOT TRUE
+                AND COALESCE(ll.quantity, 0) > 0
+                AND ll.entry_date IS NOT NULL
+                AND TO_DATE(ll.entry_date, 'YYYY-MM-DD') BETWEEN %s AND %s
+            ORDER BY ll.shift, ll.equipment_name, ll.barge_name
+        """, (entry_date_from, entry_date_to))
  
-    cur.execute("""
-        SELECT
-            ll.shift,
-            ll.equipment_name               AS unloaded_by,
-            ll.barge_name,
-            ll.cargo_name,
-            COALESCE(ll.quantity, 0)        AS quantity,
-            ll.source_type,
-            CASE
-                WHEN ll.source_type = 'VCN' THEN
-                    (SELECT h.vessel_name FROM ldud_header h
-                     WHERE h.vcn_id = ll.source_id LIMIT 1)
-                WHEN ll.source_type = 'MBC' THEN
-                    (SELECT h.mbc_name FROM mbc_header h
-                     WHERE h.id = ll.source_id LIMIT 1)
-                ELSE ''
-            END AS mv_name
-        FROM lueu_lines ll
-        WHERE
-            ll.is_deleted IS NOT TRUE
-            AND COALESCE(ll.quantity, 0) > 0
-            AND ll.entry_date IS NOT NULL
-            AND TO_DATE(ll.entry_date, 'YYYY-MM-DD') BETWEEN %s AND %s
-        ORDER BY ll.shift, ll.equipment_name, ll.barge_name
-    """, (entry_date_from, entry_date_to))
- 
-    shift_rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
+        shift_rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
  
 
     # ==================================================
@@ -1826,6 +1851,11 @@ def get_mbc_data():
                   datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         to_dt   = datetime.fromisoformat(to_date) if to_date else \
                   datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+        if to_dt < REPORT_CUTOFF_DATE:
+            return jsonify([])
+
+        if from_dt < REPORT_CUTOFF_DATE:
+            from_dt = REPORT_CUTOFF_DATE
     except Exception as e:
         return jsonify({'error': 'Invalid date format'}), 400
 
@@ -1906,7 +1936,7 @@ def get_mbc_data():
         )
 
         # Must have at least one valid date
-        if not trip_start:
+        if not trip_start or trip_start < REPORT_CUTOFF_DATE:
             continue
 
         # Trip must have started on or before to_dt
@@ -1970,12 +2000,21 @@ def get_shift_data():
         from_dt = datetime.fromisoformat(from_date) if from_date else datetime.now()
         to_dt   = datetime.fromisoformat(to_date)   if to_date   else datetime.now()
 
+        if to_dt < REPORT_CUTOFF_DATE:
+            return jsonify(shift_map)
+
+        if from_dt < REPORT_CUTOFF_DATE:
+            from_dt = REPORT_CUTOFF_DATE
+
         # ── Entry date = FROM date का date part
         # ── Example: 2026-04-01T06:00 → entry_date = 2026-04-01
         # ── But if time < 06:00, it belongs to previous day's shift
         # ── So use FROM date's date directly
-        entry_date_from = from_dt.date()
+        entry_date_from = max(from_dt.date(), REPORT_CUTOFF_DATE.date())
         entry_date_to   = to_dt.date()
+
+        if entry_date_to < REPORT_CUTOFF_DATE.date():
+            return jsonify(shift_map)
 
         # ── If TO time is exactly 06:00 of next day,
         # ── then entry_date_to should be FROM date only
