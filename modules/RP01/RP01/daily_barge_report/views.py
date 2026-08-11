@@ -98,10 +98,29 @@ def _calc_tat(start_val, end_val):
 
     except Exception as e:
 
-       
-
         return ''
-    
+
+def _calc_tat_hhmm(start_val, end_val):
+    try:
+        start_dt = safe_dt(start_val)
+        end_dt = safe_dt(end_val)
+
+        if not start_dt or not end_dt:
+            return ''
+
+        diff = end_dt - start_dt
+        total_seconds = int(diff.total_seconds())
+
+        if total_seconds < 0:
+            return ''
+
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        return f"{hours:02d}:{minutes:02d}"
+    except Exception:
+        return ''
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -216,16 +235,35 @@ def _fetch_list(from_date, to_date):
     return raw_rows
 
 def safe_dt(value):
-
     if not value:
         return None
 
     if isinstance(value, datetime):
         return value
 
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+
     value = str(value).strip()
+    if not value or value.lower() in ('none', 'null', '—', '-'):
+        return None
+
+    # Try ISO parsing first (handles ISO strings with/without T, space, and microseconds)
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        pass
+
+    # Try helper function
+    try:
+        parsed = _parse_tat_datetime(value)
+        if parsed:
+            return parsed
+    except Exception:
+        pass
 
     formats = [
+        "%d-%m-%Y %H:%M:%S",
         "%d-%m-%Y %H:%M",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
@@ -234,13 +272,9 @@ def safe_dt(value):
     ]
 
     for fmt in formats:
-
         try:
-            return datetime.strptime(
-                value,
-                fmt
-            )
-        except:
+            return datetime.strptime(value, fmt)
+        except Exception:
             pass
 
     return None
@@ -989,6 +1023,7 @@ def _write_mbc_sheet(ws, rows):
         ('Unloading Completed',         22,   LFT),
         ('MBC Cast Off',                22,   LFT),
         ('Sailed Out Load Port',        22,   LFT),
+        ('Reached Load Port',           22,   LFT),
         ('Unloaded By',                 20,   LFT),
         ('Unloaded Berth',              18,   LFT),
         ('TAT',                         12,   CTR),
@@ -1057,9 +1092,10 @@ def _write_mbc_sheet(ws, rows):
             _fmt_dt(g(row, 'unloading_completed')),
             _fmt_dt(g(row, 'mbc_cast_off',             'vessel_cast_off')),
             _fmt_dt(g(row, 'sailed_out_load_port')),
+            _fmt_dt(g(row, 'reached_load_port')),
             g(row,  'vessel_unloaded_by',  'unloaded_by'),
             g(row,  'unloaded_berth',      'vessel_unloading_berth'),
-            '',  # TAT — blank for MBC
+            row.get('tat') or _calc_tat_hhmm(g(row, 'trip_start', 'arrived_load_port'), g(row, 'reached_load_port')),
         ]
         for ci, (val, (_, _, align)) in enumerate(zip(values, COLS), 1):
             c = ws.cell(row=ridx, column=ci)
@@ -1072,40 +1108,7 @@ def _write_mbc_sheet(ws, rows):
 
 
 
-def get_filtered_mbc_rows(
-    from_dt,
-    to_dt,
-    column_filter=None,
-    status_filter='all',
-    selected_mbc=None,
-    selected_shift=None
-):
-    # use same query from get_mbc_data()
 
-    rows = fetch_mbc_rows()
-
-    filtered_rows = []
-
-    for row in rows:
-
-        status = get_mbc_status(row)
-        row['current_status'] = status
-
-        if status is None:
-            continue
-
-        if status_filter != 'all' and status != status_filter:
-            continue
-
-        if selected_mbc and row.get('mbc_name') != selected_mbc:
-            continue
-
-        if selected_shift and row.get('shift') != selected_shift:
-            continue
-
-        filtered_rows.append(row)
-
-    return filtered_rows
 
 
 
@@ -1137,6 +1140,27 @@ def _safe_float(val):
         return 0.0
 
 
+def get_equipment_list():
+    try:
+        conn = get_db()
+        cur = get_cursor(conn)
+        cur.execute("SELECT name FROM equipment WHERE name IS NOT NULL AND TRIM(name) != '' ORDER BY id, name")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        names = [r['name'].strip() for r in rows if r.get('name')]
+        if names:
+            return names
+    except Exception as e:
+        print(f"Error fetching equipment list from VEM01: {e}")
+
+    return [
+        'Barge Unloader 1', 'Barge Unloader 2',
+        'SANY 285-Exavator',
+        'Sennebogen J1', 'Sennebogen J5',
+        'BUL-01', 'BUL-02', 'BUL-03', 'BUL-04', 'BUL-05'
+    ]
+
 def _write_discharge_sheet(ws, rows):
 
     fill_green  = _pfill('C6EFCE')
@@ -1150,12 +1174,7 @@ def _write_discharge_sheet(ws, rows):
     bold_green  = Font(name='Calibri', bold=True,  size=10, color='006100')
     norm        = Font(name='Calibri', bold=False, size=10)
 
-    EQUIPMENTS = [
-        'Barge Unloader 1', 'Barge Unloader 2',
-        'SANY 285-Exavator',
-        'Sennebogen J1', 'Sennebogen J5',
-        'BUL-01', 'BUL-02', 'BUL-03', 'BUL-04', 'BUL-05',
-    ]
+    EQUIPMENTS = get_equipment_list()
     SHIFTS     = ['A Shift', 'B Shift', 'C Shift']
     DATA_ROWS  = 5
     BLOCK_SIZE = DATA_ROWS + 1   # 5 data + 1 total = 6 rows per shift
@@ -1426,7 +1445,6 @@ def mv_barge_report_data():
 
     from_datetime = request.args.get('from_date', '')
     to_datetime = request.args.get('to_date', '')
-    column_filter = request.args.get('column_filter', '')
     status_filter = request.args.get('status_filter', 'all')
 
     try:
@@ -1484,31 +1502,6 @@ def mv_barge_report_data():
             x.get('barge_name', '')
         )
     )
-
-    if column_filter:
-        column_field_map = {
-            'trip_start': 'trip_start',
-            'anchored_gull_island': 'anchored_gull_island',
-            'aweigh_gull_island': 'aweigh_gull_island',
-            'along_side_vessel': 'along_side_vessel',
-            'commenced_loading': 'commenced_loading',
-            'completed_loading': 'completed_loading',
-            'cast_off_mv': 'cast_off_mv',
-            'anchored_gull_island_empty': 'anchored_gull_island_empty',
-            'aweigh_gull_island_empty': 'aweigh_gull_island_empty',
-            'amf_at_port': 'amf_at_port',
-            'along_side_berth': 'along_side_berth',
-            'commence_discharge_berth': 'commence_discharge_berth',
-            'completed_discharge_berth': 'completed_discharge_berth',
-            'cast_off_berth_nt': 'cast_off_berth_nt',
-            'cast_off_port': 'cast_off_port'
-        }
-
-        db_field = column_field_map.get(column_filter)
-        if db_field:
-            rows = [r for r in rows if r.get(db_field)]
-            
-            
 
     for row in rows:
         
@@ -1574,7 +1567,10 @@ def get_mbc_status(row):
     if row.get('mbc_cast_off'):
         return 'completed_discharge'
 
-    # ✅ ADD THIS — No data at all yet
+    # Fallback for active MBCs that haven't commenced loading yet or have load port dates
+    if row.get('trip_start') or row.get('reached_load_port') or row.get('mbc_name') or row.get('mbc_name_raw'):
+        return 'currently_loading'
+
     return None
 
 @bp.route('/api/module/RP01/mv-barge-report/download-all')
@@ -1583,7 +1579,6 @@ def mv_barge_report_download_all():
 
     from_datetime = request.args.get('from_date', '')
     to_datetime = request.args.get('to_date', '')
-    column_filter = request.args.get('column_filter', '')
     status_filter = request.args.get('status_filter', 'all')
 
     try:
@@ -1642,34 +1637,6 @@ def mv_barge_report_download_all():
 
     barge_rows = filtered_rows
 
-    if column_filter:
-
-        column_field_map = {
-            'trip_start': 'trip_start',
-            'anchored_gull_island': 'anchored_gull_island',
-            'aweigh_gull_island': 'aweigh_gull_island',
-            'along_side_vessel': 'along_side_vessel',
-            'commenced_loading': 'commenced_loading',
-            'completed_loading': 'completed_loading',
-            'cast_off_mv': 'cast_off_mv',
-            'anchored_gull_island_empty': 'anchored_gull_island_empty',
-            'aweigh_gull_island_empty': 'aweigh_gull_island_empty',
-            'amf_at_port': 'amf_at_port',
-            'along_side_berth': 'along_side_berth',
-            'commence_discharge_berth': 'commence_discharge_berth',
-            'completed_discharge_berth': 'completed_discharge_berth',
-            'cast_off_berth_nt': 'cast_off_berth_nt',
-            'cast_off_port': 'cast_off_port'
-        }
-
-        db_field = column_field_map.get(column_filter)
-
-        if db_field:
-            barge_rows = [
-                r for r in barge_rows
-                if r.get(db_field)
-            ]
-
     # ==================================================
     # MBC DATA
     # ==================================================
@@ -1710,6 +1677,7 @@ def mv_barge_report_download_all():
             dp.unloading_completed          AS unloading_completed,
             dp.vessel_cast_off              AS mbc_cast_off,
             dp.sailed_out_load_port         AS sailed_out_load_port,
+            dp.reached_load_port            AS reached_load_port,
             dp.vessel_unloaded_by           AS vessel_unloaded_by,
             dp.vessel_unloading_berth       AS unloaded_berth
         FROM mbc_header h
@@ -1731,7 +1699,7 @@ def mv_barge_report_download_all():
     }
     mbc_rows = []
     for row in all_mbc:
-        t  = safe_dt(row.get('trip_start'))
+        t  = safe_dt(row.get('trip_start') or row.get('reached_load_port') or row.get('commenced_loading') or row.get('mbc_arrival_port'))
         co = safe_dt(row.get('mbc_cast_off'))
         ud = safe_dt(row.get('unloading_completed'))
         if not t or t > to_dt:
@@ -1744,6 +1712,7 @@ def mv_barge_report_download_all():
         if status is None:
             continue
         row['current_status'] = status
+        row['tat'] = _calc_tat_hhmm(row.get('trip_start'), row.get('reached_load_port'))
         if status_filter == 'all' or status == status_filter:
             mbc_rows.append(row)
     mbc_rows.sort(key=lambda x: _mbc_order.get(x.get('current_status'), 999))
@@ -1850,10 +1819,7 @@ def get_mbc_data():
 
     from_date     = request.args.get('from_date')
     to_date       = request.args.get('to_date')
-    column_filter = request.args.get('column_filter')
     status_filter = request.args.get('status_filter', 'all')
-    
-    
 
     try:
         from_dt = datetime.fromisoformat(from_date) if from_date else \
@@ -1865,8 +1831,6 @@ def get_mbc_data():
 
     conn = get_db()
     cur  = get_cursor(conn)
-
-
 
     # ── Fetch ALL rows — no date casting in SQL to avoid corrupt data crash ──
     # Replace the MBC query with this version that pre-aggregates lueu_lines
@@ -1903,6 +1867,7 @@ def get_mbc_data():
         dp.unloading_completed,
         dp.vessel_cast_off                  AS mbc_cast_off,
         dp.sailed_out_load_port,
+        dp.reached_load_port,
         dp.vessel_unloaded_by               AS vessel_unloaded_by,
         dp.vessel_unloading_berth           AS unloaded_berth,
         dp.cleaning_completed
@@ -1923,12 +1888,24 @@ def get_mbc_data():
     filtered_rows = []
 
     for row in rows:
+        trip_start = safe_dt(
+            row.get('trip_start') or 
+            row.get('along_side_vessel') or 
+            row.get('commenced_loading') or 
+            row.get('completed_loading') or 
+            row.get('cast_off_mv') or 
+            row.get('arrival_gull_island') or 
+            row.get('departure_gull_island') or 
+            row.get('mbc_arrival_port') or 
+            row.get('mbc_amf_unloading_berth') or 
+            row.get('unloading_commenced') or 
+            row.get('unloading_completed') or 
+            row.get('mbc_cast_off') or 
+            row.get('sailed_out_load_port') or 
+            row.get('reached_load_port')
+        )
 
-        trip_start          = safe_dt(row.get('trip_start'))
-        mbc_cast_off        = safe_dt(row.get('mbc_cast_off'))
-        unloading_completed = safe_dt(row.get('unloading_completed'))
-
-        # Must have a trip start
+        # Must have at least one valid date
         if not trip_start:
             continue
 
@@ -1936,39 +1913,14 @@ def get_mbc_data():
         if trip_start > to_dt:
             continue
 
-        # ── Mirror barge logic exactly ──────────────────────────────────────
+        unloading_completed = safe_dt(row.get('unloading_completed'))
+        mbc_cast_off        = safe_dt(row.get('mbc_cast_off'))
 
-        # If unloading is fully completed AND completed before from_dt → exclude
-        # (same as barge: completed_discharge < from_dt → skip)
         if unloading_completed and unloading_completed < from_dt:
             continue
 
-        # If mbc_cast_off exists AND is before from_dt → exclude
-        # (extra safety for fully-done voyages with corrupt or old cast_off)
         if mbc_cast_off and mbc_cast_off < from_dt:
             continue
-
-        # ── Optional column filter ──────────────────────────────────────────
-        if column_filter:
-            col_field_map = {
-                'trip_start':                 'trip_start',
-                'along_side_vessel':          'along_side_vessel',
-                'commenced_loading':          'commenced_loading',
-                'completed_loading':          'completed_loading',
-                'cast_off_mv':                'cast_off_mv',
-                'anchored_gull_island_empty': 'arrival_gull_island',
-                'aweigh_gull_island_empty':   'departure_gull_island',
-                'amf_at_port':                'mbc_arrival_port',
-                'along_side_berth':           'unloaded_berth',
-                'commence_discharge_berth':   'unloading_commenced',
-                'completed_discharge_berth':  'unloading_completed',
-                'cast_off_port':              'mbc_cast_off',
-            }
-            py_field = col_field_map.get(column_filter)
-            if py_field:
-                col_dt = safe_dt(row.get(py_field))
-                if not col_dt or not (from_dt <= col_dt <= to_dt):
-                    continue
 
         # ── Status determination ────────────────────────────────────────────
         status = get_mbc_status(row)
@@ -1976,7 +1928,6 @@ def get_mbc_data():
 
         if status is None:
             continue
-        
 
         if status_filter == 'all' or status == status_filter:
             filtered_rows.append(row)
@@ -1999,8 +1950,11 @@ def get_mbc_data():
         )
     )
     for row in filtered_rows:
-     if row.get("sailed_out_load_port"):
-         row["sailed_out_load_port"] = _fmt_dt(row["sailed_out_load_port"])
+        row['tat'] = _calc_tat_hhmm(row.get('trip_start'), row.get('reached_load_port'))
+        if row.get("sailed_out_load_port"):
+            row["sailed_out_load_port"] = _fmt_dt(row["sailed_out_load_port"])
+        if row.get("reached_load_port"):
+            row["reached_load_port"] = _fmt_dt(row["reached_load_port"])
 
     return jsonify(filtered_rows)
 
@@ -2079,12 +2033,7 @@ def get_shift_data():
     conn.close()
 
     # ── Build shift map ───────────────────────────────────────
-    equipments = [
-        'Barge Unloader 1', 'Barge Unloader 2',
-        'SANY 285-Exavator',
-        'Sennebogen J1', 'Sennebogen J5',
-        'BUL-01', 'BUL-02', 'BUL-03', 'BUL-04', 'BUL-05'
-    ]
+    equipments = get_equipment_list()
 
     shift_map = {
         'A Shift': {},
@@ -2221,7 +2170,8 @@ def mbc_berth_details():
             vessel_cast_off        = %s,
             sailed_out_load_port   = %s,
             vessel_unloaded_by     = %s,
-            vessel_unloading_berth = %s
+            vessel_unloading_berth = %s,
+            reached_load_port      = %s
         WHERE mbc_id = %s
     """, (
         to_iso(data.get('mbc_arrival_port')),
@@ -2233,6 +2183,7 @@ def mbc_berth_details():
         to_iso(data.get('sailed_out_load_port')),
         data.get('vessel_unloaded_by'),
         data.get('unloaded_berth'),
+        to_iso(data.get('reached_load_port')),
         data.get('id')
     ))
 
