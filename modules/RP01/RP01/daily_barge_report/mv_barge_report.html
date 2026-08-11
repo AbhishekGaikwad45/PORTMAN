@@ -1899,6 +1899,18 @@
     /* ── Download All (multi-sheet) ──────────────────────── */
     function downloadAll() {
         const selectedDate = document.getElementById('filter-from').value;
+
+        if (selectedDate && new Date(selectedDate) < new Date('2026-05-01T00:00')) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Report Not Available',
+                html: `<b>Cutoff Date:</b> 01-May-2026<br><br>Reports before this date are not available.`,
+                confirmButtonText: 'OK',
+                confirmButtonColor: '#4a90d9'
+            });
+            return;
+        }
+
         const selectedToDate = document.getElementById('filter-to').value;
         const btn = document.getElementById('dl-all-btn');
         const loader = document.getElementById('download-loader');
