@@ -860,10 +860,11 @@ function renderDelays(delays) {
     return;
   }
   const top = delays[0];
+  const rest = delays.slice(1);
   headline.innerHTML = `<span class="delay-name">${top.delay_name}</span><span class="delay-mins">${fmtMins(top.minutes)}</span>`;
-  all.innerHTML = delays.map(d =>
-    `<div class="delay-row"><span>${d.delay_name}</span><span>${fmtMins(d.minutes)}</span></div>`
-  ).join('');
+  all.innerHTML = rest.length
+    ? rest.map(d => `<div class="delay-row"><span>${d.delay_name}</span><span>${fmtMins(d.minutes)}</span></div>`).join('')
+    : '<div class="muted">No other delays today</div>';
 }
 document.getElementById('delayToggle').addEventListener('click', () => {
   const all = document.getElementById('delayAll');
@@ -872,7 +873,6 @@ document.getElementById('delayToggle').addEventListener('click', () => {
   all.style.display = show ? 'block' : 'none';
   btn.textContent = show ? 'Hide' : 'Show All';
 });
-
 /* ── TIDE ── */
 function renderTide(tide) {
   const body = document.getElementById('tideBody');
