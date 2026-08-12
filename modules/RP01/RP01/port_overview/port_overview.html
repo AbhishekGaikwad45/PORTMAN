@@ -478,7 +478,7 @@ html, body {
 
     <div class="bento">
       <div class="panel" id="weatherPanel">
-        <div class="panel-hdr"><span>Weather</span><span id="wxUpdated" class="muted">—</span></div>
+        <div class="panel-hdr"><span>Weather</span></div>
         <div class="panel-body" id="wxBody"></div>
       </div>
       <div class="panel" id="tidePanel">
@@ -923,13 +923,10 @@ function renderTide(tide) {
 /* ── WEATHER (cached WeatherAPI, refreshed by weather_service.py) ── */
 function renderWeather(w) {
   const body = document.getElementById('wxBody');
-  const upd = document.getElementById('wxUpdated');
   if (!w) {
-    upd.textContent = '—';
     body.innerHTML = '<div class="muted">No weather data</div>';
     return;
   }
-  upd.textContent = (w.updated || '').slice(11) || '—';
   const metric = (label, val) => `<div class="wx-metric"><i>${label}</i><b>${val}</b></div>`;
   body.innerHTML = `
     <div class="wx-now">
