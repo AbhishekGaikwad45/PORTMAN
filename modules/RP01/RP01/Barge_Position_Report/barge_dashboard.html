@@ -2337,7 +2337,17 @@
                 const effectiveBalance = live
                     ? Number(live.balance_qty)
                     : Number(item.balance ?? item.balance_qty ?? 0);
-                if (live && live.cast_off_done) {
+
+                if (!live && haveLive) {
+                    return;
+                }
+                if (
+                    live &&
+                    (
+                        (live.cast_off_port && String(live.cast_off_port).trim() !== "") ||
+                        (live.mbc_cast_off && String(live.mbc_cast_off).trim() !== "")
+                    )
+                ) {
                     return;
                 }
 
