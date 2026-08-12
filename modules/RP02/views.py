@@ -1,9 +1,14 @@
+import re
 from functools import wraps
 from flask import render_template, request, jsonify, session, redirect, url_for, Response
 
 from database import get_user_permissions
 from . import bp
 from . import model
+
+from datetime import datetime, date
+
+from database import get_db, get_cursor
 
 
 def login_required(f):
@@ -160,3 +165,403 @@ def bill_master_row_delete():
         return jsonify({'error': 'Missing id'}), 400
     model.delete_row(data['id'])
     return jsonify({'success': True})
+
+
+# ── Billing Pipeline dashboard ───────────────────────────────────────────────
+
+@bp.route('/module/RP02/billing-dashboard/')
+@login_required
+def billing_dashboard_index():
+    return render_template('billing_dashboard.html', username=session.get('username'))
+
+
+@bp.route('/api/module/RP02/billing-dashboard/data')
+@login_required
+def billing_dashboard_data():
+    return jsonify(model.get_billing_dashboard())
+
+
+# Columns for the Excel dump — quantity and dates only, no rates or amounts.
+_EXPORT_COLUMNS = [
+    ('Status', 'status'),
+    ('Vessel / MBC', 'vessel_name'),
+    ('Material PO', 'material_po'),
+    ('Customer', 'customer_name'),
+    ('Type of Cargo', 'cargo_type'),
+    ('Cargo', 'cargo_name'),
+    ('Pending Qty (MT)', 'bl_qty'),
+    ('Load Port', 'load_port'),
+    ('MV/MBC', 'mv_mbc'),
+    ('Discharge Commence', 'discharge_commence'),
+    ('Discharge Completed', 'discharge_completed'),
+    ('Age (days)', 'age_days'),
+    ('Age Bucket', 'age_bucket'),
+    ('Doc Status', 'doc_status'),
+]
+
+
+@bp.route('/api/module/RP02/billing-dashboard/export')
+@login_required
+def billing_dashboard_export():
+    """Excel dump of the pending lines, plus a summary sheet of the same numbers
+    the dashboard shows. Deliberately carries no rates or amounts.
+
+    ?dim=&val=&scope= exports one breakdown bar's drilldown instead of the whole
+    pipeline, filtered by the same model helper the modal uses."""
+    import io
+    from datetime import datetime as _dt
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    dim = request.args.get('dim')
+    val = request.args.get('val')
+    scope = request.args.get('scope', 'all')
+
+    data = model.get_billing_dashboard()
+    if dim or scope != 'all':
+        rows, drill_desc = model.filter_pending(dim, val, scope, rows=data['rows'])
+        data = {**data, 'rows': rows}
+    else:
+        drill_desc = None
+
+    thin = Side(style='thin', color='000000')
+    bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill('solid', fgColor='1E3A5F')
+    hdr_font = Font(name='Calibri', bold=True, size=10, color='FFFFFF')
+    cell_font = Font(name='Calibri', size=10)
+    blocked_font = Font(name='Calibri', size=10, color='8A5A00')
+    lft = Alignment(horizontal='left', vertical='center')
+    rgt = Alignment(horizontal='right', vertical='center')
+    ctr = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    wb = openpyxl.Workbook()
+
+    # Sheet 1: the lines
+    ws = wb.active
+    ws.title = 'Pending Lines'
+    ws.freeze_panes = 'A2'
+    ws.row_dimensions[1].height = 22
+    for i, (label, _k) in enumerate(_EXPORT_COLUMNS, 1):
+        c = ws.cell(1, i, label)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = bdr; c.alignment = ctr
+        ws.column_dimensions[get_column_letter(i)].width = max(12, len(label) + 3)
+
+    numeric = {'bl_qty', 'age_days'}
+    for row_i, r in enumerate(data['rows'], 2):
+        blocked = r.get('status') != 'Ready to bill'
+        # not `val` — that name holds the drilldown query param used below
+        for col_i, (_label, key) in enumerate(_EXPORT_COLUMNS, 1):
+            cell_val = r.get(key)
+            c = ws.cell(row_i, col_i, '' if cell_val is None else cell_val)
+            c.border = bdr
+            c.font = blocked_font if blocked else cell_font
+            c.alignment = rgt if key in numeric else lft
+            if key == 'bl_qty' and cell_val is not None:
+                c.number_format = '#,##0.00'
+    ws.auto_filter.ref = f'A1:{get_column_letter(len(_EXPORT_COLUMNS))}{max(len(data["rows"]) + 1, 1)}'
+
+    # Sheet 2: the dashboard's own numbers, so the file stands alone
+    ws2 = wb.create_sheet('Summary')
+    ws2.column_dimensions['A'].width = 34
+    ws2.column_dimensions['B'].width = 18
+    ws2.column_dimensions['C'].width = 14
+    k = data['kpi']
+    blocks = [
+        ('Billing Pipeline — generated ' + data['generated_at'], None, None),
+        ('Quantities are cargo tonnage (MT) and line counts only. No rates or amounts.', None, None),
+    ]
+    if drill_desc:
+        # a drilldown export says what it is a slice of, so the file is not
+        # mistaken for the whole pipeline once it leaves this screen
+        blocks += [
+            (None, None, None),
+            ('Drilldown: ' + drill_desc, None, None),
+            ('Lines in this export', len(data['rows']),
+             round(sum(r['bl_qty'] or 0 for r in data['rows']), 2)),
+        ]
+    blocks += [
+        (None, None, None),
+        ('Whole pipeline', 'Lines', 'Qty (MT)'),
+        ('Ready to bill', k['ready_lines'], k['ready_qty']),
+        ('Blocked upstream', k['blocked_lines'], k['blocked_qty']),
+        ('Oldest waiting (days)', k['oldest_days'], None),
+        ('Customers waiting', k['customers'], None),
+        ('Billed to date (bill master lines)', k['billed_lines'], None),
+        (f"Billed in {k['month_label']}", k['billed_month'], None),
+    ]
+    for title, group in (('Ready to bill by age', data['ageing']),
+                         ('Ready to bill by customer', data['by_customer']),
+                         ('Ready to bill by cargo type', data['by_cargo']),
+                         ('Blocked by document status', data['blocked_by_status'])):
+        blocks += [(None, None, None), (title, 'Lines', 'Qty (MT)')]
+        blocks += [(g['label'], g['lines'], g['qty']) for g in group]
+
+    for row_i, (a, b, c_) in enumerate(blocks, 1):
+        is_head = b in ('Lines',) or (row_i == 1)
+        ca = ws2.cell(row_i, 1, a if a is not None else '')
+        ca.font = Font(name='Calibri', size=10, bold=bool(is_head))
+        ca.alignment = lft
+        # not `val` — that name holds the drilldown query param used below
+        for col_i, cell_val in ((2, b), (3, c_)):
+            cc = ws2.cell(row_i, col_i, '' if cell_val is None else cell_val)
+            cc.font = Font(name='Calibri', size=10, bold=bool(is_head))
+            cc.alignment = rgt
+            if col_i == 3 and isinstance(cell_val, (int, float)):
+                cc.number_format = '#,##0.00'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    slug = ''
+    if drill_desc:
+        safe = re.sub(r'[^A-Za-z0-9]+', '_', (val or scope)).strip('_')[:40]
+        slug = f'_{safe}' if safe else '_drilldown'
+    fname = f"RP02_billing_pipeline{slug}_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return Response(
+        buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"'},
+    )
+
+
+#Revenue Regisrter
+
+
+@bp.route('/module/RP02/revenue/')
+def revenue_report():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    return render_template(
+        'rp02_revenue_report.html',
+        username=session.get('username'),
+        module_code='RP02'
+    )
+
+
+@bp.route('/api/module/RP02/revenue/data')
+def revenue_report_data():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    month = request.args.get('month')
+    year = request.args.get('year')
+
+    conn = get_db()
+    cur = get_cursor(conn)
+
+    where = []
+    params = []
+
+    if month:
+        where.append("EXTRACT(MONTH FROM ih.invoice_date::date) = %s")
+        params.append(int(month))
+
+    if year:
+        where.append("EXTRACT(YEAR FROM ih.invoice_date::date) = %s")
+        params.append(int(year))
+
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    cur.execute(f"""
+SELECT
+    ih.id,
+    ih.invoice_number,
+    ih.invoice_date,
+    ih.customer_name,
+    vc.sap_customer_code,
+    ih.customer_gl_code,
+    ih.customer_gstin,
+    ih.sap_document_number,
+    ih.subtotal AS basic_value,
+    ih.sgst_amount,
+    ih.cgst_amount,
+    ih.igst_amount,
+    ih.total_amount AS invoice_value,
+
+    ih.gst_irn,
+    ih.gst_ack_number,
+    ih.gst_ack_date,
+
+    il.rate,
+    il.quantity,
+    il.uom,
+    il.sac_code,
+    il.hsn_sac,
+    il.gl_code,
+    il.service_name,
+
+    (
+        SELECT fl.service_description
+        FROM fdcn_lines fl
+        WHERE TRIM(fl.gl_code) = TRIM(il.gl_code)
+        ORDER BY fl.id DESC
+        LIMIT 1
+    ) AS grouping,
+
+    il.cgst_rate,
+    il.sgst_rate,
+    il.igst_rate
+
+FROM invoice_header ih
+
+LEFT JOIN vessel_customers vc
+    ON TRIM(LOWER(vc.name)) = TRIM(LOWER(ih.customer_name))
+
+LEFT JOIN LATERAL (
+    SELECT
+        rate,
+        quantity,
+        uom,
+        sac_code,
+        hsn_sac,
+        gl_code,
+        service_name,
+        cgst_rate,
+        sgst_rate,
+        igst_rate
+    FROM invoice_lines
+    WHERE invoice_id = ih.id
+    ORDER BY
+        (hsn_sac IS NOT NULL AND hsn_sac <> '') DESC,
+        (sac_code IS NOT NULL AND sac_code <> '') DESC,
+        id
+    LIMIT 1
+) il ON TRUE
+
+{where_sql}
+
+ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
+""", params)
+
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    out = []
+    today = datetime.today().date()
+
+    for r in rows:
+        inv_date = r.get('invoice_date')
+
+        basic = float(r.get('basic_value') or 0)
+        sgst = float(r.get('sgst_amount') or 0)
+        cgst = float(r.get('cgst_amount') or 0)
+        igst = float(r.get('igst_amount') or 0)
+        inv_val = float(r.get('invoice_value') or 0)
+
+        cgst_rate = float(r.get('cgst_rate') or 0)
+        sgst_rate = float(r.get('sgst_rate') or 0)
+        igst_rate = float(r.get('igst_rate') or 0)
+
+        tax_rate = igst_rate if igst_rate > 0 else (cgst_rate + sgst_rate)
+
+        gl_code = str(r.get('gl_code') or '').strip()
+
+        hsn_code = (
+            r.get('sac_code')
+            if gl_code == '4101071000'
+            else (r.get('hsn_sac') or '')
+        )
+
+        tds_percent = {
+            '4101076010': 2.0,
+            '4101076030': 2.0,
+            '4201090080': 2.0,
+            '4101076100': 2.0,
+            '4101071000': 0.1,
+            '4201090210': 10.0,
+            '4101076020': 2.0
+        }
+
+        tds_rate = tds_percent.get(gl_code, 0)
+        tds_amount = round((basic * tds_rate) / 100, 2)
+        net_receivable = round(inv_val - tds_amount, 2)
+
+        if inv_date:
+            if hasattr(inv_date, "year"):
+                invoice_date = inv_date
+            else:
+                invoice_date = datetime.strptime(
+                    str(inv_date)[:10], "%Y-%m-%d"
+                ).date()
+
+            days = (today - invoice_date).days
+        else:
+            days = ""
+        
+        # Bucket based on Days
+        if days == "":
+            bucket = ""
+        elif 0 <= days <= 30:
+            bucket = "0-30 days"
+        elif 31 <= days <= 60:
+            bucket = "31-60 days"
+        elif 61 <= days <= 90:
+            bucket = "61-90 days"
+        elif 91 <= days <= 180:
+            bucket = "91-180 days"
+        elif 181 <= days <= 365:
+            bucket = "181-365 days"
+        elif 366 <= days <= 730:
+            bucket = "1-2 years"
+        elif 731 <= days <= 1095:
+            bucket = "2-3 years"
+        else:
+            bucket = "> 3 years"
+
+        out.append({
+            'invoice_no': r.get('invoice_number') or '',
+            'group_type': '',
+            'revenue_type_1': '',
+            'revenue_type_2': '',
+            'cargo_volume': '',
+
+            'date': str(inv_date)[:10] if inv_date else '',
+
+            'cust_code': r.get('sap_customer_code') or r.get('customer_gl_code') or '',
+            'customer_name': r.get('customer_name') or '',
+            'gl_code': gl_code,
+            'grouping': r.get('service_name') or '',
+
+            'qty': r.get('quantity'),
+            'rate': r.get('rate'),
+
+            'tax_category': (
+                'IGST' if igst > 0
+                else 'CGST+SGST' if (cgst > 0 or sgst > 0)
+                else ''
+            ),
+            'tax_rate': tax_rate,
+
+            'basic_value': basic,
+            'sgst': sgst,
+            'cgst': cgst,
+            'igst': igst,
+            'invoice_value': inv_val,
+
+            'gstin': r.get('customer_gstin') or '',
+            'sap_doc_no': r.get('sap_document_number') or '',
+
+            'sac_code': '' if hsn_code else (r.get('sac_code') or ''),
+            'hsn_code': hsn_code,
+            'irn': r.get('gst_irn') or '',
+            'irn_date': (
+                r.get('gst_ack_date').strftime('%Y-%m-%d')
+                if r.get('gst_ack_date')
+                else ''
+            ),
+            'ack_date': (
+                r.get('gst_ack_date').strftime('%Y-%m-%d')
+                if r.get('gst_ack_date')
+                else ''
+            ),
+            'ack_no': r.get('gst_ack_number') or '',
+
+            'tds_tcs': tds_amount,
+            'net_receivable': net_receivable,
+            'days': days,
+            'bucket': bucket,
+        })
+
+    return jsonify({'data': out})

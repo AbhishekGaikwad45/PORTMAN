@@ -27,15 +27,44 @@ def get_financial_year(date_str):
 # ---------------------------------------------------------------------------
 # Doc Number generation
 # ---------------------------------------------------------------------------
-# Fixed doc-number prefixes. The configurable DN/CN doc series was removed —
-# the SAP Reference now comes from the original invoice, so doc_number is only
-# the Portbird-side identifier (list/print/dedup/remarks), not a SAP field.
+# Fallback prefixes, used until a default series is configured in CNDS01.
+# doc_number stays a Portbird-side identifier (list/print/dedup/remarks) — the
+# SAP Reference comes from the original invoice, so the prefix is never a SAP
+# field and changing it cannot disturb a posted document.
 FDCN_DOC_PREFIXES = {'DN': 'DPPLDN', 'CN': 'DPPLCN'}
 
 
+def normalize_prefix(prefix):
+    """Tidy a stored series prefix: trimmed, uppercased, no wrapping slashes.
+
+    get_next_doc_number appends '/{FY}/{seq}' itself, so a prefix must not carry
+    its own outer separators — 'DPPLCN/' would yield 'DPPLCN//25-26/0001'."""
+    return (prefix or '').strip().strip('/').upper()
+
+
+def resolve_doc_prefix(configured_prefix, doc_type):
+    """Pure prefix choice: the configured CNDS01 series if one is set, else the
+    built-in fallback. Unknown doc types pass through unchanged."""
+    return normalize_prefix(configured_prefix) or FDCN_DOC_PREFIXES.get(doc_type, doc_type)
+
+
 def fdcn_doc_prefix(doc_type):
-    """Resolve the fixed doc-number prefix for a DN/CN. Unknown types pass through."""
-    return FDCN_DOC_PREFIXES.get(doc_type, doc_type)
+    """Doc-number prefix for a DN/CN: the CNDS01 default series for this type,
+    else the built-in fallback."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('''SELECT prefix FROM fdcn_doc_series
+                       WHERE type = %s AND is_default = TRUE
+                       ORDER BY id LIMIT 1''', [doc_type])
+        row = cur.fetchone()
+    except Exception:
+        # Table absent (nothing ever configured) — keep issuing numbers.
+        conn.rollback()
+        row = None
+    finally:
+        conn.close()
+    return resolve_doc_prefix(row['prefix'] if row else '', doc_type)
 
 
 def get_next_doc_number(doc_type, doc_date):

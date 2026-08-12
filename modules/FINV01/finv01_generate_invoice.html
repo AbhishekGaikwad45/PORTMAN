@@ -391,12 +391,12 @@ async function toggleBillLines(billId, btn) {
             html += `<tr>
                 <td>${i+1}</td><td>${ln.service_name||''}</td><td>${ln.service_description||''}</td>
                 <td>${ln.quantity||''}</td><td>${ln.uom||''}</td>
-                <td class="num">${(ln.rate||0).toFixed(2)}</td>
-                <td class="num">${(ln.line_amount||0).toFixed(2)}</td>
-                <td class="num">${(ln.cgst_amount||0).toFixed(2)}</td>
-                <td class="num">${(ln.sgst_amount||0).toFixed(2)}</td>
-                <td class="num">${(ln.igst_amount||0).toFixed(2)}</td>
-                <td class="num"><strong>${(ln.line_total||0).toFixed(2)}</strong></td>
+                <td class="num">${Number(ln.rate||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.line_amount||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.cgst_amount||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.sgst_amount||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.igst_amount||0).toFixed(2)}</td>
+                <td class="num"><strong>${Number(ln.line_total||0).toFixed(2)}</strong></td>
                 <td>${ln.sac_code||''}</td>
             </tr>`;
         });

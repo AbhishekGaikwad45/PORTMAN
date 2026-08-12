@@ -288,12 +288,22 @@ async function loadCustomers() {
         return;
     }
     sel.innerHTML = '<option value="">-- Loading... --</option>';
-    const resp = await fetch(`/api/module/FIN01/customers/${ct}`);
+    // with_billables=1: only parties with something to bill, most items first.
+    const resp = await fetch(`/api/module/FIN01/customers/${ct}?with_billables=1`);
     const json = await resp.json();
+    const list = json.data || [];
+    if (!list.length) {
+        sel.innerHTML = `<option value="">-- No ${ct.toLowerCase()}s with billable items --</option>`;
+        return;
+    }
     sel.innerHTML = '<option value="">-- Select --</option>';
-    (json.data || []).forEach(c => {
-        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name}</option>`;
+    list.forEach(c => {
+        sel.innerHTML += `<option value="${c.id}" data-name="${c.name}" data-gstin="${c.gstin || ''}" data-state-code="${c.gst_state_code || ''}">${c.name} (${c.billable_count})</option>`;
     });
+    // Preselect the busiest party. Agreements load with it; billables do not —
+    // the user still clicks Load Billables, so nothing heavy runs unasked.
+    sel.value = list[0].id;
+    onCustomerSelected();
 }
 
 async function onCustomerSelected() {
@@ -342,6 +352,13 @@ async function loadBillables() {
         const resp = await fetch(url);
         billableData = await resp.json();
 
+        // Billable rows first, locked ones (Draft / no LDUD) after. Sorted in
+        // place, not on a copy: the rendered row index is the key used to read
+        // billableData.cargo_handling back when the bill is built, so the two
+        // orders must stay identical. Stable sort keeps server order per group.
+        (billableData.cargo_handling || []).sort(
+            (a, b) => (b.is_billable ? 1 : 0) - (a.is_billable ? 1 : 0));
+
         renderCargoCards(billableData.cargo_handling || []);
         renderOtherServices(billableData.other_services || []);
         renderBilledHistory(billableData.billed || []);
@@ -355,6 +372,20 @@ async function loadBillables() {
         document.getElementById('loadBtn').textContent = 'Load Billables';
         document.getElementById('loadBtn').disabled = false;
     }
+}
+
+// Services flagged "Requires HSN Input" in FSTM01 have no fixed HSN/SAC —
+// the user types it per bill line and it overrides the master sac_code.
+function hsnInput(prefix, idx, serviceTypeId, enabled) {
+    const st = serviceTypesMap[serviceTypeId] || {};
+    if (!enabled || !Number(st.requires_hsn_input)) return '';
+    return `<br><input type="text" id="${prefix}_hsn_${idx}" class="hsn-req" placeholder="HSN / SAC *"
+        style="width:95px;margin-top:3px;padding:2px 4px;font-size:10px;border:1px solid #f39c12;">`;
+}
+
+function hsnValue(prefix, idx) {
+    const el = document.getElementById(`${prefix}_hsn_${idx}`);
+    return el ? el.value.trim() : '';
 }
 
 function renderCargoCards(cards) {
@@ -388,7 +419,7 @@ function renderCargoCards(cards) {
             <td>${isBillable ? `<input type="checkbox" class="cargo-line-check" data-idx="${idx}" onchange="recalcTotals()">` : '🔒'}</td>
             <td style="font-size:10px;">${card.doc_label || card.source_type + '-' + card.source_id}</td>
             <td><span style="background:${statusColor};color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;">${statusLabel}</span></td>
-            <td style="font-size:10px;">${card.service_name || '-'}</td>
+            <td style="font-size:10px;">${card.service_name || '-'}${hsnInput('cargo', idx, card.service_type_id, isBillable)}</td>
             <td>${card.cargo_name || '-'}</td>
             <td style="font-size:10px;">${card.material_po || '-'}</td>
             <td>${proofCell}</td>
@@ -431,7 +462,7 @@ function renderOtherServices(records) {
                 onchange="onServiceChecked(this)"></td>
             <td>${rec.record_number}</td>
             <td>${formatDateDMY(rec.record_date || '')}</td>
-            <td>${rec.service_name || ''}</td>
+            <td>${rec.service_name || ''}${hsnInput('svc', idx, rec.service_type_id, true)}</td>
             <td>${parseFloat(rec.billable_quantity || 0).toFixed(2)}</td>
             <td>${rec.billable_uom || st.uom || ''}</td>
             <td><input type="number" step="0.01" id="svc_rate_${idx}" value="${rec.rate != null ? Number(rec.rate).toFixed(2) : ''}" placeholder="0.00"
@@ -597,6 +628,8 @@ function recalcTotals() {
 }
 
 async function generateBill() {
+    const btn = document.getElementById('generateBtn');
+    if (btn.disabled) return;   // already submitting — block double-click
     const ct = document.getElementById('customerType').value;
     const cid = document.getElementById('customerId').value;
     const billDate = document.getElementById('billDate').value;
@@ -629,7 +662,8 @@ async function generateBill() {
             uom: card.uom || 'MT',
             line_amount: qty * rate,
             cargo_source_type: card.cargo_source_type,
-            cargo_source_id: card.cargo_source_id
+            cargo_source_id: card.cargo_source_id,
+            sac_code: hsnValue('cargo', idx)
         });
     });
 
@@ -648,7 +682,8 @@ async function generateBill() {
             rate: rate,
             uom: rec.billable_uom || '',
             line_amount: qty * rate,
-            service_record_id: rec.id
+            service_record_id: rec.id,
+            sac_code: hsnValue('svc', idx)
         });
     });
 
@@ -657,17 +692,20 @@ async function generateBill() {
         return;
     }
 
-    // Guard: never bill at a 0 rate (no agreement rate found — enter manually)
-    if (lines.some(l => !(l.rate > 0))) {
-        alert('Some selected lines have a 0.00 rate (no agreement rate found). Enter a rate manually before billing.');
+    // Guard: services flagged "Requires HSN Input" must carry an HSN on every selected line
+    const missingHsn = [...document.querySelectorAll('.hsn-req')].filter(el => {
+        const cb = el.closest('tr').querySelector('input[type="checkbox"]');
+        return cb && cb.checked && !el.value.trim();
+    });
+    if (missingHsn.length) {
+        missingHsn[0].focus();
+        alert('Enter the HSN / SAC for the selected line(s) — this service has no fixed HSN.');
         return;
     }
 
-    // Cargo and other-service lines cannot be mixed in the same bill
-    const hasCargoLines   = lines.some(l => l.line_type === 'cargo_handling');
-    const hasServiceLines = lines.some(l => l.line_type === 'service_record');
-    if (hasCargoLines && hasServiceLines) {
-        alert('Cargo handling lines and other service lines cannot be combined in the same bill.\nPlease create separate bills for each type.');
+    // Guard: never bill at a 0 rate (no agreement rate found — enter manually)
+    if (lines.some(l => !(l.rate > 0))) {
+        alert('Some selected lines have a 0.00 rate (no agreement rate found). Enter a rate manually before billing.');
         return;
     }
 
@@ -689,18 +727,28 @@ async function generateBill() {
         lines: lines
     };
 
-    const resp = await fetch('/api/module/FIN01/bill/save', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-    });
-    const result = await resp.json();
+    btn.disabled = true;
+    const _origLabel = btn.textContent;
+    btn.textContent = 'Generating…';
+    try {
+        const resp = await fetch('/api/module/FIN01/bill/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
 
-    if (result.success) {
-        alert('Bill generated: ' + result.bill_number);
-        window.location.href = `/module/FIN01/bill/${result.id}`;
-    } else {
+        if (result.success) {
+            alert('Bill generated: ' + result.bill_number);
+            window.location.href = `/module/FIN01/bill/${result.id}`;
+            return;   // navigating away — leave the button disabled
+        }
         alert('Error: ' + result.error);
+    } catch (e) {
+        alert('Error: ' + e);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = _origLabel;
     }
 }
 

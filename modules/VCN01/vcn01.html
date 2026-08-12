@@ -1258,11 +1258,17 @@
 
     async function deleteSubRow(type, id, vcnId) {
         if (!confirm('Delete this row?')) return;
-        await fetch(`/api/module/VCN01/${type}/delete`, {
+        const res = await fetch(`/api/module/VCN01/${type}/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({id: id})
         });
+        const result = await res.json().catch(() => ({}));
+        if (!result.success) {
+            // Keep the row on screen — it still exists on the server.
+            alert(result.error || 'Delete was rejected.');
+            return;
+        }
         if (subTables[vcnId] && subTables[vcnId][type]) {
             const row = subTables[vcnId][type].getRows().find(r => r.getData().id === id);
             if (row) row.delete();
@@ -1288,30 +1294,38 @@
         const selected = table.getSelectedRows();
         if (selected.length === 0) { alert('Select rows to delete'); return; }
         if (!confirm(`Delete ${selected.length} row(s)?`)) return;
-        selected.forEach(row => {
+        selected.forEach(async row => {
             const id = row.getData().id;
-            if (id) {
-                // Close modal if this VCN is open
-                if (currentVcnId === id) {
-                    closeDetailsModal();
-                }
+            if (!id) { row.delete(); return; }
 
-                // Clean up sub-tables if they exist
-                if (subTables[id]) {
-                    Object.values(subTables[id]).forEach(t => {
-                        if (t && typeof t.destroy === 'function') {
-                            t.destroy();
-                        }
-                    });
-                    delete subTables[id];
-                }
-
-                fetch("/api/module/VCN01/delete", {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id: id})
-                });
+            const res = await fetch("/api/module/VCN01/delete", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!result.success) {
+                // Billed or invoiced vessel calls are refused — keep the row,
+                // and keep its sub-tables alive since nothing was destroyed.
+                alert(result.error || 'Delete was rejected.');
+                return;
             }
+
+            // Close modal if this VCN is open
+            if (currentVcnId === id) {
+                closeDetailsModal();
+            }
+
+            // Clean up sub-tables if they exist
+            if (subTables[id]) {
+                Object.values(subTables[id]).forEach(t => {
+                    if (t && typeof t.destroy === 'function') {
+                        t.destroy();
+                    }
+                });
+                delete subTables[id];
+            }
+
             row.delete();
         });
     }

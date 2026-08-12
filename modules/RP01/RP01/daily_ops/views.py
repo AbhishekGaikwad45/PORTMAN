@@ -3306,89 +3306,53 @@ def _build_excel_a4(
     c.border = thick_bdr
     c.alignment = _ctr
 
-    # Category Totals Row
+# Category Totals Row
     category_row = grand_row + 1
 
-    # IBRM: 9 named cargoes + 2 blank placeholder columns = 11 columns
     index = 0
-
     category_totals = {}
 
     for cat in CATEGORY_ORDER:
-
         slots = CATEGORY_SLOTS[cat]
-        category_totals[cat] = sum( 
-            cargo_totals.get(
-                cargo_names[index + i],
-                0
-            )
+        category_totals[cat] = sum(
+            cargo_totals.get(cargo_names[index + i], 0)
             for i in range(slots)
             if index + i < len(cargo_names)
         )
-
         index += slots
 
     ibrm_total = category_totals["IBRM"]
     cbrm_total = category_totals["CBRM"]
     flux_total = category_totals["FLUX"]
 
-    ws.merge_cells(
-        start_row=category_row,
-        start_column=CH_START_COL + 1,
-        end_row=category_row,
-        end_column=CH_START_COL + 11
-    )
+    # ── dynamically computed merge boundaries (fixes off-by-one) ──
+    ibrm_start = CH_START_COL + 1
+    ibrm_end   = ibrm_start + CATEGORY_SLOTS['IBRM'] - 1
 
-    ws.merge_cells(
-        start_row=category_row,
-        start_column=CH_START_COL + 12,
-        end_row=category_row,
-        end_column=CH_START_COL + 19
-    )
+    cbrm_start = ibrm_end + 1
+    cbrm_end   = cbrm_start + CATEGORY_SLOTS['CBRM'] - 1
 
-    ws.merge_cells(
-        start_row=category_row,
-        start_column=CH_START_COL + 20,
-        end_row=category_row,
-        end_column=CH_START_COL + 25
-    )
+    flux_start = cbrm_end + 1
+    flux_end   = flux_start + CATEGORY_SLOTS['FLUX'] - 1
 
-    c = ws.cell(
-        category_row,
-        CH_START_COL + 1,
-        f"IBRM : {ibrm_total:,.0f}"
-    )
+    ws.merge_cells(start_row=category_row, start_column=ibrm_start, end_row=category_row, end_column=ibrm_end)
+    ws.merge_cells(start_row=category_row, start_column=cbrm_start, end_row=category_row, end_column=cbrm_end)
+    ws.merge_cells(start_row=category_row, start_column=flux_start, end_row=category_row, end_column=flux_end)
+
+    c = ws.cell(category_row, ibrm_start, f"IBRM : {ibrm_total:,.0f}")
     c.font = value_font
 
-    c = ws.cell(
-        category_row,
-        CH_START_COL + 12,
-        f"CBRM : {cbrm_total:,.0f}"
-    )
+    c = ws.cell(category_row, cbrm_start, f"CBRM : {cbrm_total:,.0f}")
     c.font = value_font
 
-    c = ws.cell(
-        category_row,
-        CH_START_COL + 20,
-        f"FLUXES : {flux_total:,.0f}"
-    )
+    c = ws.cell(category_row, flux_start, f"FLUXES : {flux_total:,.0f}")
     c.font = value_font
 
-    c = ws.cell(
-        category_row,
-        CH_TOTAL_COL,
-        grand_total
-    )
+    c = ws.cell(category_row, CH_TOTAL_COL, grand_total)   # now safe — no longer inside a merge
     c.font = value_font
 
-    for col in range(
-        CH_START_COL,
-        CH_TOTAL_COL + 1
-    ):
-        ws.cell(
-            category_row,
-            col
-        ).border = thick_bdr
+    for col in range(CH_START_COL, CH_TOTAL_COL + 1):
+        ws.cell(category_row, col).border = thick_bdr
 
     # Move pointer for next section
     current_row = category_row + 3

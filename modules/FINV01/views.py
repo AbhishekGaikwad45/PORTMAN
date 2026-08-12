@@ -259,6 +259,34 @@ def create_invoice():
 
     conn_seq = get_db()
     cur_seq = get_cursor(conn_seq)
+
+    # Two independent party guards, both server-side because the page-level
+    # checks are advisory only (a stale tab or a direct POST bypasses them).
+    #   1. every selected bill must be the same customer — no merging parties
+    #      into one invoice, whatever the page allowed;
+    #   2. every cargo line must still belong to its bill's customer — catches
+    #      a declaration whose customer_name was retro-edited after billing.
+    parties = model.get_bill_parties(cur_seq, bill_ids)
+    if not model.single_party(parties):
+        conn_seq.close()
+        names = ', '.join(sorted({(p['customer_name'] or '?') for p in parties}))
+        return jsonify({'success': False,
+                        'error': f'Selected bills belong to different parties ({names}). '
+                                 f'An invoice can only cover one customer — '
+                                 f'invoice each party separately.'})
+
+    mismatches = model.find_cargo_party_mismatch(cur_seq, bill_ids)
+    if mismatches:
+        conn_seq.close()
+        detail = '; '.join(
+            f"{m['bill_number']}: \"{m['cargo_name'] or 'cargo'}\" belongs to "
+            f"{m['cargo_customer']}, not {m['bill_customer']}"
+            for m in mismatches[:5])
+        return jsonify({'success': False,
+                        'error': f'Cargo on these bills belongs to another party — {detail}. '
+                                 f'The declaration was changed after the bill was made. '
+                                 f'Fix the bill before invoicing.'})
+
     default_series = _get_default_invds_series(cur_seq) or {}
 
     cur_seq.execute('SELECT bill_date, customer_type, customer_id FROM bill_header WHERE id=%s', [bill_ids[0]])

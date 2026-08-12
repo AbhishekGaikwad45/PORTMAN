@@ -105,7 +105,13 @@ SELECT
         ELSE dp.unloading_completed::text
     END AS discharge_completed,
 
-    'INDIA' AS flag
+    'INDIA' AS flag,
+
+    -- NEW: bill number(s) linked to this MBC header via bill_lines
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+
+    -- NEW: document status for MBC
+    COALESCE(h.doc_status, '-') AS status
 
 FROM mbc_header h
 
@@ -113,7 +119,31 @@ LEFT JOIN vessels v
     ON LOWER(TRIM(v.vessel_name)) =
        LOWER(TRIM(h.mbc_name))
 
-LEFT JOIN mbc_discharge_port_lines dp
+-- FIX: pre-aggregate discharge port lines to ONE row per mbc header
+-- (previously joined raw, causing a cross-join fan-out with cd below,
+-- which duplicated actual_discharge N times per header)
+LEFT JOIN (
+    SELECT
+        mbc_id,
+
+        MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS unloading_commenced,
+
+        CASE
+            WHEN SUM(
+                CASE
+                    WHEN NULLIF(TRIM(unloading_commenced), '') IS NOT NULL
+                     AND NULLIF(TRIM(unloading_completed), '') IS NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ) > 0
+            THEN NULL
+            ELSE MAX(NULLIF(TRIM(unloading_completed), '')::timestamp)
+        END AS unloading_completed
+
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+) dp
     ON dp.mbc_id = h.id
 
 LEFT JOIN mbc_customer_details cd
@@ -130,10 +160,26 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
-WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+-- NEW: bill_lines aggregated to ONE row per MBC header, so it doesn't
+-- fan out the join like a raw join would. cargo_source_type = 'MBC'
+-- and cargo_source_id = mbc_header.id per the bill_lines mapping.
+-- bill_number itself lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'MBC'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = h.id
+
+WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
-        dp.unloading_commenced::timestamp BETWEEN
+        dp.unloading_commenced BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -142,12 +188,12 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        dp.unloading_completed IS NOT NULL
         AND
-        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+        dp.unloading_completed BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -156,10 +202,10 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+        dp.unloading_completed IS NULL
     )
 )
 
@@ -177,7 +223,9 @@ GROUP BY
     dp.unloading_commenced,
     dp.unloading_completed,
     v.nationality,
-    mbc.actual_discharge
+    mbc.actual_discharge,
+    bln.bill_numbers,
+    h.doc_status
 UNION ALL
 
 SELECT
@@ -207,7 +255,16 @@ SELECT
 
     la.last_discharge_completed::text AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW: bill number(s) linked to this MV/LDUD header via bill_lines.
+    -- cargo_source_type = 'VCN_IMPORT' and cargo_source_id = ldud_header.id
+    -- (confirmed: cargo_source_id matches lh.id, the same id already used
+    -- as the row id for the MV branch)
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+
+    -- NEW: document status for MV, sourced from vcn_header
+    COALESCE(vh.doc_status, '-') AS status
 
 FROM ldud_header lh
 
@@ -258,11 +315,7 @@ LEFT JOIN (
         LOWER(TRIM(cargo_name)) AS match_cargo,
 
         SUM(
-            CASE
-                WHEN TRIM(COALESCE(quantity::text, '')) != ''
-                THEN quantity::numeric
-                ELSE 0
-            END
+            COALESCE(quantity, split_quantity, 0)
         ) AS actual_discharge
 
     FROM lueu_lines
@@ -297,6 +350,22 @@ ON mv.match_display =
 
 AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
+
+-- NEW: bill_lines aggregated to ONE row per LDUD header. Per the
+-- earlier lookup, VCN_IMPORT bills key off cargo_source_id = lh.id
+-- (NOT vh.id), so join on lh.id here. bill_number itself lives on
+-- bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'VCN_IMPORT'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = lh.id
 
 WHERE la.first_discharge_started IS NOT NULL
 AND (
@@ -344,7 +413,9 @@ GROUP BY
     la.first_discharge_started,
     la.last_discharge_completed,
     v.nationality,
-    mv.actual_discharge
+    mv.actual_discharge,
+    bln.bill_numbers,
+    vh.doc_status
 
 ORDER BY discharge_commenced DESC;
 """
@@ -367,7 +438,30 @@ ORDER BY discharge_commenced DESC;
 )
         rows = cur.fetchall()
         data = []
+
+        # A header (vessel) can have multiple Material PO / cargo rows.
+        # For MBC, actual_discharge is a HEADER-level total (same value repeated
+        # on every PO row) -> dedupe key = (id, vessel_type).
+        # For MV, actual_discharge is aggregated PER CARGO (different cargo_name
+        # rows genuinely carry different amounts and must both be counted) ->
+        # dedupe key must also include cargo_name, or distinct cargo lines get
+        # wrongly zeroed out.
+        seen_actual_keys = set()
+
         for row in rows:
+            if row['vessel_type'] == 'MV':
+                header_key = (row['id'], row['vessel_type'], row['cargo_name'])
+            else:
+                header_key = (row['id'], row['vessel_type'])
+
+            raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
+
+            if header_key in seen_actual_keys:
+                actual_val = 0
+            else:
+                actual_val = raw_actual
+                seen_actual_keys.add(header_key)
+
             data.append({
     'id': row['id'],
     'vessel_name': row['vessel_name'] or '-',
@@ -376,7 +470,7 @@ ORDER BY discharge_commenced DESC;
     'cargo_type': row['cargo_type'] or '-',
     'cargo_name': row['cargo_name'] or '-',
     'bl_qty_mt': float(row['bl_qty_mt']) if row['bl_qty_mt'] else 0,
-    'actual_discharge': float(row['actual_discharge']) if row['actual_discharge'] else 0,
+    'actual_discharge': actual_val,
     'load_port': row['load_port'] or '-',
     'consignee': row['consignee'] or '-',
     'customer_detail_id': row['customer_detail_id'] or '-',
@@ -398,6 +492,10 @@ ORDER BY discharge_commenced DESC;
 
     'customer_detail_id': row['customer_detail_id'] or '-',
     'flag': row['flag'] or '-',
+
+    # NEW
+    'bill_number': row['bill_number'] or 'NA',
+    'status': row['status'] or '-',
 })
 
 
@@ -530,7 +628,11 @@ SELECT
         ELSE dp.unloading_completed::text
     END AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(h.doc_status, '-') AS status
 
 FROM mbc_header h
 
@@ -538,7 +640,31 @@ LEFT JOIN vessels v
     ON LOWER(TRIM(v.vessel_name)) =
        LOWER(TRIM(h.mbc_name))
 
-LEFT JOIN mbc_discharge_port_lines dp
+-- FIX: pre-aggregate discharge port lines to ONE row per mbc header
+-- (previously joined raw, causing a cross-join fan-out with cd below,
+-- which duplicated actual_discharge N times per header)
+LEFT JOIN (
+    SELECT
+        mbc_id,
+
+        MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS unloading_commenced,
+
+        CASE
+            WHEN SUM(
+                CASE
+                    WHEN NULLIF(TRIM(unloading_commenced), '') IS NOT NULL
+                     AND NULLIF(TRIM(unloading_completed), '') IS NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ) > 0
+            THEN NULL
+            ELSE MAX(NULLIF(TRIM(unloading_completed), '')::timestamp)
+        END AS unloading_completed
+
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+) dp
     ON dp.mbc_id = h.id
 
 LEFT JOIN mbc_customer_details cd
@@ -555,10 +681,24 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
-WHERE NULLIF(TRIM(dp.unloading_commenced), '') IS NOT NULL
+-- NEW: bill_lines aggregated to ONE row per MBC header. bill_number
+-- lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'MBC'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = h.id
+
+WHERE dp.unloading_commenced IS NOT NULL
 AND (
     (
-        dp.unloading_commenced::timestamp BETWEEN
+        dp.unloading_commenced BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -567,12 +707,12 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NOT NULL
+        dp.unloading_completed IS NOT NULL
         AND
-        NULLIF(TRIM(dp.unloading_completed), '')::timestamp BETWEEN
+        dp.unloading_completed BETWEEN
             (%s::date + INTERVAL '6 hours')
         AND
             (%s::date + INTERVAL '6 hours')
@@ -581,10 +721,10 @@ AND (
     OR
 
     (
-        dp.unloading_commenced::timestamp <
+        dp.unloading_commenced <
             (%s::date + INTERVAL '6 hours')
         AND
-        NULLIF(TRIM(dp.unloading_completed), '') IS NULL
+        dp.unloading_completed IS NULL
     )
 )
 
@@ -601,7 +741,9 @@ GROUP BY
     dp.unloading_commenced,
     dp.unloading_completed,
     v.nationality,
-    mbc.actual_discharge
+    mbc.actual_discharge,
+    bln.bill_numbers,
+    h.doc_status
 UNION ALL
 
 SELECT
@@ -630,7 +772,11 @@ SELECT
 
     la.last_discharge_completed::text AS discharge_completed,
 
-    COALESCE(v.nationality, '-') AS flag
+    COALESCE(v.nationality, '-') AS flag,
+
+    -- NEW
+    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(vh.doc_status, '-') AS status
 
 FROM ldud_header lh
 
@@ -681,11 +827,7 @@ LEFT JOIN (
         LOWER(TRIM(cargo_name)) AS match_cargo,
 
         SUM(
-            CASE
-                WHEN TRIM(COALESCE(quantity::text, '')) != ''
-                THEN quantity::numeric
-                ELSE 0
-            END
+            COALESCE(quantity, split_quantity, 0)
         ) AS actual_discharge
 
     FROM lueu_lines
@@ -720,6 +862,20 @@ ON mv.match_display =
 
 AND mv.match_cargo =
     LOWER(TRIM(vc.cargo_name))
+
+-- NEW: bill_lines aggregated to ONE row per LDUD header, keyed on lh.id.
+-- bill_number lives on bill_header, joined via bill_lines.bill_id.
+LEFT JOIN (
+    SELECT
+        bl.cargo_source_id,
+        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
+    FROM bill_lines bl
+    JOIN bill_header bh
+        ON bh.id = bl.bill_id
+    WHERE bl.cargo_source_type = 'VCN_IMPORT'
+    GROUP BY bl.cargo_source_id
+) bln
+    ON bln.cargo_source_id = lh.id
 
 WHERE la.first_discharge_started IS NOT NULL
 AND (
@@ -766,7 +922,9 @@ GROUP BY
     la.first_discharge_started,
     la.last_discharge_completed,
     v.nationality,
-    mv.actual_discharge
+    mv.actual_discharge,
+    bln.bill_numbers,
+    vh.doc_status
 
 ORDER BY discharge_commenced DESC;
 """
@@ -812,13 +970,16 @@ ORDER BY discharge_commenced DESC;
         align_ctr  = Alignment(horizontal='center', vertical='center', wrap_text=True)
         align_left = Alignment(horizontal='left',   vertical='center', wrap_text=True)
 
+        # NEW: 'Bill No.' and 'Status' appended after Flag, at the end,
+        # so none of the existing hardcoded column indices (merges, totals,
+        # Actual Discharge alignment) below need to shift.
         headers = [
             'Sr No', 'M.Vessel Name', 'MV/MBC', 'Material PO',
             'Type', 'Cargo', 'B/L Qty.\n(MT)', 'Actual Discharge\n(MT)',
             'Load Port', 'Discharge\nCommence', 'Discharge\nCompleted',
-            'Consignee /\nCustomer', 'Flag'
+            'Consignee /\nCustomer', 'Flag', 'Bill No.', 'Status'
         ]
-        col_widths = [7, 40, 9, 16, 9, 16, 12, 24, 20, 22, 22, 22, 18]
+        col_widths = [7, 40, 9, 16, 9, 16, 12, 24, 20, 22, 22, 22, 18, 22, 14]
         num_cols   = len(headers)
 
         # ── Row 1: Title ──────────────────────────────────────
@@ -847,10 +1008,34 @@ ORDER BY discharge_commenced DESC;
         total_actual = 0
         data_start   = 3
 
+        # A header (vessel) can have multiple Material PO / cargo rows.
+        # For MBC, actual_discharge is a HEADER-level total (same value repeated
+        # on every PO row) -> dedupe key = (id, vessel_type).
+        # For MV, actual_discharge is aggregated PER CARGO (different cargo_name
+        # rows genuinely carry different amounts and must both be counted) ->
+        # dedupe key must also include cargo_name, or distinct cargo lines get
+        # wrongly zeroed out.
+        seen_actual_keys = set()
+        header_keys = []  # parallel list, one entry per data row, used for merging
+
         for idx, row in enumerate(rows, start=1):
             r      = data_start + idx - 1
             qty    = float(row['bl_qty_mt'])        if row['bl_qty_mt']        else 0
-            actual = float(row['actual_discharge'])  if row['actual_discharge']  else 0
+            raw_actual = float(row['actual_discharge']) if row['actual_discharge'] else 0
+
+            if row['vessel_type'] == 'MV':
+                header_key = (row['id'], row['vessel_type'], row['cargo_name'])
+            else:
+                header_key = (row['id'], row['vessel_type'])
+
+            header_keys.append(header_key)
+
+            if header_key in seen_actual_keys:
+                actual = 0
+            else:
+                actual = raw_actual
+                seen_actual_keys.add(header_key)
+
             total_qty    += qty
             total_actual += actual
             fill = fill_even if idx % 2 == 0 else fill_odd
@@ -881,6 +1066,10 @@ else '',
 
     row['consignee'] or '',
     row['flag'] or '',
+
+    # NEW
+    row['bill_number'] or 'NA',
+    row['status'] or '-',
 ]
 
             for col, val in enumerate(values, start=1):
@@ -889,53 +1078,40 @@ else '',
                 cell.font      = font_data
                 cell.fill      = fill
                 cell.border    = bdr_thin
-                cell.alignment = align_ctr if col in [1, 3, 7, 8] else align_left
+                cell.alignment = align_ctr if col in [1, 3, 7, 8, 15] else align_left
             ws.row_dimensions[r].height = 20
 
         # ── Merge Actual Discharge column (H) ────────────────
+        # Grouped by header_key (id + vessel_type), NOT by comparing cell
+        # values — the real actual_discharge now lives on only the first
+        # row of each group, with 0 on the rest, so values legitimately differ.
         merge_start = data_start
 
-        for row_no in range(data_start + 1, data_start + len(rows) + 1):
+        for row_no in range(data_start + 1, data_start + len(rows)):
+            prev_key = header_keys[row_no - 1 - data_start]
+            curr_key = header_keys[row_no - data_start]
 
-            prev_vessel = ws.cell(row=row_no - 1, column=2).value
-            curr_vessel = ws.cell(row=row_no, column=2).value
-
-            prev_actual = ws.cell(row=row_no - 1, column=8).value
-            curr_actual = ws.cell(row=row_no, column=8).value
-
-            if prev_vessel != curr_vessel or prev_actual != curr_actual:
-
+            if prev_key != curr_key:
                 if row_no - merge_start > 1:
-
                     ws.merge_cells(
                         start_row=merge_start,
                         start_column=8,
                         end_row=row_no - 1,
                         end_column=8
                     )
-
-                    ws.cell(
-                        row=merge_start,
-                        column=8
-                    ).alignment = align_ctr
-
+                    ws.cell(row=merge_start, column=8).alignment = align_ctr
                 merge_start = row_no
 
         last_row = data_start + len(rows) - 1
 
         if last_row - merge_start >= 1:
-
             ws.merge_cells(
                 start_row=merge_start,
                 start_column=8,
                 end_row=last_row,
                 end_column=8
             )
-
-            ws.cell(
-                row=merge_start,
-                column=8
-            ).alignment = align_ctr
+            ws.cell(row=merge_start, column=8).alignment = align_ctr
 
         # ── Total row ─────────────────────────────────────────
         total_row = data_start + len(rows)
@@ -966,7 +1142,8 @@ else '',
         act_cell.border        = bdr_thin
         act_cell.number_format = '#,##0'
 
-        for col in [1, 2, 3, 4, 9, 10, 11, 12, 13]:
+        # NEW: 14, 15 (Bill No., Status) added to the plain-header-fill pass
+        for col in [1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15]:
             c        = ws.cell(row=total_row, column=col)
             c.fill   = fill_header
             c.border = bdr_thin

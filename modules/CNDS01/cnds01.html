@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}DN/CN Doc Series Master - PORTMAN{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>DN/CN Doc Series Master</h2>
+    <span class="module-code">CNDS01</span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+
+<p style="font-size:12px;color:var(--text-secondary);margin:8px 0 0;">
+    The default series for each type sets the document-number prefix used by FDCN01
+    (e.g. <code>DPPLCN/25-26/0001</code>). Credit and debit notes carry one default each.
+    Changing a prefix starts a fresh sequence for that prefix; numbers already issued keep theirs.
+</p>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('CNDS01', 'DN/CN Doc Series Master');
+    let table;
+    const canEdit = {{ permissions.can_edit|default(0) }} || {{ permissions.can_add|default(0) }};
+
+    function initTable() {
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 200px)",
+            layout: "fitColumns",
+            columns: [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+                {title: "Series Name", field: "name", editor: canEdit ? "input" : false},
+                {title: "Prefix", field: "prefix", width: 160,
+                    editor: canEdit ? "input" : false,
+                    formatter: function(cell) {
+                        const v = cell.getValue() || '';
+                        return v ? `<code style="font-size:11px;">${v}</code>` : '';
+                    },
+                    editorParams: {
+                        elementAttributes: {style: "text-transform:uppercase;"}
+                    }
+                },
+                {title: "Type", field: "type", width: 100,
+                    editor: canEdit ? "list" : false,
+                    editorParams: {values: {"CN": "CN", "DN": "DN"}}
+                },
+                {title: "Default", field: "is_default", hozAlign: "center", width: 90, headerSort: false,
+                    formatter: function(cell) {
+                        const checked = cell.getValue() ? 'checked' : '';
+                        const type = cell.getRow().getData().type || 'CN';
+                        return `<input type="radio" name="default_fdcn_ds_${type}" ${checked} ${canEdit ? '' : 'disabled'}>`;
+                    },
+                    cellClick: function(e, cell) {
+                        if (!canEdit) return;
+                        if (e.target.tagName !== 'INPUT') return;
+                        // Default is per type — clear only the siblings of this type.
+                        const type = cell.getRow().getData().type || 'CN';
+                        table.getRows().forEach(r => {
+                            if ((r.getData().type || 'CN') === type) r.update({is_default: false});
+                        });
+                        cell.getRow().update({is_default: true});
+                    }
+                }
+            ],
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            ajaxURL: "/api/module/CNDS01/data",
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            },
+            selectable: true
+        });
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    function addRow() { table.addRow({type: 'CN'}, false); }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+        selected.forEach(row => {
+            const id = row.getData().id;
+            if (id) {
+                fetch("/api/module/CNDS01/delete", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: id})
+                });
+            }
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        const rows = table.getRows();
+        for (const row of rows) {
+            const data = row.getData();
+            if (!data.name || !data.prefix) continue;
+            const res = await fetch("/api/module/CNDS01/save", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (result.id) row.update({id: result.id});
+        }
+        table.setData("/api/module/CNDS01/data");
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+
+    initTable();
+</script>
+{% endblock %}

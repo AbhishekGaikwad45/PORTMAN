@@ -77,7 +77,8 @@ def save_service_type(data):
                     sap_gl_account=%s, sap_profit_center=%s, sap_cost_center=%s,
                     sap_igst_gl=%s, sap_cgst_gl=%s, sap_sgst_gl=%s, service_sale_flag=%s,
                     sap_tds_gl=%s, sap_tcs_gl=%s,
-                    is_tds=%s, tds_percent=%s, is_tcs=%s, tcs_percent=%s, is_triplicate=%s
+                    is_tds=%s, tds_percent=%s, is_tcs=%s, tcs_percent=%s, is_triplicate=%s,
+                    requires_hsn_input=%s
                 WHERE id=%s
             ''', [
                 (data.get('service_code') or '').strip(),
@@ -103,6 +104,7 @@ def save_service_type(data):
                 1 if data.get('is_tcs') in (1, '1', 'Yes', True) else 0,
                 tcs_pct,
                 1 if data.get('is_triplicate') in (1, '1', 'Yes', True) else 0,
+                1 if data.get('requires_hsn_input') in (1, '1', 'Yes', True) else 0,
                 data['id']
             ])
             row_id = data['id']
@@ -122,8 +124,9 @@ def save_service_type(data):
                  sap_gl_account, sap_profit_center, sap_cost_center,
                  sap_igst_gl, sap_cgst_gl, sap_sgst_gl, service_sale_flag,
                  sap_tds_gl, sap_tcs_gl,
-                 is_tds, tds_percent, is_tcs, tcs_percent, is_triplicate, created_by, created_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 is_tds, tds_percent, is_tcs, tcs_percent, is_triplicate, requires_hsn_input,
+                 created_by, created_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             ''', [
                 data.get('service_code'),
@@ -149,6 +152,7 @@ def save_service_type(data):
                 1 if data.get('is_tcs') in (1, '1', 'Yes', True) else 0,
                 tcs_pct,
                 1 if data.get('is_triplicate') in (1, '1', 'Yes', True) else 0,
+                1 if data.get('requires_hsn_input') in (1, '1', 'Yes', True) else 0,
                 data.get('created_by'),
                 datetime.now().strftime('%Y-%m-%d')
             ])

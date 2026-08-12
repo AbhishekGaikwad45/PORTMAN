@@ -71,6 +71,7 @@
             <th style="min-width:120px" title="TDS GL Account for this service (overrides config default)">TDS GL</th>
             <th style="min-width:120px" title="TCS GL Account for this service (overrides config default)">TCS GL</th>
             <th style="min-width:90px">SAC Code</th>
+            <th style="min-width:110px" title="HSN/SAC is not fixed — ask for it on every bill line in FIN01">Requires HSN Input</th>
             <th style="min-width:110px">GST Rate</th>
             <th style="min-width:70px">UOM</th>
             <th style="min-width:80px">Billable</th>
@@ -105,6 +106,10 @@
             <td><input type="text" name="sap_tds_gl[]" value="{{ row.sap_tds_gl or '' }}" placeholder="e.g. 2400001000" style="width:100%;" {% if locked %}readonly{% endif %}></td>
             <td><input type="text" name="sap_tcs_gl[]" value="{{ row.sap_tcs_gl or '' }}" placeholder="e.g. 2400007000" style="width:100%;" {% if locked %}readonly{% endif %}></td>
             <td><input type="text" name="sac_code[]" value="{{ row.sac_code }}" {% if locked %}readonly{% endif %}></td>
+            <td><select name="requires_hsn_input[]" {% if locked %}disabled{% endif %}>
+                <option value="0" {% if not row.requires_hsn_input %}selected{% endif %}>No</option>
+                <option value="1" {% if row.requires_hsn_input %}selected{% endif %}>Yes</option>
+            </select></td>
             <td><select name="gst_rate_id[]" {% if locked %}disabled{% endif %}>
                 <option value="">--Select--</option>
                 {% for gst in gst_rates %}
@@ -268,6 +273,10 @@ function addRow() {
         <td><input type="text" name="sap_tds_gl[]" placeholder="e.g. 2400001000" style="width:100%;"></td>
         <td><input type="text" name="sap_tcs_gl[]" placeholder="e.g. 2400007000" style="width:100%;"></td>
         <td><input type="text" name="sac_code[]"></td>
+        <td><select name="requires_hsn_input[]">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+        </select></td>
         <td><select name="gst_rate_id[]">
             <option value="">--Select--</option>
             {% for gst in gst_rates %}
@@ -331,6 +340,7 @@ async function saveAll() {
             sap_tds_gl: row.querySelector('[name="sap_tds_gl[]"]').value,
             sap_tcs_gl: row.querySelector('[name="sap_tcs_gl[]"]').value,
             sac_code: row.querySelector('[name="sac_code[]"]').value,
+            requires_hsn_input: row.querySelector('[name="requires_hsn_input[]"]').value,
             gst_rate_id: row.querySelector('[name="gst_rate_id[]"]').value,
             uom: row.querySelector('[name="uom[]"]').value,
             is_billable: row.querySelector('[name="is_billable[]"]').value,

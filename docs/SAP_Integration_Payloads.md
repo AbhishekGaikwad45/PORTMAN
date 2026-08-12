@@ -9,7 +9,6 @@ Portbird will communicate with SAP ECC via a SAP PI/PO REST adapter. All support
 **Endpoint:** `{base_url}/RESTAdapter/Portbirdinvoice`  
 **Method:** `POST`  
 **Auth:** OAuth2 client credentials (`/oauth2/api/v1/generateToken`)  
-**IRN Fetch:** `GET {base_url}/RESTAdapter/Portbirdinvoice/IRN?Reference={doc_number}`
 
 All payloads share the same outer envelope:
 
@@ -393,11 +392,9 @@ Derived from the first line's service master `service_sale_flag`. Configured per
 1. Post to SAP
 2. SAP PI forwards to Cygnet for IRN generation
 3. IRN is not returned in the initial POST response
-4. Finance clicks Fetch IRN later
-5. Portbird calls GET /RESTAdapter/DynaportInvoice/IRN?Reference={doc_number}
-6. SAP returns IRN_No, Ack_No, IRN_Date
-7. Portbird saves gst_irn, gst_ack_number, gst_ack_date
-8. Re-posted payloads include IRN fields if already available
+4. SAP returns IRN_No, Ack_No, IRN_Date
+5. Portbird saves gst_irn, gst_ack_number, gst_ack_date
+6. Re-posted payloads include IRN fields if already available
 ```
 
 ---

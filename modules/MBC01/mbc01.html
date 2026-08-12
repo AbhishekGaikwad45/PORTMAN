@@ -1361,6 +1361,12 @@
                 const result = await res.json();
                 if (result.success) {
                     savedCount++;
+                } else {
+                    // A rejected save (billed/invoiced/approved lock) must be
+                    // visible — staying dirty keeps the unsaved edit on screen.
+                    alert(result.error || 'Save was rejected.');
+                    if (!silent) showSubStatus(type, mbcId, `Saved ${savedCount} row(s) — not saved: rejected`);
+                    return;
                 }
             }
         }
@@ -1370,11 +1376,17 @@
 
     async function deleteSubRow(type, id, mbcId) {
         if (!confirm('Delete this row?')) return;
-        await fetch(`/api/module/MBC01/${type}/delete`, {
+        const res = await fetch(`/api/module/MBC01/${type}/delete`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({id: id})
         });
+        const result = await res.json().catch(() => ({}));
+        if (!result.success) {
+            // Keep the row on screen — it still exists on the server.
+            alert(result.error || 'Delete was rejected.');
+            return;
+        }
         if (subTables[mbcId] && subTables[mbcId][type]) {
             const row = subTables[mbcId][type].getRows().find(r => r.getData().id === id);
             if (row) row.delete();
@@ -1396,16 +1408,21 @@
         const selected = table.getSelectedRows();
         if (selected.length === 0) { alert('Select rows to delete'); return; }
         if (!confirm(`Delete ${selected.length} row(s)?`)) return;
-        selected.forEach(row => {
+        selected.forEach(async row => {
             const id = row.getData().id;
-            if (id) {
-                if (currentMbcId === id) closeDetailsModal();
-                fetch("/api/module/MBC01/delete", {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id: id})
-                });
+            if (!id) { row.delete(); return; }
+            const res = await fetch("/api/module/MBC01/delete", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!result.success) {
+                // Billed or invoiced MBCs are refused — leave the row visible.
+                alert(result.error || 'Delete was rejected.');
+                return;
             }
+            if (currentMbcId === id) closeDetailsModal();
             row.delete();
         });
     }

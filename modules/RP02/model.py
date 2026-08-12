@@ -556,3 +556,256 @@ def get_bill_master_report():
         return out
     finally:
         conn.close()
+
+
+# ── Billing Pipeline dashboard ───────────────────────────────────────────────
+# The bill master answers "what has been billed". A billing desk also needs the
+# complement: cargo discharged but not yet on an invoice. Same row shape, plus a
+# status, so both halves sit in one grid and one export.
+#
+# Deliberately quantity-only (MT) and count-only — no rates, no amounts. The
+# question this answers is "what is waiting on me", not "what is it worth".
+
+# Cargo with no invoice behind it yet, in bill-master shape. `ready` mirrors the
+# FIN01 gate: parent document open enough to bill. Not-ready rows are blocked
+# upstream in operations, not by finance.
+_PENDING_ROWS_SQL = """
+WITH ldud_latest AS (
+    SELECT DISTINCT ON (vcn_id) vcn_id, id AS ldud_id, material_po_number, doc_status
+    FROM ldud_header
+    ORDER BY vcn_id, id DESC
+),
+ldud_times AS (
+    SELECT ldud_id,
+           MIN(discharge_started) AS commence,
+           CASE WHEN SUM(CASE WHEN discharge_started IS NOT NULL
+                               AND discharge_commenced IS NULL THEN 1 ELSE 0 END) > 0
+                THEN NULL ELSE MAX(discharge_commenced) END AS completed
+    FROM ldud_anchorage
+    GROUP BY ldud_id
+),
+mbc_times AS (
+    SELECT mbc_id,
+           MIN(NULLIF(TRIM(unloading_commenced), '')::timestamp) AS commence,
+           MAX(NULLIF(TRIM(unloading_completed), '')::timestamp) AS completed
+    FROM mbc_discharge_port_lines
+    GROUP BY mbc_id
+)
+SELECT vh.vessel_name, ll.material_po_number AS material_po, cd.customer_name,
+       vh.cargo_type, cd.cargo_name,
+       COALESCE(cd.bl_quantity, 0) - COALESCE(cd.billed_quantity, 0) AS pending_qty,
+       vh.load_port, 'MV' AS mv_mbc,
+       lt.commence::text  AS discharge_commence,
+       lt.completed::text AS discharge_completed,
+       COALESCE(ll.doc_status, 'No LDUD') AS doc_status,
+       CASE WHEN ll.doc_status IN ('Closed', 'Partial Close') THEN 1 ELSE 0 END AS ready
+FROM vcn_cargo_declaration cd
+JOIN vcn_header vh ON vh.id = cd.vcn_id
+LEFT JOIN ldud_latest ll ON ll.vcn_id = cd.vcn_id
+LEFT JOIN ldud_times  lt ON lt.ldud_id = ll.ldud_id
+WHERE (COALESCE(cd.is_billed, 0) = 0 OR COALESCE(cd.billed_quantity, 0) < cd.bl_quantity)
+
+UNION ALL
+
+SELECT vh.vessel_name, ll.material_po_number, cd.customer_name,
+       vh.cargo_type, cd.cargo_name,
+       COALESCE(cd.bl_quantity, 0) - COALESCE(cd.billed_quantity, 0),
+       vh.load_port, 'MV',
+       lt.commence::text, lt.completed::text,
+       COALESCE(ll.doc_status, 'No LDUD'),
+       CASE WHEN ll.doc_status IN ('Closed', 'Partial Close') THEN 1 ELSE 0 END
+FROM vcn_export_cargo_declaration cd
+JOIN vcn_header vh ON vh.id = cd.vcn_id
+LEFT JOIN ldud_latest ll ON ll.vcn_id = cd.vcn_id
+LEFT JOIN ldud_times  lt ON lt.ldud_id = ll.ldud_id
+WHERE (COALESCE(cd.is_billed, 0) = 0 OR COALESCE(cd.billed_quantity, 0) < cd.bl_quantity)
+
+UNION ALL
+
+SELECT mh.mbc_name, cd.material_po, cd.customer_name,
+       mh.cargo_type, cd.cargo_name,
+       COALESCE(cd.quantity, 0) - COALESCE(cd.billed_quantity, 0),
+       mh.load_port, 'MBC',
+       mt.commence::text, mt.completed::text,
+       COALESCE(mh.doc_status, ''),
+       CASE WHEN mh.doc_status IN ('Approved', 'Closed', 'Partial Close') THEN 1 ELSE 0 END
+FROM mbc_customer_details cd
+JOIN mbc_header mh ON mh.id = cd.mbc_id
+LEFT JOIN mbc_times mt ON mt.mbc_id = cd.mbc_id
+WHERE (COALESCE(cd.is_billed, 0) = 0 OR COALESCE(cd.billed_quantity, 0) < cd.quantity)
+"""
+
+# Days-since-discharge buckets, oldest last so the ordinal colour ramp and the
+# bar order agree.
+AGE_BUCKETS = [('0-7 days', 0, 7), ('8-15 days', 8, 15),
+               ('16-30 days', 16, 30), ('30+ days', 31, None)]
+
+BUCKET_LABELS = [b[0] for b in AGE_BUCKETS] + ['Undated']
+
+
+def _age_days(completed):
+    """Whole days between a discharge-completed stamp and now. None if unparseable."""
+    from datetime import datetime as _dt
+    if not completed:
+        return None
+    txt = str(completed).replace('T', ' ').strip()
+    for fmt, width in (('%d-%m-%Y %H:%M', 16), ('%Y-%m-%d %H:%M', 16), ('%Y-%m-%d', 10)):
+        try:
+            return max((_dt.now() - _dt.strptime(txt[:width], fmt)).days, 0)
+        except ValueError:
+            continue
+    return None
+
+
+def _bucket(days):
+    if days is None:
+        return 'Undated'
+    for label, lo, hi in AGE_BUCKETS:
+        if days >= lo and (hi is None or days <= hi):
+            return label
+    return 'Undated'
+
+
+def get_pending_rows():
+    """Cargo declared/discharged but not yet invoiced, in bill-master shape."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute(_PENDING_ROWS_SQL)
+        out = []
+        for r in cur.fetchall():
+            qty = float(r['pending_qty'] or 0)
+            if qty <= 0:
+                continue                     # nothing left to bill on this line
+            days = _age_days(_fmt_ts(r['discharge_completed']))
+            out.append({
+                'vessel_name':         r['vessel_name'],
+                'material_po':         r['material_po'],
+                'customer_name':       r['customer_name'],
+                'cargo_type':          r['cargo_type'],
+                'cargo_name':          r['cargo_name'],
+                'bl_qty':              round(qty, 2),
+                'load_port':           r['load_port'],
+                'mv_mbc':              r['mv_mbc'],
+                'discharge_commence':  _fmt_ts(r['discharge_commence']),
+                'discharge_completed': _fmt_ts(r['discharge_completed']),
+                'doc_status':          r['doc_status'],
+                'status':              'Ready to bill' if r['ready'] else 'Blocked upstream',
+                'age_days':            days,
+                'age_bucket':          _bucket(days),
+            })
+        return out
+    finally:
+        conn.close()
+
+
+# How many bars each breakdown shows before folding the tail into "Other".
+# Shared so a drilldown on "Other" resolves to exactly the bars that were folded.
+_TOP_N = {'customer_name': 8, 'cargo_type': 6, 'doc_status': 6, 'mv_mbc': 4}
+
+
+def _label(row, key):
+    """The bucket a row falls in for a breakdown — blanks collapse to one label."""
+    return (row.get(key) or '').strip() or '—'
+
+
+def _top(rows, key, n=8):
+    """Top-n {label, lines, qty} by pending quantity; the tail folds into Other."""
+    agg = {}
+    for r in rows:
+        k = _label(r, key)
+        a = agg.setdefault(k, {'label': k, 'lines': 0, 'qty': 0.0})
+        a['lines'] += 1
+        a['qty'] += r['bl_qty']
+    ordered = sorted(agg.values(), key=lambda a: -a['qty'])
+    if len(ordered) > n:
+        head, tail = ordered[:n], ordered[n:]
+        ordered = head + [{'label': f'Other ({len(tail)})',
+                           'lines': sum(a['lines'] for a in tail),
+                           'qty': sum(a['qty'] for a in tail)}]
+    return [{**a, 'qty': round(a['qty'], 2)} for a in ordered]
+
+
+def get_billing_dashboard():
+    """Everything the billing pipeline dashboard renders.
+
+    Quantities (MT) and line counts only — no rates and no amounts anywhere in
+    this payload, by design."""
+    from datetime import datetime as _dt
+
+    pending = get_pending_rows()
+    ready = [r for r in pending if r['status'] == 'Ready to bill']
+    blocked = [r for r in pending if r['status'] == 'Blocked upstream']
+
+    billed = get_bill_master_report()
+    this_month = _dt.now().strftime('%b-%y')
+
+    def qty(rows):
+        return round(sum(r['bl_qty'] or 0 for r in rows), 2)
+
+    buckets = {label: {'label': label, 'lines': 0, 'qty': 0.0} for label in BUCKET_LABELS}
+    for r in ready:
+        b = buckets[r['age_bucket']]
+        b['lines'] += 1
+        b['qty'] += r['bl_qty']
+
+    aged = [r['age_days'] for r in ready if r['age_days'] is not None]
+
+    return {
+        'generated_at': _dt.now().strftime('%d-%m-%Y %H:%M'),
+        'kpi': {
+            'ready_lines':   len(ready),
+            'ready_qty':     qty(ready),
+            'blocked_lines': len(blocked),
+            'blocked_qty':   qty(blocked),
+            'oldest_days':   max(aged) if aged else 0,
+            'customers':     len({(r['customer_name'] or '—') for r in ready}),
+            'billed_lines':  len(billed),
+            'billed_month':  len([r for r in billed if r.get('month_label') == this_month]),
+            'month_label':   this_month,
+        },
+        'ageing':            [{**buckets[l], 'qty': round(buckets[l]['qty'], 2)}
+                              for l in BUCKET_LABELS],
+        'by_customer':       _top(ready, 'customer_name', _TOP_N['customer_name']),
+        'by_cargo':          _top(ready, 'cargo_type', _TOP_N['cargo_type']),
+        'by_mode':           _top(pending, 'mv_mbc', _TOP_N['mv_mbc']),
+        'blocked_by_status': _top(blocked, 'doc_status', _TOP_N['doc_status']),
+        'rows':              sorted(pending,
+                                    key=lambda r: (-(r['age_days'] if r['age_days'] is not None else -1),
+                                                   r['customer_name'] or '')),
+    }
+
+
+# Which pending rows a breakdown bar stands for. scope mirrors the card the bar
+# came from: the ageing/customer/cargo cards chart ready lines, the document
+# status card charts blocked ones.
+DRILL_SCOPES = {'ready': 'Ready to bill', 'blocked': 'Blocked upstream'}
+DRILL_DIMS = ('age_bucket', 'customer_name', 'cargo_type', 'doc_status', 'mv_mbc')
+
+
+def filter_pending(dim=None, val=None, scope='all', rows=None):
+    """The rows behind one breakdown bar.
+
+    A bar labelled "Other (n)" is the tail the chart folded away, so it resolves
+    to everything outside that breakdown's own top-n — recomputed here with the
+    same _TOP_N, which is why the modal and the export can never disagree.
+
+    Returns (rows, human-readable description)."""
+    rows = get_pending_rows() if rows is None else rows
+
+    status = DRILL_SCOPES.get(scope)
+    if status:
+        rows = [r for r in rows if r['status'] == status]
+    scope_txt = status or 'All pending'
+
+    if not dim or dim not in DRILL_DIMS or val is None or val == '':
+        return rows, scope_txt
+
+    if val.startswith('Other ('):
+        kept = {t['label'] for t in _top(rows, dim, _TOP_N.get(dim, 8))
+                if not t['label'].startswith('Other (')}
+        rows = [r for r in rows if _label(r, dim) not in kept]
+    else:
+        rows = [r for r in rows if _label(r, dim) == val]
+
+    return rows, f'{scope_txt} · {dim.replace("_", " ")} = {val}'

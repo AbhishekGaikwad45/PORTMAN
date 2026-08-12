@@ -22,6 +22,10 @@
     <button class="tab-btn" onclick="showTab('mail')">Mail</button>
     <button class="tab-btn" onclick="showTab('logs')">Logs</button>
     <button class="tab-btn" onclick="showTab('cutover')">Cutover</button>
+    <button class="tab-btn" onclick="showTab('uninvoice')">Uninvoice</button>
+    <button class="tab-btn" onclick="showTab('billremove')">Remove Bill</button>
+    <button class="tab-btn" onclick="showTab('cargorelease')">Release Cargo</button>
+    <button class="tab-btn" onclick="showTab('cargoswap')">Swap Bill Cargo</button>
 </div>
 
 <!-- User Management Tab -->
@@ -645,6 +649,194 @@
     </div>
 </div>
 
+<!-- Uninvoice Tab -->
+<div id="uninvoice-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Uninvoice — remove invoices with no SAP document</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            Lists invoices that were generated but have <strong>no SAP document number</strong> (never posted to SAP).
+            Uninvoicing <strong>deletes the invoice</strong> — freeing its number so the series continues with no gap —
+            and resets its bills from <em>Invoiced</em> back to <em>Approved</em> so they can be re-invoiced.
+            Cargo and bills are left intact. Invoices that already have a SAP document must be cancelled via FINV01 instead.
+        </p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadUninvoiceList()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="uninvoiceTable">
+            <thead>
+                <tr>
+                    <th>Invoice No</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th>Bills</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="uninvoiceBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Remove Bill Tab -->
+<div id="billremove-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Remove Bill — delete duplicate / unwanted bills</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            Lists bills that are <strong>not invoiced</strong>. Removing a bill <strong>deletes it</strong> —
+            freeing its number so the series continues with no gap — and releases the cargo/service billed
+            tracking it held, so those items become billable again. Invoiced bills are not shown; uninvoice
+            them first (Uninvoice tab), which returns them here as removable.
+        </p>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="loadBillRemoveList()">↻ Refresh</button>
+        </div>
+        <table class="admin-table" id="billRemoveTable">
+            <thead>
+                <tr>
+                    <th>Bill No</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Source</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th>Created By</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="billRemoveBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Release Cargo Tab -->
+<div id="cargorelease-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Release Cargo — make wrongly-billed cargo billable again</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            Last resort for cargo billed to the <strong>wrong customer</strong> on an invoice that
+            already reached SAP, where Uninvoice and Remove Bill are both refused. Releasing clears
+            only the billed tracking on that one cargo line, so it can be billed to its rightful
+            customer. <strong>The bill, the invoice and the SAP posting are left exactly as they
+            are</strong> — correct the money with a credit note (FDCN01), never by rewriting an
+            issued invoice. Every release is written to the approval log.
+        </p>
+        <p style="font-size:13px;color:#975a16;background:#fffaf0;border-left:3px solid #dd6b20;padding:8px 12px;margin:0 0 12px;">
+            If the invoice has <em>no</em> SAP document number, do not use this — Uninvoice then
+            Remove Bill is the clean path and it frees the cargo for you.
+        </p>
+        <div class="toolbar">
+            <input type="text" id="cargoReleaseSearch" placeholder="Search vessel / MBC / customer / cargo"
+                   style="padding:8px;border:1px solid #e2e8f0;border-radius:4px;min-width:320px;"
+                   onkeydown="if(event.key==='Enter')loadCargoReleaseList()">
+            <button class="btn btn-save" onclick="loadCargoReleaseList()">Search</button>
+        </div>
+        <table class="admin-table" id="cargoReleaseTable">
+            <thead>
+                <tr>
+                    <th>Doc / Vessel</th>
+                    <th>Source</th>
+                    <th>Customer</th>
+                    <th>Cargo</th>
+                    <th style="text-align:right;">Billed / Total</th>
+                    <th>Bills</th>
+                    <th>Invoices</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="cargoReleaseBody">
+                <tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">Search to list billed cargo.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Swap Bill Cargo Tab -->
+<div id="cargoswap-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>Swap Bill Cargo — replace wrong cargo without moving the money</h3>
+        <p style="font-size:13px;color:#718096;margin:0 0 12px;">
+            For a bill that ended up charging one customer for <strong>another customer's cargo</strong>.
+            Pick the offending line and replace it with cargo belonging to the bill's own customer.
+            The replacements <strong>inherit the removed line's rate</strong> and must add up to the
+            <strong>same quantity</strong>, so the bill total, the invoice total and the SAP posting
+            are provably unchanged — only which cargo backs the charge moves. The displaced cargo is
+            released and becomes billable to its rightful customer.
+        </p>
+        <p style="font-size:13px;color:#22543d;background:#f0fff4;border-left:3px solid #38a169;padding:8px 12px;margin:0 0 12px;">
+            Safe on an already-invoiced bill: the swap is refused outright if it would change any
+            total, or if the matching invoice line cannot be identified beyond doubt. If you need the
+            amount to change, that is a credit note (FDCN01), not a swap.
+        </p>
+        <div class="toolbar">
+            <input type="text" id="cargoSwapSearch" placeholder="Search bill no / customer / source"
+                   style="padding:8px;border:1px solid #e2e8f0;border-radius:4px;min-width:300px;"
+                   onkeydown="if(event.key==='Enter')loadCargoSwapBills()">
+            <label class="checkbox-label" style="margin:0 0 0 8px;">
+                <input type="checkbox" id="cargoSwapMismatchOnly" checked onchange="loadCargoSwapBills()">
+                Only bills with another party's cargo
+            </label>
+            <button class="btn btn-save" onclick="loadCargoSwapBills()">Search</button>
+        </div>
+        <table class="admin-table" id="cargoSwapBillTable">
+            <thead>
+                <tr>
+                    <th>Bill No</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Source</th>
+                    <th style="text-align:right;">Total</th>
+                    <th>Status</th>
+                    <th>Invoices</th>
+                    <th>Flags</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="cargoSwapBillBody">
+                <tr><td colspan="9" style="text-align:center;color:#718096;padding:16px;">Loading…</td></tr>
+            </tbody>
+        </table>
+
+        <div id="cargoSwapDetail" style="display:none;margin-top:20px;border-top:2px solid #e2e8f0;padding-top:16px;">
+            <h4 id="cargoSwapDetailTitle" style="margin:0 0 10px;"></h4>
+
+            <p style="font-size:12px;color:#4a5568;margin:0 0 6px;font-weight:600;">1. Cargo line to remove</p>
+            <table class="admin-table">
+                <thead>
+                    <tr><th style="width:40px;"></th><th>Cargo</th><th>Belongs To</th>
+                        <th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th>
+                        <th style="text-align:right;">Amount</th><th>Flag</th></tr>
+                </thead>
+                <tbody id="cargoSwapLineBody"></tbody>
+            </table>
+
+            <p style="font-size:12px;color:#4a5568;margin:16px 0 6px;font-weight:600;">
+                2. Replacement cargo <span style="font-weight:400;color:#718096;">(this customer's unbilled cargo only)</span>
+            </p>
+            <table class="admin-table">
+                <thead>
+                    <tr><th style="width:40px;"></th><th>Doc / Vessel</th><th>Source</th><th>Cargo</th>
+                        <th style="text-align:right;">Available</th><th style="text-align:right;">Use Qty</th></tr>
+                </thead>
+                <tbody id="cargoSwapCandidateBody"></tbody>
+            </table>
+
+            <div style="margin-top:12px;padding:10px 12px;background:#f7fafc;border-radius:4px;font-size:13px;">
+                Removing <strong><span id="cargoSwapRemoveQty">0</span></strong> ·
+                Replacing with <strong><span id="cargoSwapAddQty">0</span></strong> ·
+                <span id="cargoSwapBalance" style="font-weight:600;"></span>
+            </div>
+
+            <div class="toolbar" style="margin-top:12px;">
+                <button class="btn btn-danger" id="cargoSwapBtn" onclick="doCargoSwap()" disabled>Swap Cargo</button>
+                <button class="btn" onclick="document.getElementById('cargoSwapDetail').style.display='none'">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
 .admin-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
 .tab-btn { padding: 8px 16px; border: none; background: #e2e8f0; cursor: pointer; border-radius: 4px 4px 0 0; }
@@ -843,6 +1035,10 @@ function showTab(tab) {
     if (tab === 'logs') { loadLogs(); loadNginxConfig(); }
     if (tab === 'saptokens') loadSapTokens();
     if (tab === 'sapplay') { spgLoadSample(); }
+    if (tab === 'uninvoice') loadUninvoiceList();
+    if (tab === 'billremove') loadBillRemoveList();
+    if (tab === 'cargorelease') loadCargoReleaseList();
+    if (tab === 'cargoswap') loadCargoSwapBills();
 }
 
 let _newPwStrength = null;
@@ -1434,6 +1630,277 @@ async function resetMbcApproval(id, docNum) {
     const removed = data.docs_removed || 0;
     if (removed > 0) alert(`MBC reset to Draft. ${removed} proof document(s) deleted.`);
     loadMbcApprovals();
+}
+
+// ── Uninvoice Tab ────────────────────────────────────────────────────────────
+async function loadUninvoiceList() {
+    const res = await fetch('/admin/api/uninvoice/list');
+    const rows = await res.json();
+    const tbody = document.getElementById('uninvoiceBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">No invoices without a SAP document found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.invoice_number || ''}</td>
+            <td>${(r.invoice_date || '').toString().slice(0,10)}</td>
+            <td>${r.customer_name || ''}</td>
+            <td style="text-align:right;">${r.total_amount != null ? Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''}</td>
+            <td><span style="background:#fefcbf;color:#744210;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.invoice_status || ''}</span></td>
+            <td style="font-size:11px;">${r.bills || ''}</td>
+            <td>${r.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="doUninvoice(${r.id}, '${(r.invoice_number||'').replace(/'/g,"\\'")}')">Uninvoice</button></td>
+        </tr>
+    `).join('');
+}
+
+async function doUninvoice(id, num) {
+    if (!confirm(`Uninvoice "${num}"?\n\nThis permanently DELETES the invoice and resets its bills to Approved so they can be re-invoiced. The invoice number is freed for reuse.\n\nOnly do this for invoices that were NOT posted to SAP.`)) return;
+    const res = await fetch('/admin/api/uninvoice/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Invoice ${data.invoice_number} removed. Bills reset to Approved: ${(data.bills || []).join(', ') || '(none)'}`);
+    loadUninvoiceList();
+}
+
+// ── Remove Bill Tab ──────────────────────────────────────────────────────────
+async function loadBillRemoveList() {
+    const res = await fetch('/admin/api/bill-remove/list');
+    const rows = await res.json();
+    const tbody = document.getElementById('billRemoveBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">No removable bills found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${r.bill_number || ''}</td>
+            <td>${(r.bill_date || '').toString().slice(0,10)}</td>
+            <td>${r.customer_name || ''}</td>
+            <td style="font-size:11px;">${r.source_display || ''}</td>
+            <td style="text-align:right;">${r.total_amount != null ? Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''}</td>
+            <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.bill_status || ''}</span></td>
+            <td>${r.created_by || ''}</td>
+            <td><button class="btn btn-danger" onclick="doBillRemove(${r.id}, '${(r.bill_number||'').replace(/'/g,"\\'")}')">Remove</button></td>
+        </tr>
+    `).join('');
+}
+
+async function doBillRemove(id, num) {
+    if (!confirm(`Remove bill "${num}"?\n\nThis permanently DELETES the bill and makes its cargo/service items billable again. The bill number is freed for reuse.\n\nOnly do this for duplicate or unwanted bills.`)) return;
+    const res = await fetch('/admin/api/bill-remove/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Bill ${data.bill_number} removed. Its items are billable again.`);
+    loadBillRemoveList();
+}
+
+// ── Release Cargo Tab ────────────────────────────────────────────────────────
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadCargoReleaseList() {
+    const q = document.getElementById('cargoReleaseSearch').value.trim();
+    const tbody = document.getElementById('cargoReleaseBody');
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">Loading…</td></tr>';
+    const res = await fetch('/admin/api/cargo-release/list?q=' + encodeURIComponent(q));
+    const rows = await res.json();
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:16px;">No billed cargo matches that search.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${esc(r.doc_num)}${r.vessel_name ? ' / ' + esc(r.vessel_name) : ''}</td>
+            <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${esc(r.cargo_source_type)}</span></td>
+            <td>${esc(r.customer_name)}</td>
+            <td>${esc(r.cargo_name)}</td>
+            <td style="text-align:right;">${Number(r.billed_quantity||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:3})} / ${Number(r.total_quantity||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:3})}</td>
+            <td style="font-size:11px;">${esc(r.bills) || '—'}</td>
+            <td style="font-size:11px;">${r.invoices ? '<strong>' + esc(r.invoices) + '</strong>' : '—'}</td>
+            <td><button class="btn btn-danger" onclick='doCargoRelease(${JSON.stringify(r.cargo_source_type)}, ${r.cargo_source_id}, ${JSON.stringify(r.cargo_name || "")}, ${JSON.stringify(r.invoices || "")})'>Release</button></td>
+        </tr>
+    `).join('');
+}
+
+async function doCargoRelease(type, id, cargo, invoices) {
+    const warn = invoices
+        ? `\n\nThis cargo is on invoice ${invoices}. That invoice, its bill and any SAP posting stay EXACTLY as they are — raise a credit note in FDCN01 to correct the money.`
+        : '';
+    if (!confirm(`Release "${cargo}"?\n\nIt becomes billable again so it can be billed to the right customer.${warn}`)) return;
+    const reason = prompt('Reason for release (recorded in the approval log):', '') ;
+    if (reason === null) return;
+    const res = await fetch('/admin/api/cargo-release/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cargo_source_type: type, cargo_source_id: id, reason})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Released "${data.cargo}"${data.customer ? ' (' + data.customer + ')' : ''}.\nIt is billable again. Bills and invoices were not changed.`);
+    loadCargoReleaseList();
+}
+
+// ── Swap Bill Cargo Tab ──────────────────────────────────────────────────────
+let cargoSwapBill = null;
+
+async function loadCargoSwapBills() {
+    const q = document.getElementById('cargoSwapSearch').value.trim();
+    const only = document.getElementById('cargoSwapMismatchOnly').checked ? '1' : '0';
+    const tbody = document.getElementById('cargoSwapBillBody');
+    document.getElementById('cargoSwapDetail').style.display = 'none';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:16px;">Loading…</td></tr>';
+    const res = await fetch(`/admin/api/cargo-swap/bills?q=${encodeURIComponent(q)}&mismatched=${only}`);
+    const rows = await res.json();
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#718096;padding:16px;">${
+            only === '1' ? 'No bill is carrying another party\'s cargo. Nothing to fix.'
+                         : 'No bills match that search.'}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${esc(r.bill_number)}</td>
+            <td>${(r.bill_date || '').toString().slice(0,10)}</td>
+            <td>${esc(r.customer_name)}</td>
+            <td style="font-size:11px;">${esc(r.source_display)}</td>
+            <td style="text-align:right;">${Number(r.total_amount||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+            <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${esc(r.bill_status)}</span></td>
+            <td style="font-size:11px;">${r.invoices ? '<strong>' + esc(r.invoices) + '</strong>' : '—'}</td>
+            <td>${r.mismatch_count
+                    ? `<span style="background:#fed7d7;color:#742a2a;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.mismatch_count} wrong party</span>`
+                    : '<span style="color:#718096;font-size:11px;">clean</span>'}</td>
+            <td><button class="btn btn-save" onclick='openCargoSwap(${r.id}, ${JSON.stringify(r.bill_number)}, ${JSON.stringify(r.customer_name || "")})'>Open</button></td>
+        </tr>
+    `).join('');
+}
+
+async function openCargoSwap(billId, billNumber, customer) {
+    const res = await fetch(`/admin/api/cargo-swap/lines/${billId}`);
+    const data = await res.json();
+    cargoSwapBill = {id: billId, number: billNumber, customer};
+
+    document.getElementById('cargoSwapDetailTitle').textContent =
+        `${billNumber} — ${customer}`;
+
+    const lines = data.lines || [];
+    document.getElementById('cargoSwapLineBody').innerHTML = lines.length ? lines.map(l => `
+        <tr>
+            <td><input type="radio" name="swapLine" value="${l.bill_line_id}"
+                       data-qty="${l.quantity}" onchange="onCargoSwapLinePick()"></td>
+            <td>${esc(l.cargo_name || l.service_description)}</td>
+            <td>${esc(l.cargo_customer)}</td>
+            <td style="text-align:right;">${Number(l.quantity||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:3})}</td>
+            <td style="text-align:right;">${Number(l.rate||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+            <td style="text-align:right;">${Number(l.line_amount||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+            <td>${l.party_mismatch
+                    ? '<span style="background:#fed7d7;color:#742a2a;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">wrong party</span>'
+                    : '<span style="color:#718096;font-size:11px;">ok</span>'}</td>
+        </tr>
+    `).join('') : '<tr><td colspan="7" style="text-align:center;color:#718096;padding:12px;">This bill has no cargo lines.</td></tr>';
+
+    const cands = data.candidates || [];
+    document.getElementById('cargoSwapCandidateBody').innerHTML = cands.length ? cands.map(c => `
+        <tr>
+            <td><input type="checkbox" class="swapCand"
+                       data-type="${esc(c.cargo_source_type)}" data-id="${c.cargo_source_id}"
+                       data-avail="${c.billable_quantity}" onchange="onCargoSwapQtyChange()"></td>
+            <td>${esc(c.doc_num)}${c.vessel_name ? ' / ' + esc(c.vessel_name) : ''}</td>
+            <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${esc(c.cargo_source_type)}</span></td>
+            <td>${esc(c.cargo_name)}</td>
+            <td style="text-align:right;">${Number(c.billable_quantity||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:3})}</td>
+            <td style="text-align:right;"><input type="number" step="0.001" min="0" class="swapQty"
+                    style="width:110px;text-align:right;padding:4px;border:1px solid #e2e8f0;border-radius:4px;"
+                    value="${c.billable_quantity}" onchange="onCargoSwapQtyChange()"></td>
+        </tr>
+    `).join('') : `<tr><td colspan="6" style="text-align:center;color:#718096;padding:12px;">${esc(customer)} has no unbilled cargo to swap in. Create the replacement billables first.</td></tr>`;
+
+    document.getElementById('cargoSwapDetail').style.display = 'block';
+    onCargoSwapLinePick();
+}
+
+function onCargoSwapLinePick() {
+    const picked = document.querySelector('input[name="swapLine"]:checked');
+    document.getElementById('cargoSwapRemoveQty').textContent =
+        picked ? Number(picked.dataset.qty).toFixed(3) : '0';
+    onCargoSwapQtyChange();
+}
+
+function onCargoSwapQtyChange() {
+    const picked = document.querySelector('input[name="swapLine"]:checked');
+    const remove = picked ? parseFloat(picked.dataset.qty) : 0;
+    let add = 0;
+    document.querySelectorAll('.swapCand').forEach(cb => {
+        if (!cb.checked) return;
+        const qty = parseFloat(cb.closest('tr').querySelector('.swapQty').value) || 0;
+        add += qty;
+    });
+    document.getElementById('cargoSwapAddQty').textContent = add.toFixed(3);
+
+    const balance = document.getElementById('cargoSwapBalance');
+    const btn = document.getElementById('cargoSwapBtn');
+    const balanced = picked && add > 0 && Math.abs(add - remove) <= 0.001;
+    if (!picked) {
+        balance.textContent = 'Pick the line to remove.'; balance.style.color = '#718096';
+    } else if (add === 0) {
+        balance.textContent = 'Pick replacement cargo.'; balance.style.color = '#718096';
+    } else if (balanced) {
+        balance.textContent = '✓ Balanced — the amount will not change.'; balance.style.color = '#276749';
+    } else {
+        balance.textContent = `✗ Off by ${(add - remove).toFixed(3)} — must match exactly.`;
+        balance.style.color = '#c53030';
+    }
+    btn.disabled = !balanced;
+}
+
+async function doCargoSwap() {
+    const picked = document.querySelector('input[name="swapLine"]:checked');
+    if (!picked) return;
+    const replacements = [];
+    document.querySelectorAll('.swapCand').forEach(cb => {
+        if (!cb.checked) return;
+        const qty = parseFloat(cb.closest('tr').querySelector('.swapQty').value) || 0;
+        if (qty > 0) replacements.push({
+            cargo_source_type: cb.dataset.type,
+            cargo_source_id: parseInt(cb.dataset.id),
+            quantity: qty
+        });
+    });
+    if (!replacements.length) { alert('Pick at least one replacement cargo line.'); return; }
+
+    if (!confirm(`Swap cargo on ${cargoSwapBill.number}?\n\n` +
+                 `Removing ${Number(picked.dataset.qty).toFixed(3)} and replacing it with ` +
+                 `${replacements.length} line(s) at the same rate.\n\n` +
+                 `Totals stay identical. The removed cargo becomes billable again.`)) return;
+    const reason = prompt('Reason for the swap (recorded in the approval log):', '');
+    if (reason === null) return;
+
+    const res = await fetch('/admin/api/cargo-swap/do', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            bill_id: cargoSwapBill.id,
+            bill_line_id: parseInt(picked.value),
+            replacements, reason
+        })
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`${data.bill_number}: swapped in ${data.replaced_lines} line(s). ` +
+          `Total unchanged at ${Number(data.total).toLocaleString('en-IN',{minimumFractionDigits:2})}.` +
+          (data.invoice_updated ? '\nThe invoice copy was updated to match.' : ''));
+    loadCargoSwapBills();
 }
 
 // ── Mail Tab ─────────────────────────────────────────────────────────────────
@@ -2195,7 +2662,7 @@ async function cutLoadBillables() {
     } else {
         html += '<div class="cut-table-wrap"><table class="admin-table cut-cargo-table"><thead><tr>'
             + '<th><input type="checkbox" id="cut-select-all" onclick="cutToggleAll(this)"></th>'
-            + '<th>Source</th><th>Status</th><th>Service</th><th>Cargo</th><th>Proof Docs</th>'
+            + '<th>Source</th><th>Status</th><th>Material PO</th><th>Service</th><th>Cargo</th><th>Proof Docs</th>'
             + '<th>BL Date</th><th class="num">BL Qty</th><th class="num">Billed</th>'
             + '<th class="num">Balance</th><th class="num">Bill Qty</th><th class="num">Rate</th>'
             + '<th class="num">Amount</th></tr></thead><tbody>';
@@ -2211,6 +2678,7 @@ async function cutLoadBillables() {
                 <td><input type="checkbox" class="cut-cargo" data-st="${c.cargo_source_type}" data-id="${c.cargo_source_id}"></td>
                 <td>${c.doc_label || ''} <span class="cut-tag">${tag}</span></td>
                 <td><span class="cut-chip ${chip}">${c.doc_status || '—'}</span></td>
+                <td>${c.material_po || '—'}</td>
                 <td>${c.service_name || ''}</td>
                 <td>${c.cargo_name || ''}</td>
                 <td>${cutProofCell(c)}</td>
@@ -2224,6 +2692,35 @@ async function cutLoadBillables() {
             </tr>`;
         });
         html += '</tbody></table></div>';
+    }
+
+    // Cutover-flagged cargo: is_billed=1 with no bill behind it, so it is absent
+    // from cargo_handling above and invisible everywhere in FIN01 except the
+    // Billed tab. This is the only place it can be handed back.
+    const flagged = (data.billed || []).filter(b => b.is_cutover_billed && b.cargo_source_type);
+    if (flagged.length) {
+        html += '<h4 class="cut-subhead">Cutover-flagged (no bill) — reopen to make billable again</h4>';
+        html += '<div class="cut-table-wrap"><table class="admin-table"><thead><tr>'
+            + '<th><input type="checkbox" onclick="cutToggleReopen(this)"></th>'
+            + '<th>Source</th><th>Material PO</th><th>Cargo</th><th class="num">Qty</th>'
+            + '<th class="num">Flagged Billed</th></tr></thead><tbody>';
+        html += flagged.map(b => {
+            const qty = Number(b.quantity || 0);
+            const bq = Number(b.billed_quantity || 0);
+            // over-flagged rows are the ones a bad cutover run left behind
+            const warn = bq > qty ? ' class="cut-chip cut-chip-block"' : '';
+            return `<tr>
+                <td><input type="checkbox" class="cut-reopen" data-st="${b.cargo_source_type}" data-id="${b.id}"></td>
+                <td>${b.service_name || ''}</td>
+                <td>${b.material_po || '—'}</td>
+                <td>${b.cargo_name || ''}</td>
+                <td class="num">${qty.toFixed(2)}</td>
+                <td class="num"><span${warn}>${bq.toFixed(2)}</span></td>
+            </tr>`;
+        }).join('');
+        html += '</tbody></table></div>';
+        html += '<div class="cut-actions"><button class="btn btn-danger" onclick="cutReopenSelected()">'
+             +  'Reopen selected (make billable again)</button></div>';
     }
 
     html += '<h4 class="cut-subhead">Other Services</h4>';
@@ -2280,6 +2777,24 @@ function cutCalcAmount(el) {
 function cutToggleAll(master) {
     document.querySelectorAll('#cut-billables .cut-cargo, #cut-billables .cut-svc')
         .forEach(cb => { cb.checked = master.checked; });
+}
+
+function cutToggleReopen(master) {
+    document.querySelectorAll('#cut-billables .cut-reopen')
+        .forEach(cb => { cb.checked = master.checked; });
+}
+
+// Own button, own scope: acts only on the cutover-flagged table, never on the
+// cargo table above it. Reopening is always a full reset to unbilled.
+async function cutReopenSelected() {
+    const cargo_items = [...document.querySelectorAll('.cut-reopen:checked')].map(e => (
+        { source_type: e.dataset.st, id: parseInt(e.dataset.id, 10) }
+    ));
+    if (!cargo_items.length) { alert('Select at least one flagged row to reopen'); return; }
+    if (!confirm(`Reopen ${cargo_items.length} cargo line(s)? They become billable in FIN01 again.`)) return;
+    const ok = await _cutPost('/admin/api/cutover/mark-billed',
+                              { cargo_items, service_ids: [], billed: false });
+    if (ok) { alert('Reopened'); cutLoadBillables(); }
 }
 
 async function cutMarkBilled(billed) {

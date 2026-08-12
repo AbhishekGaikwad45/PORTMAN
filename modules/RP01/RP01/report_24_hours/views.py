@@ -13,6 +13,7 @@ from functools import wraps
 from .. import bp
 from database import get_db, get_cursor
 from datetime import datetime, timedelta, date
+from ..Barge_Position_Report.views import _fetch_tide_data
 
 # =========================================================
 # LOGIN REQUIRED
@@ -1653,6 +1654,26 @@ def get_24_hours_report():
             cement_plant_delay_hours = 0
             bad_weather_delay_hours = 0
 
+        # =================================================
+        # TIDE DATA
+        # =================================================
+
+        tide_data = []
+
+        try:
+
+            print("\n--- FETCHING TIDE DATA ---")
+
+            tide_data = _fetch_tide_data(window_start, window_end)
+
+            print("TIDE DATA:", tide_data)
+
+        except Exception as e:
+
+            print("TIDE DATA ERROR:", str(e))
+
+            tide_data = []
+
         response = {
         'success': True,
 
@@ -1689,7 +1710,8 @@ def get_24_hours_report():
         'cement_plant_delay_hours': cement_plant_delay_hours if cement_plant_delay_hours > 0 else None,
         'bad_weather_delay_hours': bad_weather_delay_hours if bad_weather_delay_hours > 0 else None,
 
-        'delay_rows': delay_rows
+        'delay_rows': delay_rows,
+        'tide_data': tide_data
 
 
         }

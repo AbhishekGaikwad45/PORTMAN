@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Revenue Report - RP02{% endblock %}
+{% block content %}
+<div class="module-header">
+    <h2>Revenue Report</h2>
+    <span class="module-code">RP02</span>
+</div>
+
+<div style="padding:14px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <select id="rev-month" style="padding:5px 8px;border-radius:4px;border:1px solid #cbd5e0;">
+            <option value="">All Months</option>
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+        </select>
+        <input id="rev-year" type="number" placeholder="Year (e.g. 2026)" style="padding:5px 8px;border-radius:4px;border:1px solid #cbd5e0;width:130px;">
+        <button class="btn" onclick="revReload()" style="background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Apply</button>
+        <button class="btn" onclick="revDownload()" style="margin-left:auto;background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">⬇ Download CSV</button>
+        <button class="btn" onclick="revGrid && revGrid.clearHeaderFilter()" style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">Clear filters</button>
+    </div>
+    <div id="rev-grid"></div>
+    <div id="rev-status" style="font-size:11px;color:#718096;margin-top:6px;"></div>
+</div>
+
+<script>
+try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
+
+let revGrid = null;
+
+function revInit() {
+    revGrid = new Tabulator('#rev-grid', {
+        layout: 'fitDataFill',
+        height: 'calc(100vh - 220px)',
+        placeholder: 'No invoices found.',
+        pagination: true,
+        paginationSize: 100,
+        paginationSizeSelector: [50, 100, 200, 500],
+        columnDefaults: {headerSort: true, headerFilter: 'input'},
+        ajaxURL: '/api/module/RP02/revenue/data',
+        ajaxResponse: (url, params, response) => {
+            const rows = response.data || [];
+            document.getElementById('rev-status').textContent = `${rows.length} row(s)`;
+            return rows;
+        },
+        columns: [
+            {title: 'Sr', formatter: 'rownum', width: 55, headerFilter: false, headerSort: false, frozen: true},
+            {title: 'Invoice No.', field: 'invoice_no', width: 140, frozen: true},
+            {title: 'Group/Non group', field: 'group_type', width: 110},
+            {title: 'Revenue type', field: 'revenue_type_1', width: 100},
+            {title: 'Revenue type', field: 'revenue_type_2', width: 130},
+            {title: 'Cargo Volume', field: 'cargo_volume', width: 100},
+            {title: 'Date', field: 'date', width: 100},
+            {title: 'Cust Code', field: 'cust_code', width: 100},
+            {title: 'Customer Name', field: 'customer_name', width: 180},
+            {title: 'GL CODE', field: 'gl_code', width: 110},
+            {title: 'Grouping', field: 'grouping', width: 140},
+            {title: 'Qty - MT', field: 'qty', width: 90, hozAlign: 'right'},
+            {title: 'Rate', field: 'rate', width: 90, hozAlign: 'right'},
+            {title: 'Tax Category', field: 'tax_category', width: 100},
+            {title: 'Tax Rate', field: 'tax_rate', width: 90},
+            {title: 'Basic Value (Rs.)', field: 'basic_value', width: 120, hozAlign: 'right',
+                formatter: c => c.getValue() != null ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''},
+            {title: 'SGST (Rs.)', field: 'sgst', width: 100, hozAlign: 'right'},
+            {title: 'CGST (Rs.)', field: 'cgst', width: 100, hozAlign: 'right'},
+            {title: 'IGST (Rs.)', field: 'igst', width: 100, hozAlign: 'right'},
+            {title: 'Invoice value (Rs.)', field: 'invoice_value', width: 130, hozAlign: 'right',
+                formatter: c => c.getValue() != null ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''},
+            {title: 'GSTIN', field: 'gstin', width: 140},
+            {title: 'SAP Doc No', field: 'sap_doc_no', width: 110},
+            {title: 'SAC CODE', field: 'sac_code', width: 90},
+            {title: 'HSN CODE', field: 'hsn_code', width: 90},
+            {title: 'IRN', field: 'irn', width: 140},
+            {title: 'Ack Date', field: 'ack_date', width: 100},
+            {title: 'Ack No', field: 'ack_no', width: 110},
+            {title: 'BARCODE', field: 'barcode', width: 110},
+            {title: 'BOOKING/PAYMENT STATUS', field: 'booking_status', width: 150},
+            {title: 'TDS/TCS', field: 'tds_tcs', width: 90, hozAlign: 'right'},
+            {title: 'NET RECEIVABLE', field: 'net_receivable', width: 130, hozAlign: 'right'},
+            {title: 'Days', field: 'days', width: 70, hozAlign: 'right'},
+            {title: 'Bucket', field: 'bucket', width: 80},
+        ],
+    });
+    if (localStorage.getItem('theme') === 'dark')
+        document.getElementById('rev-grid').classList.add('tabulator-dark');
+}
+
+function revReload() {
+    const month = document.getElementById('rev-month').value;
+    const year = document.getElementById('rev-year').value;
+    const qs = new URLSearchParams();
+    if (month) qs.set('month', month);
+    if (year) qs.set('year', year);
+    revGrid.setData('/api/module/RP02/revenue/data?' + qs.toString());
+}
+
+function revDownload() {
+    if (revGrid) revGrid.download('csv', 'revenue_report.csv');
+}
+
+document.addEventListener('DOMContentLoaded', revInit);
+</script>
+{% endblock %}

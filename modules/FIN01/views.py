@@ -30,6 +30,36 @@ def _queue_bill_approval_request(bill_id, bill_number, customer_name, total_amou
         ),
     )
 
+def _find_already_billed(lines):
+    """Return a label for the first selected line whose source is already
+    (fully) billed, else None. Mirrors the billables query server-side so a
+    stale page or a double-submit can't bill the same cargo/service twice."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        for line in lines:
+            if line.get('line_type') == 'service_record' and line.get('service_record_id'):
+                cur.execute('SELECT is_billed FROM service_records WHERE id=%s',
+                            [line['service_record_id']])
+                r = cur.fetchone()
+                if r and r['is_billed']:
+                    return line.get('description') or f"service #{line['service_record_id']}"
+            cstype, csid = line.get('cargo_source_type'), line.get('cargo_source_id')
+            if cstype and csid:
+                entry = model._CARGO_TABLES.get(cstype)
+                if not entry:
+                    continue
+                table, qty_col = entry
+                cur.execute(f'SELECT COALESCE(billed_quantity,0) AS bq, {qty_col} AS tot '
+                            f'FROM {table} WHERE id=%s', [csid])
+                r = cur.fetchone()
+                if r and model.would_overbill(r['bq'], line.get('quantity'), r['tot']):
+                    return line.get('description') or f"{cstype} #{csid}"
+        return None
+    finally:
+        conn.close()
+
+
 @bp.route('/module/FIN01/')
 def index():
     """Main FIN01 index - redirect to bills"""
@@ -248,6 +278,19 @@ def save_bill():
     # Extract lines from data before saving header (lines belong to bill_lines table, not bill_header)
     lines = data.pop('lines', [])
 
+    # Guard against duplicate billing: reject a NEW bill if any selected source
+    # is already billed. Catches "went back and re-billed the same items" and
+    # most double-submits (the Generate button is also disabled client-side).
+    # ponytail: a truly simultaneous double-POST can still slip through the
+    # read-before-write window; atomic FOR UPDATE locking on the declaration
+    # rows is the upgrade path if that ever shows up in practice.
+    if not data.get('id'):
+        dup = _find_already_billed(lines)
+        if dup:
+            return jsonify({'success': False,
+                            'error': f'"{dup}" is already billed. Refresh the page to see '
+                                     f'the current billable items before generating a bill.'})
+
     data['created_by'] = session.get('username')
     data['created_date'] = __import__('datetime').datetime.now().strftime('%Y-%m-%d')
 
@@ -443,7 +486,7 @@ def get_service_types():
     cur = get_cursor(conn)
     cur.execute('''
         SELECT s.id, s.service_name, s.service_code, s.sac_code, s.uom, s.gl_code,
-               s.gst_rate_id,
+               s.gst_rate_id, COALESCE(s.requires_hsn_input, 0) as requires_hsn_input,
                COALESCE(g.cgst_rate, 0) as cgst_rate,
                COALESCE(g.sgst_rate, 0) as sgst_rate,
                COALESCE(g.igst_rate, 0) as igst_rate,
@@ -924,6 +967,9 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.bl_quantity AS quantity, cd.billed_quantity,
                cd.quantity_uom AS uom,
+               'VCN_IMPORT' AS cargo_source_type,
+               (SELECT lh.material_po_number FROM ldud_header lh
+                 WHERE lh.vcn_id = cd.vcn_id ORDER BY lh.id DESC LIMIT 1) AS material_po,
                (vh.vcn_doc_num || ' – VCN Import') AS service_name
         FROM vcn_cargo_declaration cd
         JOIN vcn_header vh ON cd.vcn_id = vh.id
@@ -942,6 +988,9 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.bl_quantity AS quantity, cd.billed_quantity,
                cd.quantity_uom AS uom,
+               'VCN_EXPORT' AS cargo_source_type,
+               (SELECT lh.material_po_number FROM ldud_header lh
+                 WHERE lh.vcn_id = cd.vcn_id ORDER BY lh.id DESC LIMIT 1) AS material_po,
                (vh.vcn_doc_num || ' – VCN Export') AS service_name
         FROM vcn_export_cargo_declaration cd
         JOIN vcn_header vh ON cd.vcn_id = vh.id
@@ -960,6 +1009,8 @@ def get_customer_billables(customer_type, customer_id):
         SELECT cd.id, cd.cargo_name,
                cd.quantity, cd.billed_quantity,
                NULL AS uom,
+               'MBC' AS cargo_source_type,
+               cd.material_po,
                (mh.doc_num || ' – MBC') AS service_name
         FROM mbc_customer_details cd
         JOIN mbc_header mh ON cd.mbc_id = mh.id
@@ -1011,29 +1062,81 @@ def get_service_records(customer_type, customer_id):
     return jsonify({'data': records})
 
 
+# Cargo a customer can actually be billed for, by name. Mirrors the gates in
+# get_customer_billables: unbilled (or part-billed) AND the parent document
+# open enough to bill. Draft cargo is deliberately excluded — it renders locked
+# in the UI, so a customer holding only drafts has nothing to bill today.
+_BILLABLE_CARGO_COUNT = '''
+    SELECT cd.customer_name AS name, COUNT(*) AS n
+    FROM vcn_cargo_declaration cd
+    JOIN (SELECT DISTINCT ON (vcn_id) vcn_id, doc_status FROM ldud_header
+          ORDER BY vcn_id, id DESC) lh ON lh.vcn_id = cd.vcn_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.bl_quantity)
+      AND lh.doc_status IN ('Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+  UNION ALL
+    SELECT cd.customer_name, COUNT(*)
+    FROM vcn_export_cargo_declaration cd
+    JOIN (SELECT DISTINCT ON (vcn_id) vcn_id, doc_status FROM ldud_header
+          ORDER BY vcn_id, id DESC) lh ON lh.vcn_id = cd.vcn_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.bl_quantity)
+      AND lh.doc_status IN ('Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+  UNION ALL
+    SELECT cd.customer_name, COUNT(*)
+    FROM mbc_customer_details cd
+    JOIN mbc_header mh ON mh.id = cd.mbc_id
+    WHERE (COALESCE(cd.is_billed,0) = 0 OR COALESCE(cd.billed_quantity,0) < cd.quantity)
+      AND mh.doc_status IN ('Approved', 'Closed', 'Partial Close')
+    GROUP BY cd.customer_name
+'''
+
+
 @bp.route('/api/module/FIN01/customers/<path:customer_type>')
 def get_customers_for_billing(customer_type):
-    """Get customers or agents with billing details"""
+    """Get customers or agents with billing details.
+
+    ?with_billables=1 adds a billable_count per party, drops parties with none,
+    and orders by count desc. Opt-in because the admin cutover picker needs the
+    full master list (it works on cargo that is already flagged billed)."""
     if 'user_id' not in session:
         return jsonify({'error': 'Not logged in'}), 401
 
+    if customer_type == 'Customer':
+        table, active = 'vessel_customers', ''
+    elif customer_type == 'Agent':
+        table, active = 'vessel_agents', 'WHERE is_active = 1'
+    else:
+        return jsonify({'error': 'Invalid customer type'}), 400
+
     conn = get_db()
     cur = get_cursor(conn)
-    if customer_type == 'Customer':
-        cur.execute('''
-            SELECT id, name, gstin, gst_state_code,
-                   billing_address, city, pincode, contact_phone, contact_email
-            FROM vessel_customers ORDER BY name
-        ''')
-    elif customer_type == 'Agent':
-        cur.execute('''
-            SELECT id, name, gstin, gst_state_code,
-                   billing_address, city, pincode, contact_phone, contact_email
-            FROM vessel_agents WHERE is_active = 1 ORDER BY name
-        ''')
+    cols = ('id, name, gstin, gst_state_code, billing_address, city, pincode, '
+            'contact_phone, contact_email')
+
+    if request.args.get('with_billables') == '1':
+        # Cargo links to a party by name; service records link by id. Both are
+        # counted so the ordering reflects everything the page will list.
+        cur.execute(f'''
+            WITH cargo AS ({_BILLABLE_CARGO_COUNT}),
+            svc AS (
+                SELECT source_id AS id, COUNT(*) AS n
+                FROM service_records
+                WHERE source_type = %s AND doc_status = 'Approved'
+                  AND COALESCE(is_billed, 0) = 0
+                GROUP BY source_id
+            )
+            SELECT p.{cols.replace(', ', ', p.')},
+                   COALESCE((SELECT SUM(n) FROM cargo c WHERE c.name = p.name), 0)
+                 + COALESCE((SELECT n FROM svc s WHERE s.id = p.id), 0) AS billable_count
+            FROM {table} p
+            {active}
+            ORDER BY billable_count DESC, p.name
+        ''', [customer_type])
+        rows = [dict(r) for r in cur.fetchall() if r['billable_count'] > 0]
     else:
-        conn.close()
-        return jsonify({'error': 'Invalid customer type'}), 400
-    rows = cur.fetchall()
+        cur.execute(f'SELECT {cols} FROM {table} {active} ORDER BY name')
+        rows = [dict(r) for r in cur.fetchall()]
+
     conn.close()
-    return jsonify({'data': [dict(r) for r in rows]})
+    return jsonify({'data': rows})

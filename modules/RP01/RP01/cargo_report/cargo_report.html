@@ -414,6 +414,20 @@
         color: #667085;
     }
 
+    /* NEW: small colored pill for the Status column */
+    .status-pill {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        background: #eef2f6;
+        color: #475467;
+        white-space: nowrap;
+    }
+
     @keyframes spin {
         100% {
             transform: rotate(360deg);
@@ -632,6 +646,16 @@
                     <th style="padding:12px;border:1px solid #cfd4dc;">
                         Flag
                     </th>
+
+                    <!-- NEW -->
+                    <th style="padding:12px;border:1px solid #cfd4dc;">
+                        Bill No.
+                    </th>
+
+                    <!-- NEW -->
+                    <th style="padding:12px;border:1px solid #cfd4dc;">
+                        Status
+                    </th>
                 </tr>
 
             </thead>
@@ -748,7 +772,13 @@ $(document).ready(function () {
                 item.discharge_commenced || '-',
                 item.discharge_completed || '-',
                 item.consignee || '-',
-                item.flag || '-'
+                item.flag || '-',
+
+                // NEW
+                item.bill_number || 'NA',
+
+                // NEW: rendered as a small status pill
+                `<span class="status-pill">${item.status || '-'}</span>`
             ]);
         });
 
@@ -756,47 +786,59 @@ $(document).ready(function () {
 
 
     }
+
     function mergeActualDischargeCells() {
 
-    const rows = $('#cargo-report-table tbody tr');
+        const rows = $('#cargo-report-table tbody tr');
 
-    let prevKey = '';
-    let firstCell = null;
-    let rowspan = 1;
+        let prevKey = '';
+        let firstCell = null;
+        let rowspan = 1;
+        let sum = 0;
 
-    rows.each(function () {
+        rows.each(function () {
 
-        const cells = $(this).find('td');
+            const cells = $(this).find('td');
 
-        if (cells.length < 13) return;
+            // Was 13 columns, now 15 after adding Bill No. and Status.
+            // Indices below (1, 2, 7) are unaffected since the new
+            // columns were appended at the end.
+            if (cells.length < 15) return;
 
-        const vesselName = cells.eq(1).text().trim();
-        const vesselType = cells.eq(2).text().trim();
+            const vesselName = cells.eq(1).text().trim();
+            const vesselType = cells.eq(2).text().trim();
 
-        const key = vesselName + '|' + vesselType;
+            const key = vesselName + '|' + vesselType;
 
-        const actualCell = cells.eq(7);
+            const actualCell = cells.eq(7);
+            const actualValue = parseFloat(actualCell.text().replace(/,/g, '')) || 0;
 
-        if (key === prevKey) {
+            if (key === prevKey) {
 
-            rowspan++;
+                rowspan++;
+                sum += actualValue;
 
-            firstCell.attr('rowspan', rowspan);
+                firstCell.attr('rowspan', rowspan);
+                firstCell.text(sum);
 
-            actualCell.remove();
+                actualCell.remove();
 
-        } else {
+            } else {
 
-            prevKey = key;
-            firstCell = actualCell;
-            rowspan = 1;
-        }
-    });
+                prevKey = key;
+                firstCell = actualCell;
+                rowspan = 1;
+                sum = actualValue;
 
-    $('#cargo-report-table td[rowspan]').css({
-        'vertical-align': 'middle',
-    });
-}
+                firstCell.text(sum);
+            }
+        });
+
+        $('#cargo-report-table td[rowspan]').css({
+            'vertical-align': 'middle',
+        });
+    }
+
     $(document).on('change', '.material-po-input', async function () {
 
         const materialPo = $(this).val();
@@ -840,6 +882,7 @@ $(document).ready(function () {
 
         }
     });
+
     function validateDates(fromDate, toDate) {
 
         const cutoffDate = '2026-05-01';
