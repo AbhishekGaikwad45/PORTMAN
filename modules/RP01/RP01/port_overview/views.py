@@ -638,6 +638,12 @@ def _weather_card(now):
         'hours':    [{'t': h['time'][11:16], 'temp': h.get('temp_c'),
                       'icon': (h.get('condition') or {}).get('icon'),
                       'rain': h.get('chance_of_rain')} for h in hours],
+        'days':     [{'d': d.get('date'),
+                      'icon': ((d.get('day') or {}).get('condition') or {}).get('icon'),
+                      'max':  (d.get('day') or {}).get('maxtemp_c'),
+                      'min':  (d.get('day') or {}).get('mintemp_c'),
+                      'wind': (d.get('day') or {}).get('maxwind_kph'),
+                      'rain': (d.get('day') or {}).get('daily_chance_of_rain')} for d in days[:3]],
     }
 
 
