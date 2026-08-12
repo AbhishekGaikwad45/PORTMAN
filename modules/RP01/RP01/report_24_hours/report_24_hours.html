@@ -51,6 +51,33 @@
 }
 
 /* ─────────────────────────────────────────────
+   TIDE TABLE
+───────────────────────────────────────────── */
+
+.tide-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+.tide-table th,
+.tide-table td {
+    border: 1px solid #d9dee7;
+    padding: 6px 10px;
+    text-align: left;
+    color: #344054;
+}
+
+.tide-table th {
+    background: #f8f9fb;
+    font-weight: 700;
+    color: #667085;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────
    FILTER SECTION
 ───────────────────────────────────────────── */
 
@@ -377,40 +404,59 @@ function buildWhatsAppText(data) {
     lines.push('');
 
     // Delays
-lines.push(`*Delays / Detention*`);
-lines.push('');
+    lines.push(`*Delays / Detention*`);
+    lines.push('');
 
-let delaySr = 1;
+    let delaySr = 1;
 
-if (Number(data.rhms_delay_hours || 0) > 0) {
-    lines.push(
-        `  ${delaySr++}. Non Availability of RHMS System - ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.`
-    );
-}
+    if (Number(data.rhms_delay_hours || 0) > 0) {
+        lines.push(
+            `  ${delaySr++}. Non Availability of RHMS System - ${Number(data.rhms_delay_hours).toFixed(2)} Hrs.`
+        );
+    }
 
-if (Number(data.maintenance_delay_hours || 0) > 0) {
-    lines.push(
-        `  ${delaySr++}. Non Availability of Jetty System - ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.`
-    );
-}
+    if (Number(data.maintenance_delay_hours || 0) > 0) {
+        lines.push(
+            `  ${delaySr++}. Non Availability of Jetty System - ${Number(data.maintenance_delay_hours).toFixed(2)} Hrs.`
+        );
+    }
 
-if (Number(data.no_cargo_hours || 0) > 0) {
-    lines.push(
-        `  ${delaySr++}. No Cargo - ${Number(data.no_cargo_hours).toFixed(2)} Hrs.`
-    );
-}
+    if (Number(data.no_cargo_hours || 0) > 0) {
+        lines.push(
+            `  ${delaySr++}. No Cargo - ${Number(data.no_cargo_hours).toFixed(2)} Hrs.`
+        );
+    }
 
-if (Number(data.cement_plant_delay_hours || 0) > 0) {
-    lines.push(
-        `  ${delaySr++}. Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.`
-    );
-}
+    if (Number(data.cement_plant_delay_hours || 0) > 0) {
+        lines.push(
+            `  ${delaySr++}. Non Availability of Cement Plant System - ${Number(data.cement_plant_delay_hours).toFixed(2)} Hrs.`
+        );
+    }
 
-if (Number(data.bad_weather_delay_hours || 0) > 0) {
-    lines.push(
-        `  ${delaySr++}. Bad Weather - ${Number(data.bad_weather_delay_hours).toFixed(2)} Hrs.`
-    );
-}
+    if (Number(data.bad_weather_delay_hours || 0) > 0) {
+        lines.push(
+            `  ${delaySr++}. Bad Weather - ${Number(data.bad_weather_delay_hours).toFixed(2)} Hrs.`
+        );
+    }
+
+    lines.push('');
+
+    // ─────────────────────────────────────────────
+    // TIDE DETAILS
+    // ─────────────────────────────────────────────
+
+    lines.push(`*Tide Details*`);
+
+    const tideData = data.tide_data || [];
+
+    if (tideData.length > 0) {
+        tideData.forEach(item => {
+            const heightText = item.height !== undefined ? `${Number(item.height).toFixed(2)} m` : '';
+            lines.push(`  ${item.time || ''} — ${item.type || ''} ${heightText}`);
+        });
+    } else {
+        lines.push('  Nil');
+    }
 
     return lines.join('\n');
 }
@@ -723,6 +769,52 @@ if (Number(data.bad_weather_delay_hours || 0) > 0) {
 }
 
 html += `</ol>`;
+
+    // ─────────────────────────────────────────────
+    // TIDE DETAILS
+    // ─────────────────────────────────────────────
+
+    html += `
+        <div class="report-line" style="margin-top:20px;">
+            <b>Tide Details</b>
+        </div>
+    `;
+
+    const tideData = data.tide_data || [];
+
+    if (tideData.length > 0) {
+
+        html += `
+            <table class="tide-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Height (m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        tideData.forEach(item => {
+            html += `
+                <tr>
+                    <td>${item.time || ''}</td>
+                    <td>${item.type || ''}</td>
+                    <td>${item.height !== undefined ? Number(item.height).toFixed(2) : ''}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+    } else {
+        html += `<div class="report-line nil-text">No tide data available.</div>`;
+    }
+
     html += `</div>`;
 
     $('#report-container')
