@@ -10,6 +10,7 @@ from database import get_db, get_cursor
 from ..daily_ops.model import fy_label
 from ..shift_report.views import _fetch_delays, _fetch_shift_pivot
 from ..Barge_Position_Report.views import _fetch_tide_data, _fetch_all_barges
+from weather_service import get_weather
 from flask import render_template, session, redirect, url_for, jsonify, request
 
 IMAGE_SIZE = (941, 1672)  # static/img/Clean_berths.png natural pixel size
@@ -605,6 +606,41 @@ def _top_delays_today():
 # API
 # ---------------------------------------------------------------------------
 
+def _weather_card(now):
+    """Cached WeatherAPI payload trimmed to the fields the weather card shows.
+
+    None when the cache is empty or stale (see weather_service.TTL_HOURS) — the
+    card then renders a 'no data' state instead of showing old weather.
+    """
+    w = get_weather()
+    if not w:
+        return None
+    cur = w.get('current') or {}
+    days = (w.get('forecast') or {}).get('forecastday') or []
+    day0 = days[0] if days else {}
+    now_s = now.strftime('%Y-%m-%d %H:%M')
+    hours = [h for d in days for h in (d.get('hour') or []) if h.get('time', '') >= now_s][:6]
+    return {
+        'temp':     cur.get('temp_c'),
+        'feels':    cur.get('feelslike_c'),
+        'text':     (cur.get('condition') or {}).get('text'),
+        'icon':     (cur.get('condition') or {}).get('icon'),
+        'wind':     cur.get('wind_kph'),
+        'wind_dir': cur.get('wind_dir'),
+        'gust':     cur.get('gust_kph'),
+        'humidity': cur.get('humidity'),
+        'pressure': cur.get('pressure_mb'),
+        'vis':      cur.get('vis_km'),
+        'rain':     (day0.get('day') or {}).get('totalprecip_mm'),
+        'sunrise':  (day0.get('astro') or {}).get('sunrise'),
+        'sunset':   (day0.get('astro') or {}).get('sunset'),
+        'updated':  cur.get('last_updated'),
+        'hours':    [{'t': h['time'][11:16], 'temp': h.get('temp_c'),
+                      'icon': (h.get('condition') or {}).get('icon'),
+                      'rain': h.get('chance_of_rain')} for h in hours],
+    }
+
+
 @bp.route('/api/module/RP01/port-overview/data')
 @login_required
 def port_overview_data():
@@ -692,6 +728,7 @@ def port_overview_data():
         'upcoming':    _upcoming_arrivals(),
         'delays':      _top_delays_today(),
         'mbc_status':  mbc_status,
+        'weather':     _weather_card(now),
         'as_of':       now.strftime('%Y-%m-%d %H:%M:%S'),
     })
 
