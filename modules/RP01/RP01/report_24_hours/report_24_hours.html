@@ -340,6 +340,25 @@ function buildWhatsAppText(data) {
 
     lines.push('');
 
+    // ─────────────────────────────────────────────
+    // TIDE DETAILS
+    // ─────────────────────────────────────────────
+
+    lines.push(`*Tide Details*`);
+
+    const tideData = data.tide_data || [];
+
+    if (tideData.length > 0) {
+        tideData.forEach(item => {
+            const heightText = item.height !== undefined ? `${Number(item.height).toFixed(2)} m` : '';
+            lines.push(`  ${item.time || ''} — ${item.type || ''} ${heightText}`);
+        });
+    } else {
+        lines.push('  Nil');
+    }
+
+    lines.push('');
+
     // MV Discharge List
     const mvList = data.mv_discharge_list || [];
     if (mvList.length > 0) {
@@ -439,28 +458,8 @@ function buildWhatsAppText(data) {
         );
     }
 
-    lines.push('');
-
-    // ─────────────────────────────────────────────
-    // TIDE DETAILS
-    // ─────────────────────────────────────────────
-
-    lines.push(`*Tide Details*`);
-
-    const tideData = data.tide_data || [];
-
-    if (tideData.length > 0) {
-        tideData.forEach(item => {
-            const heightText = item.height !== undefined ? `${Number(item.height).toFixed(2)} m` : '';
-            lines.push(`  ${item.time || ''} — ${item.type || ''} ${heightText}`);
-        });
-    } else {
-        lines.push('  Nil');
-    }
-
     return lines.join('\n');
 }
-
 
 // ─────────────────────────────────────────────
 // SEND TO WHATSAPP
@@ -622,6 +621,51 @@ function render24HoursReport(data) {
         html += `</ol>`;
     }
 
+    // ─────────────────────────────────────────────
+    // TIDE DETAILS
+    // ─────────────────────────────────────────────
+
+    html += `
+        <div class="report-line" style="margin-top:20px;">
+            <b>Tide Details</b>
+        </div>
+    `;
+
+    const tideData = data.tide_data || [];
+
+    if (tideData.length > 0) {
+
+        html += `
+            <table class="tide-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Height (m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        tideData.forEach(item => {
+            html += `
+                <tr>
+                    <td>${item.time || ''}</td>
+                    <td>${item.type || ''}</td>
+                    <td>${item.height !== undefined ? Number(item.height).toFixed(2) : ''}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+    } else {
+        html += `<div class="report-line nil-text">No tide data available.</div>`;
+    }
+
     // Vessel List
     if ((data.mv_discharge_list || []).length > 0) {
 
@@ -769,52 +813,6 @@ if (Number(data.bad_weather_delay_hours || 0) > 0) {
 }
 
 html += `</ol>`;
-
-    // ─────────────────────────────────────────────
-    // TIDE DETAILS
-    // ─────────────────────────────────────────────
-
-    html += `
-        <div class="report-line" style="margin-top:20px;">
-            <b>Tide Details</b>
-        </div>
-    `;
-
-    const tideData = data.tide_data || [];
-
-    if (tideData.length > 0) {
-
-        html += `
-            <table class="tide-table">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Type</th>
-                        <th>Height (m)</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
-        tideData.forEach(item => {
-            html += `
-                <tr>
-                    <td>${item.time || ''}</td>
-                    <td>${item.type || ''}</td>
-                    <td>${item.height !== undefined ? Number(item.height).toFixed(2) : ''}</td>
-                </tr>
-            `;
-        });
-
-        html += `
-                </tbody>
-            </table>
-        `;
-
-    } else {
-        html += `<div class="report-line nil-text">No tide data available.</div>`;
-    }
-
     html += `</div>`;
 
     $('#report-container')
