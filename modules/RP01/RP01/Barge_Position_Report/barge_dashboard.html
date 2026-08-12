@@ -101,8 +101,8 @@
 
     .dashboard-viewport {
         display: grid;
-        grid-template-columns: 220px 1.4fr 1.4fr;
-        gap: 16px;
+        grid-template-columns: 160px 1.4fr 1.4fr 160px;
+        gap: 10px;
         height: calc(100vh - 210px);
         width: 100%;
     }
@@ -118,8 +118,8 @@
     }
 
     .panel-header {
-        padding: 14px 16px;
-        font-size: 13px;
+        padding: 10px 12px;
+        font-size: 12px;
         font-weight: 700;
         letter-spacing: .5px;
         text-transform: uppercase;
@@ -146,10 +146,10 @@
     .waiting-list-flow {
         flex: 1;
         overflow-y: auto;
-        padding: 12px;
+        padding: 6px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
         background: #f8fafc;
     }
 
@@ -162,11 +162,11 @@
         background: var(--state-waiting-bg);
         border: 1px solid var(--state-waiting-border);
         border-radius: 6px;
-        padding: 14px;
+        padding: 8px 10px;
         cursor: grab;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 3px;
         box-shadow: 0 2px 4px rgba(0, 0, 0, .05);
         transition: transform .1s ease;
     }
@@ -179,25 +179,46 @@
     .barge-pill-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-size: 14px;
+        gap: 4px;
+        font-size: 12px;
         font-weight: 800;
         color: var(--state-waiting-text);
         text-transform: uppercase;
+        word-break: break-word;
     }
 
     .barge-pill-cargo {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--state-waiting-text);
         font-weight: 600;
         opacity: .9;
+        word-break: break-word;
     }
 
     .barge-pill-metrics {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--state-waiting-text);
         font-weight: 700;
-        margin-top: 4px;
+        margin-top: 2px;
+    }
+
+    /* ── WR 19 Anchorage Red Theme ── */
+    #wr19AreaZone .barge-pill-container {
+        background: linear-gradient(135deg, #ffe4e6, #fecdd3);
+        border: 1px solid #f87171;
+        box-shadow: 0 2px 6px rgba(225, 29, 72, 0.18);
+    }
+
+    #wr19AreaZone .barge-pill-header {
+        color: #9f1239;
+    }
+
+    #wr19AreaZone .barge-pill-cargo {
+        color: #be123c;
+    }
+
+    #wr19AreaZone .barge-pill-metrics {
+        color: #881337 !important;
     }
 
     .matrix-wrapper {
@@ -213,6 +234,7 @@
 
     .matrix-table {
         width: 100%;
+        min-width: 480px;
         table-layout: fixed;
         border-collapse: collapse;
     }
@@ -225,7 +247,7 @@
         font-size: 11px;
         font-weight: 700;
         color: var(--text-muted);
-        padding: 12px 6px;
+        padding: 12px 4px;
         border-bottom: 1px solid var(--border-clr);
         text-align: center;
         letter-spacing: .5px;
@@ -233,7 +255,7 @@
 
     .matrix-table th:first-child {
         text-align: left;
-        padding-left: 16px;
+        padding-left: 10px;
     }
 
     .matrix-table tr:nth-child(even) .matrix-dropzone.empty-slot {
@@ -242,9 +264,10 @@
 
     .matrix-table td {
         border-bottom: 1px solid var(--border-clr);
-        padding: 6px 4px;
+        padding: 4px 2px;
         text-align: center;
         vertical-align: middle;
+        overflow: hidden;
     }
 
     .jetty-label {
@@ -262,6 +285,8 @@
 
     .matrix-dropzone {
         width: 100%;
+        min-width: 0;
+        max-width: 100%;
         height: 110px;
         min-height: 110px;
         box-sizing: border-box;
@@ -271,6 +296,7 @@
         align-items: stretch;
         justify-content: stretch;
         padding: 2px;
+        overflow: hidden;
     }
 
     .matrix-dropzone.empty-slot {
@@ -287,10 +313,11 @@
 
     .berth-allocated-card {
         width: 100%;
-        border-radius: 10px;
-        min-width: 80px;
+        max-width: 100%;
+        min-width: 0;
+        border-radius: 6px;
         min-height: 105px;
-        padding: 8px;
+        padding: 6px 4px;
         box-sizing: border-box;
         overflow: hidden;
     }
@@ -313,19 +340,20 @@
 
     .berth-card-title {
         font-size: 11px;
-        line-height: 14px;
+        line-height: 13px;
         word-break: break-word;
     }
 
     .berth-card-cargo {
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 600;
         color: var(--state-discharging-text);
         opacity: .9;
+        word-break: break-word;
     }
 
     .berth-card-metrics {
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
         color: var(--state-discharging-text);
         margin-top: 2px;
@@ -860,7 +888,7 @@
 
     .log-count-table {
         border-collapse: collapse;
-        width: 180px;
+        width: 320px;
         background: #fff;
     }
 
@@ -1201,7 +1229,7 @@
     <!-- Berth board -->
     <div class="dashboard-viewport">
 
-        <!-- Waiting area -->
+        <!-- Waiting area (Left Side) -->
         <div class="panel-frame">
             <div class="panel-header">
                 <span class="title-tag">Waiting Area</span>
@@ -1291,6 +1319,16 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- WR 19 area (Right Side) -->
+        <div class="panel-frame">
+            <div class="panel-header">
+                <span class="title-tag" style="color:#e11d48;">WR19 Anchorage</span>
+                <span class="badge-count" id="wr19Count">0</span>
+            </div>
+            <div class="waiting-list-flow" id="wr19AreaZone" data-location="WR 19">
             </div>
         </div>
     </div>
@@ -1501,24 +1539,34 @@
             <thead>
                 <tr>
                     <th>SHIFT</th>
+                    <th>BARGE</th>
+                    <th>MBC</th>
                     <th>LOG COUNT</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
                     <td>A</td>
+                    <td id="aBargeCount">0</td>
+                    <td id="aMbcCount">0</td>
                     <td id="aLogCount">0</td>
                 </tr>
                 <tr>
                     <td>B</td>
+                    <td id="bBargeCount">0</td>
+                    <td id="bMbcCount">0</td>
                     <td id="bLogCount">0</td>
                 </tr>
                 <tr>
                     <td>C</td>
+                    <td id="cBargeCount">0</td>
+                    <td id="cMbcCount">0</td>
                     <td id="cLogCount">0</td>
                 </tr>
                 <tr class="total-row">
                     <td>TOTAL</td>
+                    <td id="totalBargeCount">0</td>
+                    <td id="totalMbcCount">0</td>
                     <td id="totalLogCount" style="font-weight:700;">0</td>
                 </tr>
             </tbody>
@@ -1904,6 +1952,25 @@
                 });
             });
 
+            // ── 2b. WR 19 items (order matters) ────────────────────────────────────
+            const wr19Items = [];
+            document.querySelectorAll('#wr19AreaZone .barge-pill-container').forEach(pill => {
+                wr19Items.push({
+                    id: pill.dataset.id || '',
+                    name: pill.dataset.name || '',
+                    cargo: pill.dataset.cargo || '',
+                    status: pill.dataset.status || '',
+                    qty: parseFloat(pill.dataset.qty || 0),
+                    balance: parseFloat(pill.dataset.balance || 0),
+                    total: parseFloat(pill.dataset.total || pill.dataset.qty || 0),
+                    type: pill.dataset.type || 'BARGE',
+                    berth: 'WR 19',
+                    position: '',
+                    unloading_commenced: pill.dataset.unloadingCommenced || '',
+                    commence_discharge_berth: pill.dataset.commencedischargeBerth || '',
+                });
+            });
+
             // ── 3. WT @ R19 and MBC ETA — keyed by vessel name ─────────────────────
             const wtR19 = {};
             const mbcEta = {};
@@ -1944,7 +2011,7 @@
                 shift_incharge: document.getElementById('shiftInchargeName').value || '',
                 bpo: document.getElementById('shiftBpoName').value || '',
                 crane_operator: document.getElementById('shiftIportName').value || '',
-                berth_layout: [...berthLayout, ...waitingItems],
+                berth_layout: [...berthLayout, ...waitingItems, ...wr19Items],
                 wt_r19: wtR19,
                 eta_to_dharamtar: etaToDharamtar,
                 mbc_eta: mbcEta,
@@ -2209,6 +2276,7 @@
             z.innerHTML = '—';
         });
         document.getElementById('waitingAreaZone').innerHTML = '';
+        if (document.getElementById('wr19AreaZone')) document.getElementById('wr19AreaZone').innerHTML = '';
 
         // Saved layouts on prod carry empty ids (an old save dropped them and every
         // carry-forward re-saved ''), so match by id only when both sides have one,
@@ -2264,6 +2332,25 @@
                         total: live.total_qty ?? live.qty,
                     } : item)
                 );
+            } else if (item.berth === 'WR 19') {
+                const live = findLive(item);
+                const effectiveBalance = live
+                    ? Number(live.balance_qty)
+                    : Number(item.balance ?? item.balance_qty ?? 0);
+                if (live && live.cast_off_done) {
+                    return;
+                }
+
+                console.log(`[BPR] ${item.name} (WR 19): live=${!!live}, balance ${effectiveBalance} — shown`);
+                if (document.getElementById('wr19AreaZone')) {
+                    document.getElementById('wr19AreaZone').appendChild(
+                        buildWaitingPill(live ? {
+                            ...live,
+                            balance: live.balance_qty,
+                            total: live.total_qty ?? live.qty,
+                        } : item)
+                    );
+                }
             } else {
                 const zone = document.querySelector(
                     `.matrix-dropzone[data-berth="${item.berth}"][data-position="${item.position}"]`
@@ -2356,12 +2443,23 @@
             .replace(/>/g, '&gt;');
     }
 
+    function detectVesselType(item) {
+        if (!item) return 'BARGE';
+        const type = (item.type || item.vessel_type || '').toString().trim().toUpperCase();
+        if (type === 'MBC') return 'MBC';
+        if (type === 'BARGE') return 'BARGE';
+        const name = (item.name || item.barge_name || item.mbc_name || '').toString().trim().toUpperCase();
+        if (name.includes('MBC') || name.startsWith('MBC')) return 'MBC';
+        return 'BARGE';
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════
     //  BUILD DOM ELEMENTS
     // ══════════════════════════════════════════════════════════════════════════════
     function buildWaitingPill(item) {
         const bl = parseFloat(item.total || item.qty || 0);
         const bal = parseFloat(item.balance || bl);
+        const vType = detectVesselType(item);
         const pill = document.createElement('div');
         pill.className = 'barge-pill-container draggable-node';
         pill.setAttribute('draggable', 'true');
@@ -2371,13 +2469,13 @@
         pill.dataset.qty = item.qty || 0;
         pill.dataset.balance = item.balance || 0;
         pill.dataset.total = item.total || item.qty || 0;
-        pill.dataset.type = item.type || 'BARGE';
+        pill.dataset.type = vType;
         pill.dataset.status = item.status || '';
         pill.dataset.unloadingCommenced = item.unloading_commenced || '';
         pill.dataset.commencedischargeBerth = item.commence_discharge_berth || '';
 
         pill.innerHTML = `
-        <div class="barge-pill-header">${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="barge-pill-header">${vType} — ${item.name || ''}</div>
         <div class="barge-pill-cargo">${item.cargo || ''}</div>
         <div class="barge-pill-metrics"><b>BL:</b> ${bl.toLocaleString()} MT</div>
         <div class="barge-pill-metrics" style="color:#b45309;"><b>Bal:</b> ${bal.toLocaleString()} MT</div>`;
@@ -2387,6 +2485,7 @@
     function buildBerthCard(item, balance) {
         const bal = parseFloat(balance || 0);
         const bl = parseFloat(item.total || item.qty || 0);
+        const vType = detectVesselType(item);
 
         const unloadingCommenced = String(item.unloading_commenced || '').trim();
         const commenceDischargeBerth = String(item.commence_discharge_berth || '').trim();
@@ -2418,11 +2517,11 @@
          data-balance="${bal}"
          data-status="${item.status || ''}"
          data-discharge="${item.discharge || 0}"
-         data-type="${item.type || 'BARGE'}"
+         data-type="${vType}"
          data-unloading-commenced="${item.unloading_commenced || ''}"
          data-commencedischarge-berth="${item.commence_discharge_berth || ''}">
 
-        <div class="berth-card-title">⚓ ${item.type || 'BARGE'} — ${item.name || ''}</div>
+        <div class="berth-card-title">⚓ ${vType} — ${item.name || ''}</div>
         <div class="berth-card-cargo">${item.cargo || ''}</div>
         <div class="berth-card-metrics"><b>BL :</b> ${bl.toLocaleString()} MT</div>
         <div class="berth-card-metrics" style="color:#b45309;"><b>Bal :</b> ${bal.toLocaleString()} MT</div>
@@ -2547,15 +2646,17 @@
     document.addEventListener('dragstart', function (e) {
         const node = e.target.closest('.draggable-node, .berth-allocated-card');
         if (node) {
+            const vName = node.dataset.name || '';
+            const vType = detectVesselType({ type: node.dataset.type, name: vName });
             activeDragData = {
                 id: node.dataset.id,
-                name: node.dataset.name,
+                name: vName,
                 cargo: node.dataset.cargo,
                 qty: node.dataset.qty,
                 balance: node.dataset.balance || node.dataset.qty,
                 total: node.dataset.total || node.dataset.qty,
                 discharge: node.dataset.discharge || 0,
-                type: node.dataset.type || 'BARGE',
+                type: vType,
                 unloading_commenced: node.dataset.unloadingCommenced || '',
                 commence_discharge_berth: node.dataset.commencedischargeBerth || '',
             };
@@ -2592,7 +2693,13 @@
                 const position = this.dataset.position;
                 let fromLocation = 'WAITING AREA';
                 const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
-                if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+                if (oldZone) {
+                    fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+                } else if (sourceOriginElement?.closest('#wr19AreaZone')) {
+                    fromLocation = 'WR 19';
+                } else if (sourceOriginElement?.closest('#waitingAreaZone')) {
+                    fromLocation = 'WAITING AREA';
+                }
 
                 cleanSourceOrigin();
                 this.classList.remove('empty-slot');
@@ -2602,12 +2709,47 @@
                     commence_discharge_berth: activeDragData.commence_discharge_berth,
                 }, parseFloat(activeDragData.balance || activeDragData.qty || 0));
 
-                writeLog(activeDragData.name, fromLocation, `${berth} → ${position}`);
+                writeLog(activeDragData.name, fromLocation, `${berth} → ${position}`, activeDragData.type || 'BARGE');
                 resetDragVars();
                 updateInterfaceMetrics();
                 markUnsaved();
             });
         });
+
+        // ── WR 19 Dropzone ──
+        const wr19Zone = document.getElementById('wr19AreaZone');
+        if (wr19Zone && !wr19Zone.dataset.bound) {
+            wr19Zone.dataset.bound = 'true';
+            wr19Zone.addEventListener('dragover', e => e.preventDefault());
+            wr19Zone.addEventListener('dragenter', function () { this.classList.add('drag-active'); });
+            wr19Zone.addEventListener('dragleave', function () { this.classList.remove('drag-active'); });
+            wr19Zone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                this.classList.remove('drag-active');
+                if (!activeDragData) return;
+                if (sourceOriginElement?.parentElement === this) return;
+
+                let fromLocation = 'WR 19';
+                const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
+                if (oldZone) {
+                    fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+                } else if (sourceOriginElement?.closest('#waitingAreaZone')) {
+                    fromLocation = 'WAITING AREA';
+                }
+
+                cleanSourceOrigin();
+                this.appendChild(buildWaitingPill({
+                    ...activeDragData,
+                    balance: activeDragData.balance || activeDragData.qty,
+                    total: activeDragData.total || activeDragData.qty,
+                }));
+
+                writeLog(activeDragData.name, fromLocation, 'WR 19', activeDragData.type || 'BARGE');
+                resetDragVars();
+                updateInterfaceMetrics();
+                markUnsaved();
+            });
+        }
     }
 
     const waitingZone = document.getElementById('waitingAreaZone');
@@ -2622,7 +2764,11 @@
 
         let fromLocation = 'WAITING AREA';
         const oldZone = sourceOriginElement?.closest('.matrix-dropzone');
-        if (oldZone) fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+        if (oldZone) {
+            fromLocation = `${oldZone.dataset.berth} → ${oldZone.dataset.position}`;
+        } else if (sourceOriginElement?.closest('#wr19AreaZone')) {
+            fromLocation = 'WR 19';
+        }
 
         cleanSourceOrigin();
         this.appendChild(buildWaitingPill({
@@ -2631,7 +2777,7 @@
             total: activeDragData.total || activeDragData.qty,
         }));
 
-        writeLog(activeDragData.name, fromLocation, 'WAITING AREA');
+        writeLog(activeDragData.name, fromLocation, 'WAITING AREA', activeDragData.type || 'BARGE');
         resetDragVars();
         updateInterfaceMetrics();
         markUnsaved();
@@ -2657,7 +2803,7 @@
 
         if (statusF === 'COMPLETED') { showCompletedPopup(); return; }
 
-        document.querySelectorAll('#waitingAreaZone .barge-pill-container').forEach(card => {
+        document.querySelectorAll('#waitingAreaZone .barge-pill-container, #wr19AreaZone .barge-pill-container').forEach(card => {
             const ok = card.dataset.name.toLowerCase().includes(nameQ)
                 && card.dataset.cargo.toLowerCase().includes(cargoQ)
                 && (statusF === 'ALL' || statusF === 'WAITING')
@@ -2685,6 +2831,7 @@
     // ══════════════════════════════════════════════════════════════════════════════
     function updateInterfaceMetrics() {
         const waitingCount = document.querySelectorAll('#waitingAreaZone .barge-pill-container').length;
+        const wr19Count = document.querySelectorAll('#wr19AreaZone .barge-pill-container').length;
         const dischargingCount = document.querySelectorAll('.berth-allocated-card').length;
         const occupiedBerths = new Set();
 
@@ -2697,8 +2844,9 @@
         const totalBerths = document.querySelectorAll("tr[data-jetty-row]").length;
 
         document.getElementById('waitingCount').innerText = waitingCount;
-        document.getElementById('metricTotal').innerText = waitingCount + dischargingCount;
-        document.getElementById('metricWaiting').innerText = waitingCount;
+        if (document.getElementById('wr19Count')) document.getElementById('wr19Count').innerText = wr19Count;
+        document.getElementById('metricTotal').innerText = waitingCount + wr19Count + dischargingCount;
+        document.getElementById('metricWaiting').innerText = waitingCount + wr19Count;
         document.getElementById('metricDischarging').innerText = dischargingCount;
         document.getElementById('metricOccupied').innerText = occ;
         document.getElementById('metricFree').innerText = Math.max(0, totalBerths - occ);
@@ -3131,40 +3279,71 @@
         const shifts = ['A', 'B', 'C'];
         const discharge = { A: 0, B: 0, C: 0 };
         const logCounts = { A: 0, B: 0, C: 0 };
+        const bargeCounts = { A: 0, B: 0, C: 0 };
+        const mbcCounts = { A: 0, B: 0, C: 0 };
 
         for (const shift of shifts) {
             const params = new URLSearchParams({ date: reportDate, shift: shift });
             let logsCount = 0;
+            let bCount = 0;
+            let mCount = 0;
             try {
                 const res = await fetch(`/api/module/RP01/shift-wise-discharge?${params}`);
                 const data = await res.json();
-                const logs = [...(data.barge_discharge || []), ...(data.mbc_discharge || [])];
+                const barges = data.barge_discharge || [];
+                const mbcs = data.mbc_discharge || [];
+                bCount = barges.length;
+                mCount = mbcs.length;
+                logsCount = bCount + mCount;
                 let total = 0;
-                logs.forEach(row => {
+                [...barges, ...mbcs].forEach(row => {
                     total += Number(row.actual_discharge || 0);
                 });
                 discharge[shift] = total;
-                logsCount = logs.length;
             } catch (e) {
                 console.error('shift summary fetch error:', e);
             }
 
-            const movCount = (_movementLogs || []).filter(l => {
+            const movs = (_movementLogs || []).filter(l => {
                 const s = (l.shift || '').trim().toUpperCase();
                 return s === shift || s === (shift + ' SHIFT') || s.startsWith(shift);
-            }).length;
+            });
+            const movBarge = movs.filter(l => (l.type || 'BARGE').toUpperCase() === 'BARGE').length;
+            const movMbc = movs.filter(l => (l.type || '').toUpperCase() === 'MBC').length;
 
-            logCounts[shift] = logsCount > 0 ? logsCount : movCount;
+            bargeCounts[shift] = Math.max(bCount, movBarge);
+            mbcCounts[shift] = Math.max(mCount, movMbc);
+            logCounts[shift] = Math.max(logsCount, movs.length, bargeCounts[shift] + mbcCounts[shift]);
         }
 
         document.getElementById('aDischarge').textContent = discharge.A.toLocaleString();
         document.getElementById('bDischarge').textContent = discharge.B.toLocaleString();
         document.getElementById('cDischarge').textContent = discharge.C.toLocaleString();
 
-        document.getElementById('aLogCount').textContent = logCounts.A.toLocaleString();
-        document.getElementById('bLogCount').textContent = logCounts.B.toLocaleString();
-        document.getElementById('cLogCount').textContent = logCounts.C.toLocaleString();
-        document.getElementById('totalLogCount').textContent = (logCounts.A + logCounts.B + logCounts.C).toLocaleString();
+        ['A', 'B', 'C'].forEach(s => {
+            const lowKey = s.toLowerCase();
+            const elB = document.getElementById(`${lowKey}BargeCount`);
+            const elM = document.getElementById(`${lowKey}MbcCount`);
+            const elL = document.getElementById(`${lowKey}LogCount`);
+
+            if (elB) {
+                elB.textContent = bargeCounts[s].toLocaleString();
+                elB.dataset.baseCount = bargeCounts[s];
+            }
+            if (elM) {
+                elM.textContent = mbcCounts[s].toLocaleString();
+                elM.dataset.baseCount = mbcCounts[s];
+            }
+            if (elL) elL.textContent = logCounts[s].toLocaleString();
+        });
+
+        const totBarge = bargeCounts.A + bargeCounts.B + bargeCounts.C;
+        const totMbc = mbcCounts.A + mbcCounts.B + mbcCounts.C;
+        const totLog = logCounts.A + logCounts.B + logCounts.C;
+
+        if (document.getElementById('totalBargeCount')) document.getElementById('totalBargeCount').textContent = totBarge.toLocaleString();
+        if (document.getElementById('totalMbcCount')) document.getElementById('totalMbcCount').textContent = totMbc.toLocaleString();
+        if (document.getElementById('totalLogCount')) document.getElementById('totalLogCount').textContent = totLog.toLocaleString();
 
         updateLogCountTable();
 
@@ -3173,26 +3352,58 @@
     }
 
     function updateLogCountTable() {
-        const counts = { A: 0, B: 0, C: 0 };
+        const counts = {
+            A: { barge: 0, mbc: 0 },
+            B: { barge: 0, mbc: 0 },
+            C: { barge: 0, mbc: 0 }
+        };
+
         (_movementLogs || []).forEach(l => {
             const s = (l.shift || '').trim().toUpperCase();
-            if (s.startsWith('A')) counts.A++;
-            else if (s.startsWith('B')) counts.B++;
-            else if (s.startsWith('C')) counts.C++;
+            let shiftKey = null;
+            if (s.startsWith('A')) shiftKey = 'A';
+            else if (s.startsWith('B')) shiftKey = 'B';
+            else if (s.startsWith('C')) shiftKey = 'C';
+
+            if (shiftKey) {
+                const vType = detectVesselType({ type: l.type, name: l.name });
+                if (vType === 'MBC') {
+                    counts[shiftKey].mbc++;
+                } else {
+                    counts[shiftKey].barge++;
+                }
+            }
         });
 
-        const curA = parseInt(document.getElementById('aLogCount').textContent || '0', 10) || 0;
-        const curB = parseInt(document.getElementById('bLogCount').textContent || '0', 10) || 0;
-        const curC = parseInt(document.getElementById('cLogCount').textContent || '0', 10) || 0;
+        let totalBargeSum = 0;
+        let totalMbcSum = 0;
+        let totalLogSum = 0;
 
-        const valA = Math.max(curA, counts.A);
-        const valB = Math.max(curB, counts.B);
-        const valC = Math.max(curC, counts.C);
+        ['A', 'B', 'C'].forEach(s => {
+            const lowKey = s.toLowerCase();
+            const elB = document.getElementById(`${lowKey}BargeCount`);
+            const elM = document.getElementById(`${lowKey}MbcCount`);
+            const elL = document.getElementById(`${lowKey}LogCount`);
 
-        document.getElementById('aLogCount').textContent = valA.toLocaleString();
-        document.getElementById('bLogCount').textContent = valB.toLocaleString();
-        document.getElementById('cLogCount').textContent = valC.toLocaleString();
-        document.getElementById('totalLogCount').textContent = (valA + valB + valC).toLocaleString();
+            const baseB = parseInt(elB?.dataset?.baseCount ?? elB?.textContent ?? '0', 10) || 0;
+            const baseM = parseInt(elM?.dataset?.baseCount ?? elM?.textContent ?? '0', 10) || 0;
+
+            const finalB = baseB + counts[s].barge;
+            const finalM = baseM + counts[s].mbc;
+            const valL = finalB + finalM;
+
+            if (elB) elB.textContent = finalB.toLocaleString();
+            if (elM) elM.textContent = finalM.toLocaleString();
+            if (elL) elL.textContent = valL.toLocaleString();
+
+            totalBargeSum += finalB;
+            totalMbcSum += finalM;
+            totalLogSum += valL;
+        });
+
+        if (document.getElementById('totalBargeCount')) document.getElementById('totalBargeCount').textContent = totalBargeSum.toLocaleString();
+        if (document.getElementById('totalMbcCount')) document.getElementById('totalMbcCount').textContent = totalMbcSum.toLocaleString();
+        if (document.getElementById('totalLogCount')) document.getElementById('totalLogCount').textContent = totalLogSum.toLocaleString();
     }
 
     function autoSelectShift() {
