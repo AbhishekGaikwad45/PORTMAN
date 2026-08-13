@@ -287,7 +287,6 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         v['cargo_name']       = (cargo_export.get(vid, '') if op == 'Export' else cargo_import.get(vid, ''))
         v['stevedore_group']  = vcn_meta.get(vid, '')
 
-        v['stevedore_group']  = vcn_meta.get(vid, '')
         v['bl_qty']           = bl_qty
         v['ops_24h']          = ops_24h.get(v['id'], 0)
         v['ops_till']         = ops_till.get(v['id'], 0)
@@ -296,10 +295,20 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         v['eta_to_dharamtar'] = eta_to_dharamtar.get(v['id'], '')
         v['wt_r19']           = ''
         v['at_gull_loaded']   = at_gull_loaded.get(v['id'], '')
-        if i < len(mbc_eta_list):
-          v['mbc_eta'] = mbc_eta_list[i]
-        else:
-            v['mbc_eta'] = ''
+
+        v_cargo = (v.get('cargo_name') or '').strip().upper()
+        matching_etas = []
+        for r in mbc_eta_rows:
+            mbc_cargo = (r.get('cargo_name') or '').strip().upper()
+            dep_dt = _parse_dt(r['departure_gull_island'])
+            dep_str = dep_dt.strftime('%d-%m %H:%M') if dep_dt else ''
+            entry = f"{r['mbc_name']} ({r['cargo_name'] or ''}) - Dep Gull: {dep_str}"
+
+            if mbc_cargo and v_cargo and (mbc_cargo in v_cargo or v_cargo in mbc_cargo):
+                if entry not in matching_etas:
+                    matching_etas.append(entry)
+
+        v['mbc_eta'] = ', '.join(matching_etas) if matching_etas else ''
 
     return vessels
 
