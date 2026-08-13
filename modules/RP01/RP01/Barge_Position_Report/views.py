@@ -252,29 +252,17 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         SELECT
             h.mbc_name,
             p.departure_gull_island,
+            p.vessel_arrival_port,
             h.cargo_name,
             COALESCE(h.bl_quantity, 0) AS bl_qty
         FROM mbc_header h
         JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
         WHERE p.departure_gull_island IS NOT NULL
           AND TRIM(COALESCE(p.departure_gull_island, '')) <> ''
-          AND (
-                p.vessel_arrival_port IS NULL
-                OR TRIM(COALESCE(p.vessel_arrival_port, '')) = ''
-              )
-          AND NULLIF(TRIM(p.departure_gull_island), '')::timestamp <= %s
         ORDER BY p.departure_gull_island
-    """, (to_datetime,))
- 
+    """)
+
     mbc_eta_rows = cur.fetchall()
- 
-    # Format: "MBC_NAME (cargo) ETA: departure_time"
-    mbc_eta_list = []
-    for r in mbc_eta_rows:
-        dep_dt = _parse_dt(r['departure_gull_island'])
-        dep_str = dep_dt.strftime('%d-%m %H:%M') if dep_dt else ''
-        entry = f"{r['mbc_name']} ({r['cargo_name'] or ''}) - Dep Gull: {dep_str}"
-        mbc_eta_list.append(entry)
 
     cur.close()
     conn.close()
@@ -299,8 +287,18 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         v_cargo = (v.get('cargo_name') or '').strip().upper()
         matching_etas = []
         for r in mbc_eta_rows:
+            dep_dt = _parse_dt(r.get('departure_gull_island'))
+            arr_val = str(r.get('vessel_arrival_port') or '').strip()
+
+            # If departure_gull_island is missing or in the future, skip
+            if not dep_dt or dep_dt > to_datetime:
+                continue
+
+            # If vessel_arrival_port exists (both times exist), do NOT show any MBC in the table
+            if arr_val:
+                continue
+
             mbc_cargo = (r.get('cargo_name') or '').strip().upper()
-            dep_dt = _parse_dt(r['departure_gull_island'])
             dep_str = dep_dt.strftime('%d-%m %H:%M') if dep_dt else ''
             entry = f"{r['mbc_name']} ({r['cargo_name'] or ''}) - Dep Gull: {dep_str}"
 
@@ -1608,9 +1606,7 @@ def api_shift_report_load():
                 if v:
                     merged_wt_r19[k] = v
 
-            for k, v in (r.get('mbc_eta') or {}).items():
-                if v:
-                    merged_mbc_eta[k] = v
+            # Note: mbc_eta is NOT carried forward from past dates/shifts per user requirement.
 
             for k, v in (r.get('eta_to_dharamtar') or {}).items():
                 if v:
@@ -1628,6 +1624,21 @@ def api_shift_report_load():
 
             if r.get("updated_at"):
                 latest_meta_updated_at = r.get("updated_at")
+
+        # MBC ETA: Do NOT carry forward from past dates/shifts or old saved strings if both timestamps exist.
+        # Populate directly from active live MBCs for this report window.
+        merged_mbc_eta = {}
+        try:
+            report_dt = datetime.strptime(report_date, "%Y-%m-%d")
+            to_datetime = report_dt.replace(hour=8, minute=0, second=0, microsecond=0)
+            from_datetime = to_datetime - timedelta(hours=24)
+            live_mvs = _fetch_mother_vessels(from_datetime, to_datetime)
+
+            for v in live_mvs:
+                vname = v.get('vessel_name', '')
+                merged_mbc_eta[vname] = v.get('mbc_eta', '')
+        except Exception:
+            pass
 
         # Carry forward only the latest saved notes
         if latest_notes_row:

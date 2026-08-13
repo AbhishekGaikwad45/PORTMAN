@@ -1325,7 +1325,7 @@
         <!-- WR 19 area (Right Side) -->
         <div class="panel-frame">
             <div class="panel-header">
-                <span class="title-tag" style="color:#e11d48;">WR19 Anchorage</span>
+                <span class="title-tag" style="color:#e11d48;">R19 Anchorage</span>
                 <span class="badge-count" id="wr19Count">0</span>
             </div>
             <div class="waiting-list-flow" id="wr19AreaZone" data-location="WR 19">
@@ -1371,20 +1371,12 @@
                             </td>
                             {% endfor %}
                         </tr>
-                        <!-- WT @ R19 — editable, keyed by vessel name -->
-                        <tr data-mv-row=" wt_r19">
-                            <td><b>WT @ R19</b></td>
-                            {% for vessel in mother_vessels %}
-                            <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="wt_r19"
-                                oninput="markUnsaved()"></td>
-                            {% endfor %}
-                        </tr>
                         <tr>
                             <td><b>ON THE WAY TO GULL</b></td>
                             {% for vessel in mother_vessels %}<td>{{ vessel.at_gull_loaded }}</td>{% endfor %}
                         </tr>
                         <!-- MBC ETA — editable -->
-                        <tr data-mv-row="mbc_eta">
+                        <tr data-mv-row=" mbc_eta">
                             <td><b>MBC ETA</b></td>
                             {% for vessel in mother_vessels %}
                             <td contenteditable="true" data-vessel="{{ vessel.vessel_name }}" data-field="mbc_eta"
@@ -2160,8 +2152,8 @@
         // ── MBC ETA ─────────────────────────────────────────────────────────────
         if (savedData.mbc_eta) {
             document.querySelectorAll('[data-field="mbc_eta"]').forEach(td => {
-                const val = savedData.mbc_eta[td.dataset.vessel];
-                if (val !== undefined) td.textContent = val;
+                const val = savedData.mbc_eta[td.dataset.vessel] || '';
+                td.textContent = val;
             });
         }
         // on the way to dharamtar
@@ -2556,7 +2548,6 @@
             ['VSL DISCHARGE COMPLETED', 'discharge_completed', false],
             ['UNDER LOADING', 'under_loading', false],
             ['ETA TO DHARAMTAR', 'at_gull_loaded', false],
-            ['WT @ R19', 'wt_r19', true],  // editable
             ['ON THE WAY TO GULL', 'on_the_way_gull', true, 'on_the_way_gull', false],
             ['MBC ETA', 'mbc_eta', true],  // editable
         ];
