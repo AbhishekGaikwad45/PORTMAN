@@ -1264,22 +1264,134 @@
         }
     }
 
-    function validateDateSequence(rows, pairs) {
-        for (let i = 0; i < rows.length; i++) {
-            const d = rows[i].getData();
-            for (const [fieldA, labelA, fieldB, labelB] of pairs) {
-                if (d[fieldA] && d[fieldB]) {
-                    const dateA = new Date(d[fieldA]);
-                    const dateB = new Date(d[fieldB]);
-                    if (!isNaN(dateA) && !isNaN(dateB) && dateB < dateA) {
-                        alert(`Row ${i + 1}: "${labelB}" (${d[fieldB]}) must be same or after "${labelA}" (${d[fieldA]}).`);
-                        return false;
-                    }
+    function parseValidationDate(value) {
+    if (!value) return null;
+
+    if (value instanceof Date) {
+        return isNaN(value.getTime()) ? null : value;
+    }
+
+    const str = String(value).trim();
+
+    // Handles: 25-06-2026 20:20 IST
+    const match = str.match(
+        /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+IST)?$/i
+    );
+
+    if (match) {
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1;
+        const year = parseInt(match[3], 10);
+        const hour = parseInt(match[4], 10);
+        const minute = parseInt(match[5], 10);
+        const second = parseInt(match[6] || '0', 10);
+
+        // Convert IST to UTC
+        const date = new Date(
+            Date.UTC(
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second
+            )
+        );
+
+        date.setUTCMinutes(date.getUTCMinutes() - 330);
+
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    // Fallback
+    const date = new Date(str);
+
+    return isNaN(date.getTime()) ? null : date;
+}
+
+
+function validateDateSequence(rows, pairs) {
+
+    for (let i = 0; i < rows.length; i++) {
+
+        const d = rows[i].getData();
+
+        for (const [fieldA, labelA, fieldB, labelB] of pairs) {
+
+            // ====================================================
+            // Validate FIRST DATE
+            // ====================================================
+
+            if (d[fieldA]) {
+
+                const dateA =
+                    parseValidationDate(d[fieldA]);
+
+                if (!dateA) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelA}" ` +
+                        `contains an invalid date/time:\n\n` +
+                        `${d[fieldA]}\n\n` +
+                        `Please enter a valid date in DD-MM-YYYY HH:MM format.`
+                    );
+
+                    return false;
+                }
+            }
+
+
+            // ====================================================
+            // Validate SECOND DATE
+            // ====================================================
+
+            if (d[fieldB]) {
+
+                const dateB =
+                    parseValidationDate(d[fieldB]);
+
+                if (!dateB) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelB}" ` +
+                        `contains an invalid date/time:\n\n` +
+                        `${d[fieldB]}\n\n` +
+                        `Please enter a valid date in DD-MM-YYYY HH:MM format.`
+                    );
+
+                    return false;
+                }
+            }
+
+
+            // ====================================================
+            // SEQUENCE VALIDATION
+            // ====================================================
+
+            if (d[fieldA] && d[fieldB]) {
+
+                const dateA =
+                    parseValidationDate(d[fieldA]);
+
+                const dateB =
+                    parseValidationDate(d[fieldB]);
+
+                if (dateB < dateA) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelB}" ` +
+                        `(${d[fieldB]}) must be same or after ` +
+                        `"${labelA}" (${d[fieldA]}).`
+                    );
+
+                    return false;
                 }
             }
         }
-        return true;
     }
+
+    return true;
+}
 
     async function saveSubTable(type, mbcId, silent = false) {
         if (!subTables[mbcId] || !subTables[mbcId][type]) return;
@@ -1329,23 +1441,368 @@
             ];
             if (!validateDateSequence(allRows, pairs)) return;
         }
+        // ============================================================
+// CROSS-TABLE VALIDATION
+//
+// Arrived Gull Island must be same or after
+// Cast Off Load Port
+// ============================================================
+
+const dischargeTable =
+    subTables[mbcId]?.discharge_port;
+
+if (dischargeTable) {
+
+    const dischargeRows =
+        dischargeTable.getRows();
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const loadData =
+            allRows[i].getData();
+
+        if (!loadData.cast_off_load_port) {
+            continue;
+        }
+
+        const castOffLoadPort =
+            parseValidationDate(
+                loadData.cast_off_load_port
+            );
+
+        if (!castOffLoadPort) {
+            continue;
+        }
+
+
+        for (let j = 0; j < dischargeRows.length; j++) {
+
+            const dischargeData =
+                dischargeRows[j].getData();
+
+            if (!dischargeData.arrival_gull_island) {
+                continue;
+            }
+
+            const arrivalGullIsland =
+                parseValidationDate(
+                    dischargeData.arrival_gull_island
+                );
+
+            if (!arrivalGullIsland) {
+                continue;
+            }
+
+
+            if (
+                arrivalGullIsland <
+                castOffLoadPort
+            ) {
+
+                alert(
+                    `Discharge Row ${j + 1}: ` +
+                    `"Arrived Gull Island" ` +
+                    `(${dischargeData.arrival_gull_island}) ` +
+                    `cannot be before ` +
+                    `"Cast Off Load Port" ` +
+                    `(${loadData.cast_off_load_port}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
 
         // ── Validation: discharge_port — date fields must be in chronological order ──
-        if (type === 'discharge_port') {
-            const pairs = [
-                ['arrival_gull_island',   'Arrival Gull Island',         'departure_gull_island',  'Departure Gull Island'],
-                ['departure_gull_island', 'Departure Gull Island',       'arrived_yellow_crane',   'Arrived Yellow Crane'],
-                ['arrived_yellow_crane',  'Arrived Yellow Crane',        'vessel_arrival_port',    'MBC Arrival Port'],
-                ['vessel_arrival_port',   'MBC Arrival Port',            'vessel_all_made_fast',   'MBC AMF at Unloading Berth'],
-                ['vessel_all_made_fast',  'MBC AMF at Unloading Berth',  'unloading_commenced',    'Unloading Commenced'],
-                ['unloading_commenced',   'Unloading Commenced',         'cleaning_commenced',     'Cleaning Commenced'],
-                ['cleaning_commenced',    'Cleaning Commenced',          'unloading_completed',    'Unloading Completed'],
-                ['unloading_completed',   'Unloading Completed',         'vessel_cast_off',        'MBC Cast Off'],
-                ['vessel_cast_off',       'MBC Cast Off',                'sailed_out_load_port',   'Sailed Out From Discharge Port'],
-                ['discharge_stop_shifting','Discharge Stop Shifting',    'discharge_start_shifting','Discharge Start Shifting'],
-            ];
-            if (!validateDateSequence(allRows, pairs)) return;
+// ── Validation: discharge_port ──
+if (type === 'discharge_port') {
+
+    // ============================================================
+    // 1. ARRIVED GULL ISLAND >= CAST OFF LOAD PORT
+    //    Cast Off Load Port is in LOAD PORT table
+    //    Arrived Gull Island is in DISCHARGE PORT table
+    // ============================================================
+
+    const loadPortTable = subTables[mbcId]?.load_port;
+
+    if (loadPortTable) {
+
+        const loadPortRows = loadPortTable.getRows();
+
+        for (let i = 0; i < allRows.length; i++) {
+
+            const dischargeData = allRows[i].getData();
+
+            if (!dischargeData.arrival_gull_island) {
+                continue;
+            }
+
+            const arrivalGullIsland =
+                parseValidationDate(
+                    dischargeData.arrival_gull_island
+                );
+
+            if (!arrivalGullIsland) {
+                continue;
+            }
+
+            for (let j = 0; j < loadPortRows.length; j++) {
+
+                const loadData =
+                    loadPortRows[j].getData();
+
+                if (!loadData.cast_off_load_port) {
+                    continue;
+                }
+
+                const castOffLoadPort =
+                    parseValidationDate(
+                        loadData.cast_off_load_port
+                    );
+
+                if (!castOffLoadPort) {
+                    continue;
+                }
+
+                if (arrivalGullIsland < castOffLoadPort) {
+
+                    alert(
+                        `Row ${i + 1}: ` +
+                        `"Arrived Gull Island" ` +
+                        `(${dischargeData.arrival_gull_island}) ` +
+                        `cannot be before ` +
+                        `"Cast Off Load Port" ` +
+                        `(${loadData.cast_off_load_port}).`
+                    );
+
+                    return;
+                }
+            }
         }
+    }
+
+
+    // ============================================================
+    // 2. NORMAL DISCHARGE DATE SEQUENCE
+    // ============================================================
+
+    const pairs = [
+
+        // Arrived Gull Island
+        // >= Cast Off Load Port handled above
+
+        [
+            'arrival_gull_island',
+            'Arrived Gull Island',
+            'departure_gull_island',
+            'Departure Gull Island'
+        ],
+
+        [
+            'departure_gull_island',
+            'Departure Gull Island',
+            'arrived_yellow_crane',
+            'Arrived Yellow Crane'
+        ],
+
+        [
+            'arrived_yellow_crane',
+            'Arrived Yellow Crane',
+            'vessel_arrival_port',
+            'MBC Arrival Port'
+        ],
+
+        [
+            'vessel_arrival_port',
+            'MBC Arrival Port',
+            'vessel_all_made_fast',
+            'MBC AMF at Unloading Berth'
+        ],
+
+        [
+            'vessel_all_made_fast',
+            'MBC AMF at Unloading Berth',
+            'unloading_commenced',
+            'Unloading Commenced'
+        ],
+
+        [
+            'unloading_commenced',
+            'Unloading Commenced',
+            'cleaning_commenced',
+            'Cleaning Commenced'
+        ],
+
+        [
+            'cleaning_commenced',
+            'Cleaning Commenced',
+            'unloading_completed',
+            'Unloading Completed'
+        ],
+
+        [
+            'unloading_completed',
+            'Unloading Completed',
+            'vessel_cast_off',
+            'MBC Cast Off'
+        ],
+
+        [
+            'vessel_cast_off',
+            'MBC Cast Off',
+            'sailed_out_load_port',
+            'Sailed Out From Discharge Port'
+        ],
+
+        [
+            'discharge_start_shifting',
+            'Discharge Start',
+            'discharge_stop_shifting',
+            'Discharge Stop'
+        ],
+
+        [
+            'sailed_out_load_port',
+            'Sailed Out From Discharge Port',
+            'reached_load_port',
+            'Reached Load Port'
+        ]
+
+    ];
+
+
+    if (!validateDateSequence(allRows, pairs)) {
+        return;
+    }
+
+
+    // ============================================================
+    // 3. MBC ARRIVAL PORT
+    //
+    // Must be after BOTH:
+    // Arrived Yellow Crane
+    // AND
+    // Departure Gull Island
+    // ============================================================
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const d = allRows[i].getData();
+
+        if (!d.vessel_arrival_port) {
+            continue;
+        }
+
+        const arrivalPort =
+            parseValidationDate(
+                d.vessel_arrival_port
+            );
+
+        if (!arrivalPort) {
+            continue;
+        }
+
+
+        // Check Departure Gull Island
+        if (d.departure_gull_island) {
+
+            const departureGull =
+                parseValidationDate(
+                    d.departure_gull_island
+                );
+
+            if (
+                departureGull &&
+                arrivalPort < departureGull
+            ) {
+
+                alert(
+                    `Row ${i + 1}: ` +
+                    `"MBC Arrival Port" ` +
+                    `(${d.vessel_arrival_port}) ` +
+                    `must be same or after ` +
+                    `"Departure Gull Island" ` +
+                    `(${d.departure_gull_island}).`
+                );
+
+                return;
+            }
+        }
+
+
+        // Check Arrived Yellow Crane
+        if (d.arrived_yellow_crane) {
+
+            const yellowCrane =
+                parseValidationDate(
+                    d.arrived_yellow_crane
+                );
+
+            if (
+                yellowCrane &&
+                arrivalPort < yellowCrane
+            ) {
+
+                alert(
+                    `Row ${i + 1}: ` +
+                    `"MBC Arrival Port" ` +
+                    `(${d.vessel_arrival_port}) ` +
+                    `must be same or after ` +
+                    `"Arrived Yellow Crane" ` +
+                    `(${d.arrived_yellow_crane}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
+
+// ── Validation: MBC Cleaning Details ──
+if (type === 'cleaning') {
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const d = allRows[i].getData();
+
+        if (d.start_time && d.end_time) {
+
+            const startTime = parseValidationDate(d.start_time);
+            const endTime = parseValidationDate(d.end_time);
+
+            // Invalid Start Time
+            if (!startTime) {
+                alert(
+                    `Row ${i + 1}: "Start Time" ` +
+                    `(${d.start_time}) is not a valid date/time.`
+                );
+                return;
+            }
+
+            // Invalid End Time
+            if (!endTime) {
+                alert(
+                    `Row ${i + 1}: "End Time" ` +
+                    `(${d.end_time}) is not a valid date/time.`
+                );
+                return;
+            }
+
+            // End Time must be greater than Start Time
+            if (endTime <= startTime) {
+
+                alert(
+                    `Row ${i + 1}: "End Time" ` +
+                    `(${d.end_time}) must be greater than ` +
+                    `"Start Time" (${d.start_time}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
 
         const rows = subTables[mbcId][type].getRows();
         let savedCount = 0;
