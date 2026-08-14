@@ -1061,13 +1061,71 @@
             });
             deselected.forEach(function(row) { row.reformat(); });
         });
-        table.on('cellEdited', function(cell) {
-            if (_isSaving) return;
-            headerDirty = true;
-            const id = cell.getRow().getData().id;
-            if (id) dirtyRowIds.add(String(id));
-            showUnsavedBanner();
-        });
+        const SEQUENTIAL_DATE_RULES = [
+    { field: 'nor_accepted',            after: 'nor_tendered',              afterLabel: 'NOR Tendered' },
+    { field: 'initial_draft_survey_to', after: 'initial_draft_survey_from', afterLabel: 'Init Survey From' },
+    { field: 'custom_clearance',        after: 'initial_draft_survey_to',   afterLabel: 'Init Survey To' },
+    { field: 'final_draft_survey_from', after: 'ops_completed',             afterLabel: 'Discharge/Loading Completed' },
+    { field: 'final_draft_survey_to',   after: 'final_draft_survey_from',   afterLabel: 'Final Survey From' },
+    {
+        field: 'agent_stevedore_onboard',
+        after: 'nor_accepted',              afterLabel: 'NOR Accepted',
+        before: 'initial_draft_survey_from', beforeLabel: 'Init Survey From'
+    },
+];
+
+function checkSequentialDate(cell) {
+    const field = cell.getColumn().getField();
+    const rule = SEQUENTIAL_DATE_RULES.find(r => r.field === field);
+    if (!rule) return true; // no rule for this field, allow
+
+    const rowData = cell.getRow().getData();
+    const thisVal = cell.getValue();
+    const thisDate = thisVal ? new Date(thisVal.replace(' ', 'T')) : null;
+    const colTitle = cell.getColumn().getDefinition().title;
+
+    // Lower bound: this field cannot be earlier than `after`
+    if (rule.after) {
+        const afterVal = rowData[rule.after];
+        if (afterVal && thisVal) {
+            const afterDate = new Date(afterVal.replace(' ', 'T'));
+            if (!isNaN(afterDate) && !isNaN(thisDate) && thisDate < afterDate) {
+                alert(`${colTitle} cannot be earlier than ${rule.afterLabel} date.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+        } else if (thisVal && !afterVal) {
+            alert(`Please set ${rule.afterLabel} before entering ${colTitle}.`);
+            cell.setValue(cell.getOldValue(), true);
+            return false;
+        }
+    }
+
+    // Upper bound: this field cannot be later than `before`
+    if (rule.before) {
+        const beforeVal = rowData[rule.before];
+        if (beforeVal && thisVal) {
+            const beforeDate = new Date(beforeVal.replace(' ', 'T'));
+            if (!isNaN(beforeDate) && !isNaN(thisDate) && thisDate > beforeDate) {
+                alert(`${colTitle} cannot be later than ${rule.beforeLabel} date.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+table.on('cellEdited', function(cell) {
+    if (_isSaving) return;
+    if (!checkSequentialDate(cell)) return;
+
+    headerDirty = true;
+    const id = cell.getRow().getData().id;
+    if (id) dirtyRowIds.add(String(id));
+    showUnsavedBanner();
+});
         table.on('rowAdded', function() {
             if (_isSaving) return;
             headerDirty = true;
@@ -1078,6 +1136,77 @@
             document.getElementById('table').classList.add('tabulator-dark');
         }
     }
+    function parseValidDateTime(value) {
+    if (!value) return null;
+
+    const str = String(value).trim();
+    if (!str) return null;
+
+    let day, month, year, hour, minute, second = 0;
+
+    // DD-MM-YYYY HH:mm[:ss] IST
+    let match = str.match(
+        /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+IST)?$/i
+    );
+
+    if (match) {
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
+        hour = Number(match[4]);
+        minute = Number(match[5]);
+        second = Number(match[6] || 0);
+    } else {
+
+        // YYYY-MM-DD HH:mm[:ss]
+        match = str.match(
+            /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/
+        );
+
+        if (!match) return null;
+
+        year = Number(match[1]);
+        month = Number(match[2]);
+        day = Number(match[3]);
+        hour = Number(match[4]);
+        minute = Number(match[5]);
+        second = Number(match[6] || 0);
+    }
+
+    // Validate ranges
+    if (
+        month < 1 || month > 12 ||
+        day < 1 || day > 31 ||
+        hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 ||
+        second < 0 || second > 59
+    ) {
+        return null;
+    }
+
+    const date = new Date(
+        year,
+        month - 1,
+        day,
+        hour,
+        minute,
+        second
+    );
+
+    // Strict validation
+    if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day ||
+        date.getHours() !== hour ||
+        date.getMinutes() !== minute ||
+        date.getSeconds() !== second
+    ) {
+        return null;
+    }
+
+    return date;
+}
 
     async function openDetailsModal(data) {
         const ldudId = data.id;
@@ -1644,7 +1773,54 @@
             ajaxURL: `/api/module/LDUD01/delays/${ldudId}`,
             columnDefaults: { headerSort: false },
             initialSort: [{column: "start_datetime", dir: "asc"}],
-            cellEdited: () => markDirty('delays'),
+
+ajaxResponse: function(url, params, response) {
+
+    if (!Array.isArray(response)) {
+        return response;
+    }
+
+    response.forEach(function(row) {
+
+        // Check Start date
+        if (
+            row.start_datetime &&
+            !parseValidDateTime(row.start_datetime)
+        ) {
+            console.warn(
+                'Invalid Delay Start:',
+                row.start_datetime,
+                'Row ID:',
+                row.id
+            );
+
+            row._invalid_start_datetime = true;
+        }
+
+        // Check End date
+        if (
+            row.end_datetime &&
+            !parseValidDateTime(row.end_datetime)
+        ) {
+            console.warn(
+                'Invalid Delay End:',
+                row.end_datetime,
+                'Row ID:',
+                row.id
+            );
+
+            row._invalid_end_datetime = true;
+        }
+    });
+
+    return response;
+},
+
+            cellEdited: function(cell) {
+    if (validateDelayDate(cell)) {
+        markDirty('delays');
+    }
+},
             columns: [
                 {title: "Crane No", field: "crane_number", width: 110, editor: canEdit ? craneMultiSelectEditor : false,
                     formatter: function(cell) {
@@ -1657,10 +1833,44 @@
                 },
                 {title: "Delay Name", field: "delay_name", width: 120, editor: canEdit ? "list" : false,
                     editorParams: {values: delayOptions, autocomplete: true, allowEmpty: true}},
-                {title: "Start", field: "start_datetime", width: 140, editor: canEdit ? datetimeEditor : false,
-                    formatter: datetimeCellFormatter},
-                {title: "End", field: "end_datetime", width: 140, editor: canEdit ? datetimeEditor : false,
-                    formatter: datetimeCellFormatter},
+                {
+    title: "Start",
+    field: "start_datetime",
+    width: 140,
+    editor: canEdit ? datetimeEditor : false,
+
+    formatter: function(cell) {
+        const row = cell.getRow().getData();
+
+        if (row._invalid_start_datetime) {
+            return `<span style="color:#e53e3e;font-weight:600;"
+                        title="Invalid date/time">
+                        ⚠ ${cell.getValue()}
+                    </span>`;
+        }
+
+        return datetimeCellFormatter(cell);
+    }
+},
+                {
+    title: "End",
+    field: "end_datetime",
+    width: 140,
+    editor: canEdit ? datetimeEditor : false,
+
+    formatter: function(cell) {
+        const row = cell.getRow().getData();
+
+        if (row._invalid_end_datetime) {
+            return `<span style="color:#e53e3e;font-weight:600;"
+                        title="Invalid date/time">
+                        ⚠ ${cell.getValue()}
+                    </span>`;
+        }
+
+        return datetimeCellFormatter(cell);
+    }
+},
                 {title: "Mins", field: "total_time_mins", width: 60, hozAlign: "right"},
                 {title: "Hrs", field: "total_time_hrs", width: 60, hozAlign: "right", sorter: "number"},
                 {title: "Minus Hrs", field: "minus_delay_hours", width: 70, editor: canEdit ? "list" : false,
@@ -1679,6 +1889,237 @@
         const anchorageStartedTitle = operationType === 'Export' ? 'Loading Started' : 'Discharge Started';
         const anchorageCompletedTitle = operationType === 'Export' ? 'Loading Completed' : 'Discharge Completed';
 
+        // ============================================================
+function parseValidDateTime(value) {
+    if (!value) return null;
+
+    const str = String(value).trim();
+
+    // Reject obviously invalid values
+    // Example: 56-55-5698 45:98 IST
+    if (!str) return null;
+
+    let day, month, year, hour, minute, second = 0;
+
+    // --------------------------------------------------
+    // Format 1: DD-MM-YYYY HH:mm[:ss] IST
+    // Example: 19-06-2026 09:15 IST
+    // --------------------------------------------------
+    let match = str.match(
+        /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+IST)?$/i
+    );
+
+    if (match) {
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
+        hour = Number(match[4]);
+        minute = Number(match[5]);
+        second = Number(match[6] || 0);
+    } else {
+
+        // --------------------------------------------------
+        // Format 2: YYYY-MM-DD HH:mm[:ss]
+        // Example: 2026-06-19 09:15:00
+        // --------------------------------------------------
+        match = str.match(
+            /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/
+        );
+
+        if (!match) {
+            return null;
+        }
+
+        year = Number(match[1]);
+        month = Number(match[2]);
+        day = Number(match[3]);
+        hour = Number(match[4]);
+        minute = Number(match[5]);
+        second = Number(match[6] || 0);
+    }
+
+    // --------------------------------------------------
+    // Strict validation
+    // --------------------------------------------------
+    if (
+        month < 1 || month > 12 ||
+        day < 1 || day > 31 ||
+        hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 ||
+        second < 0 || second > 59
+    ) {
+        return null;
+    }
+
+    const date = new Date(
+        year,
+        month - 1,
+        day,
+        hour,
+        minute,
+        second
+    );
+
+    // Prevent JS from converting invalid dates
+    // Example: 31-02-2026
+    if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day ||
+        date.getHours() !== hour ||
+        date.getMinutes() !== minute ||
+        date.getSeconds() !== second
+    ) {
+        return null;
+    }
+
+    return date;
+}
+
+function validateDelayDate(cell) {
+
+    const field = cell.getColumn().getField();
+
+    // Only Start and End
+    if (
+        field !== 'start_datetime' &&
+        field !== 'end_datetime'
+    ) {
+        return true;
+    }
+
+    const row = cell.getRow();
+    const rowData = row.getData();
+    const value = cell.getValue();
+
+    if (!value) return true;
+
+    // 1. Validate date format FIRST
+    const enteredDate = parseValidDateTime(value);
+
+    if (!enteredDate) {
+
+        alert(
+            'Invalid date/time.\n\n' +
+            'Please enter a valid date and time.'
+        );
+
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    // Get main vessel row
+    const mainRow = table.getRows().find(
+        r => String(r.getData().id) === String(currentLdudId)
+    );
+
+    if (!mainRow) return true;
+
+    const mainData = mainRow.getData();
+
+    const opsStarted = mainData.ops_started;
+    const opsCompleted = mainData.ops_completed;
+
+    // 2. Discharge/Loading Started must exist
+    if (!opsStarted) {
+
+        alert(
+            'Please enter Discharge/Loading Started first.'
+        );
+
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    const startedDate = parseValidDateTime(opsStarted);
+
+    if (!startedDate) {
+
+        alert(
+            'Discharge/Loading Started contains an invalid date/time.'
+        );
+
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    // 3. Start cannot be before Discharge/Loading Started
+    if (
+        field === 'start_datetime' &&
+        enteredDate < startedDate
+    ) {
+
+        alert(
+            'Delay Start cannot be earlier than ' +
+            'Discharge/Loading Started.'
+        );
+
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    // 4. Start/End cannot be after Discharge/Loading Completed
+    if (opsCompleted) {
+
+        const completedDate = parseValidDateTime(opsCompleted);
+
+        if (!completedDate) {
+
+            alert(
+                'Discharge/Loading Completed contains an invalid date/time.'
+            );
+
+            cell.setValue(cell.getOldValue(), true);
+            return false;
+        }
+
+        if (enteredDate > completedDate) {
+
+            alert(
+                (field === 'start_datetime'
+                    ? 'Delay Start'
+                    : 'Delay End') +
+                ' cannot be later than Discharge/Loading Completed.'
+            );
+
+            cell.setValue(cell.getOldValue(), true);
+            return false;
+        }
+    }
+
+    // 5. End cannot be before Start
+    if (field === 'end_datetime') {
+
+        const startValue = rowData.start_datetime;
+
+        if (startValue) {
+
+            const startDate = parseValidDateTime(startValue);
+
+            if (!startDate) {
+
+                alert(
+                    'Delay Start contains an invalid date/time.'
+                );
+
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            if (enteredDate < startDate) {
+
+                alert(
+                    'Delay End cannot be earlier than Delay Start.'
+                );
+
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
         subTables[ldudId].anchorage = new Tabulator(`#anchorage-table-${ldudId}`, {
             layout: "fitColumns",
             height: 200,
@@ -1787,6 +2228,297 @@
             cellClick: function(e, cell) { const d = cell.getRow().getData(); if (d.id) cloneBargeLineForCargo(d, ldudId); }
         } : null;
 
+        // All datetime-editable fields in barge_lines (Import + Export combined)
+        const BARGE_LINES_DATETIME_FIELDS = new Set([
+            'trip_start', 'amf_at_port', 'along_side_berth', 'commenced_loading',
+            'completed_loading', 'cast_off_loading_berth', 'cast_off_port',
+            'anchored_gull_island', 'aweigh_gull_island', 'along_side_vessel',
+            'commence_discharge_berth', 'completed_discharge_berth', 'cast_off_berth',
+            'anchored_gull_island_empty', 'aweigh_gull_island_empty', 'cast_off_mv'
+        ]);
+
+        function validateBargeDateFormat(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+            if (!parseValidDateTime(value)) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+            return true;
+        }
+
+        // Trip Start must not be earlier than the previous row's Cast Off Port time
+// Trip Start must not be earlier than the previous row's Cast Off Port time
+        function validateBargeTripStartSequence(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rows = cell.getTable().getRows();
+            const rowIndex = rows.indexOf(cell.getRow());
+            if (rowIndex <= 0) return true; // first row — nothing to compare against
+
+            const prevCastOff = rows[rowIndex - 1].getData().cast_off_port;
+            if (!prevCastOff) return true; // previous row has no Cast Off Port recorded yet
+
+            const prevDate = parseValidDateTime(prevCastOff);
+            if (!prevDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < prevDate) {
+                alert("Trip Start cannot be earlier than the previous trip's Cast Off Port time.");
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Anch Gull Island cannot be earlier than this row's own Trip Start
+        // Aweigh Gull Island cannot be earlier than this row's own Anch Gull Island
+        function validateAweighGullAfterAnchGull(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rowData = cell.getRow().getData();
+            const anchGull = rowData.anchored_gull_island;
+            if (!anchGull) return true; // nothing to compare against yet
+
+            const anchGullDate = parseValidDateTime(anchGull);
+            if (!anchGullDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < anchGullDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than Anch Gull Island.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Alongside Vessel cannot be earlier than Aweigh Gull Island (falls back to Trip Start if Aweigh Gull Island is blank)
+        // Alongside Vessel cannot be earlier than Aweigh Gull Island (falls back to Trip Start if Aweigh Gull Island is blank)
+        function validateAlongsideVesselSequence(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rowData = cell.getRow().getData();
+            const aweighGull = rowData.aweigh_gull_island;
+            const tripStart = rowData.trip_start;
+
+            const compareValue = aweighGull || tripStart;
+            const compareLabel = aweighGull ? 'Aweigh Gull Island' : 'Trip Start';
+            if (!compareValue) return true; // nothing to compare against yet
+
+            const compareDate = parseValidDateTime(compareValue);
+            if (!compareDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < compareDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than ${compareLabel}.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Loading Start cannot be earlier than this row's own Alongside Vessel
+        // Loading Start cannot be earlier than this row's own Alongside Vessel
+        function validateLoadingStartAfterAlongsideVessel(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rowData = cell.getRow().getData();
+            const alongsideVessel = rowData.along_side_vessel;
+            if (!alongsideVessel) return true; // nothing to compare against yet
+
+            const alongsideVesselDate = parseValidDateTime(alongsideVessel);
+            if (!alongsideVesselDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < alongsideVesselDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than Alongside Vessel.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Loading End cannot be earlier than this row's own Loading Start
+        // Loading End cannot be earlier than this row's own Loading Start
+        function validateLoadingEndAfterLoadingStart(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rowData = cell.getRow().getData();
+            const loadingStart = rowData.commenced_loading;
+            if (!loadingStart) return true; // nothing to compare against yet
+
+            const loadingStartDate = parseValidDateTime(loadingStart);
+            if (!loadingStartDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < loadingStartDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than Loading Start.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+        
+
+        // Generic helper: compare a cell's value against another same-row field's value
+        function validateAgainstRowField(cell, compareField, compareLabel) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true; // format already checked by validateBargeDateFormat
+
+            const rowData = cell.getRow().getData();
+            const compareValue = rowData[compareField];
+            if (!compareValue) return true; // nothing to compare against yet
+
+            const compareDate = parseValidDateTime(compareValue);
+            if (!compareDate) return true; // can't validate against an invalid stored value
+
+            if (enteredDate < compareDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than ${compareLabel}.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Cast Off MV cannot be earlier than this row's own Loading End
+        function validateCastOffMvAfterLoadingEnd(cell) {
+            return validateAgainstRowField(cell, 'completed_loading', 'Loading End');
+        }
+
+        // Anch Gull Island (Loaded) cannot be earlier than this row's own Cast Off MV
+        function validateAnchGullEmptyAfterCastOffMv(cell) {
+            return validateAgainstRowField(cell, 'cast_off_mv', 'Cast Off MV');
+        }
+
+        // Aweigh Gull Island (Loaded) cannot be earlier than this row's own Anch Gull Island (Loaded)
+        function validateAweighGullEmptyAfterAnchGullEmpty(cell) {
+            return validateAgainstRowField(cell, 'anchored_gull_island_empty', 'Anch Gull Island (Loaded)');
+        }
+
+        // AMF at Port cannot be earlier than Aweigh Gull Island (Loaded) (falls back to Cast Off MV if blank)
+        function validateAmfAtPortSequence(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true;
+
+            const rowData = cell.getRow().getData();
+            const aweighGullEmpty = rowData.aweigh_gull_island_empty;
+            const castOffMv = rowData.cast_off_mv;
+
+            const compareValue = aweighGullEmpty || castOffMv;
+            const compareLabel = aweighGullEmpty ? 'Aweigh Gull Island (Loaded)' : 'Cast Off MV';
+            if (!compareValue) return true;
+
+            const compareDate = parseValidDateTime(compareValue);
+            if (!compareDate) return true;
+
+            if (enteredDate < compareDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than ${compareLabel}.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Alongside Berth cannot be earlier than this row's own AMF at Port
+        function validateAlongsideBerthAfterAmf(cell) {
+            return validateAgainstRowField(cell, 'amf_at_port', 'AMF at Port');
+        }
+
+        // Discharge Start cannot be earlier than this row's own Alongside Berth
+        function validateDischargeStartAfterAlongsideBerth(cell) {
+            return validateAgainstRowField(cell, 'along_side_berth', 'Alongside Berth');
+        }
+
+        // Discharge End cannot be earlier than this row's own Discharge Start
+        function validateDischargeEndAfterDischargeStart(cell) {
+            return validateAgainstRowField(cell, 'commence_discharge_berth', 'Discharge Start');
+        }
+        function validateHoldCompletionAgainstMVDischarge(cell) {
+    const value = cell.getValue();
+    if (!value) return true;
+
+    const enteredDate = parseValidDateTime(value);
+    if (!enteredDate) return true;
+
+    const mainRow = table.getRows().find(
+        r => String(r.getData().id) === String(currentLdudId)
+    );
+
+    if (!mainRow) return true;
+
+    const mainData = mainRow.getData();
+
+    // MV Discharge Commenced from main MV Discharge table
+    const mvDischargeCommenced = mainData.ops_started;
+
+    if (!mvDischargeCommenced) {
+        alert('Please enter MV Discharge Commenced first.');
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    const mvDate = parseValidDateTime(mvDischargeCommenced);
+
+    if (!mvDate) return true;
+
+    if (enteredDate < mvDate) {
+        alert(
+            'Discharge Commenced cannot be earlier than MV Discharge Commenced.\n\n' +
+            'MV Discharge Commenced: ' + mvDischargeCommenced
+        );
+
+        cell.setValue(cell.getOldValue(), true);
+        return false;
+    }
+
+    return true;
+}
+
+        // Cast Off Berth cannot be earlier than this row's own Discharge End
+        function validateCastOffBerthAfterDischargeEnd(cell) {
+            return validateAgainstRowField(cell, 'completed_discharge_berth', 'Discharge End');
+        }
+
+        // Cast Off Port cannot be earlier than this row's own Cast Off Berth
+        function validateCastOffPortAfterCastOffBerth(cell) {
+            return validateAgainstRowField(cell, 'cast_off_berth', 'Cast Off Berth');
+        }
+
         let bargeLinesColumns;
         if (operationType === 'Export') {
             bargeLinesColumns = [
@@ -1888,13 +2620,66 @@
                 this.getRows().forEach(r => r.reformat());
             },
             cellEdited: (cell) => {
+                const field = cell.getField();
+
+                if (BARGE_LINES_DATETIME_FIELDS.has(field) && !validateBargeDateFormat(cell)) {
+                    return;
+                }
+                if (field === 'trip_start' && !validateBargeTripStartSequence(cell)) {
+                    return;
+                }
+                if (field === 'anchored_gull_island' && !validateAnchGullAfterTripStart(cell)) {
+                    return;
+                }
+                if (field === 'aweigh_gull_island' && !validateAweighGullAfterAnchGull(cell)) {
+                    return;
+                }
+                if (field === 'along_side_vessel' && !validateAlongsideVesselSequence(cell)) {
+                    return;
+                }
+                if (field === 'commenced_loading' && !validateLoadingStartAfterAlongsideVessel(cell)) {
+                    return;
+                }
+                if (field === 'completed_loading' && !validateLoadingEndAfterLoadingStart(cell)) {
+                    return;
+                }
+                if (field === 'cast_off_mv' && !validateCastOffMvAfterLoadingEnd(cell)) {
+                    return;
+                }
+                if (field === 'anchored_gull_island_empty' && !validateAnchGullEmptyAfterCastOffMv(cell)) {
+                    return;
+                }
+                if (field === 'aweigh_gull_island_empty' && !validateAweighGullEmptyAfterAnchGullEmpty(cell)) {
+                    return;
+                }
+                if (field === 'amf_at_port' && !validateAmfAtPortSequence(cell)) {
+                    return;
+                }
+                if (field === 'along_side_berth' && !validateAlongsideBerthAfterAmf(cell)) {
+                    return;
+                }
+                if (field === 'commence_discharge_berth' && !validateDischargeStartAfterAlongsideBerth(cell)) {
+                    return;
+                }
+                if (field === 'completed_discharge_berth' && !validateDischargeEndAfterDischargeStart(cell)) {
+                    return;
+                }
+                if (field === 'cast_off_berth' && !validateCastOffBerthAfterDischargeEnd(cell)) {
+                    return;
+                }
+                if (field === 'cast_off_port' && !validateCastOffPortAfterCastOffBerth(cell)) {
+                    return;
+                }
+
+
                 markDirty('barge_lines');
                 // Refresh all LUEU reconciliation cells when their inputs change
                 // (qty may be split across several rows of the same barge).
-                if (['discharge_quantity', 'barge_name', 'trip_number'].includes(cell.getField())) {
+                if (['discharge_quantity', 'barge_name', 'trip_number'].includes(field)) {
                     recomputeBargeExpected();
                     cell.getTable().getRows().forEach(r => r.reformat());
                 }
+            
             },
             columns: bargeLinesColumns
         });
@@ -2047,13 +2832,143 @@
             }
             return opts;
         }
+        // Diesel End must be strictly earlier (lesser) than Diesel Start
+        // Diesel End must be strictly greater (later) than Diesel Start
+        function validateDieselEndAfterDieselStart(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            const rowData = cell.getRow().getData();
+            const dieselStart = rowData.diesel_start;
+            if (!dieselStart) return true;
+
+            const dieselStartDate = parseValidDateTime(dieselStart);
+            if (!dieselStartDate) return true;
+
+            if (enteredDate <= dieselStartDate) {
+                alert('Diesel End must be greater than Diesel Start.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Diesel Start cannot be edited to land at/before an already-set Diesel End
+        // Diesel Start cannot be edited to land at/after an already-set Diesel End
+        function validateDieselStartBeforeDieselEnd(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            const rowData = cell.getRow().getData();
+            const dieselEnd = rowData.diesel_end;
+            if (!dieselEnd) return true;
+
+            const dieselEndDate = parseValidDateTime(dieselEnd);
+            if (!dieselEndDate) return true;
+
+            if (enteredDate >= dieselEndDate) {
+                alert('Diesel Start must be earlier than Diesel End.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // End Time must be strictly greater (later) than Start Time
+        function validateEndTimeAfterStartTime(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            const rowData = cell.getRow().getData();
+            const startTime = rowData.start_time;
+            if (!startTime) return true;
+
+            const startTimeDate = parseValidDateTime(startTime);
+            if (!startTimeDate) return true;
+
+            if (enteredDate <= startTimeDate) {
+                alert('End Time must be greater than Start Time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
+
+        // Start Time cannot be edited to land at/after an already-set End Time
+        function validateStartTimeBeforeEndTime(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            const rowData = cell.getRow().getData();
+            const endTime = rowData.end_time;
+            if (!endTime) return true;
+
+            const endTimeDate = parseValidDateTime(endTime);
+            if (!endTimeDate) return true;
+
+            if (enteredDate >= endTimeDate) {
+                alert('Start Time must be earlier than End Time.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
+        }
 
         subTables[ldudId].barge_cleaning = new Tabulator(`#barge_cleaning-table-${ldudId}`, {
             layout: "fitDataFill",
             height: 200,
             ajaxURL: `/api/module/LDUD01/barge_cleaning/${ldudId}`,
             columnDefaults: { headerSort: false },
-            cellEdited: () => markDirty('barge_cleaning'),
+            cellEdited: (cell) => {
+                const field = cell.getField();
+
+                if (field === 'diesel_end' && !validateDieselEndAfterDieselStart(cell)) {
+                    return;
+                }
+                if (field === 'diesel_start' && !validateDieselStartBeforeDieselEnd(cell)) {
+                    return;
+                }
+                if (field === 'end_time' && !validateEndTimeAfterStartTime(cell)) {
+                    return;
+                }
+                if (field === 'start_time' && !validateStartTimeBeforeEndTime(cell)) {
+                    return;
+                }
+
+                markDirty('barge_cleaning');
+            },
             columns: [
                 {title: "Barge", field: "barge_name", width: 130, editor: canEdit ? "list" : false,
                     editorParams: function() { return {values: getBargeCleaningOptions(), autocomplete: true, allowEmpty: true}; }},
@@ -2153,7 +3068,41 @@
             height: 200,
             ajaxURL: `/api/module/LDUD01/hold_completion/${ldudId}`,
             columnDefaults: { headerSort: false },
-            cellEdited: () => markDirty('hold_completion'),
+            cellEdited: function(cell) {
+
+    const field = cell.getField();
+
+    // Discharge Commenced must be >= MV Discharge Commenced
+    if (field === 'commenced') {
+        if (!validateHoldCompletionAgainstMVDischarge(cell)) {
+            return;
+        }
+    }
+
+    // Discharge Completed must be >= Discharge Commenced
+    if (field === 'completed') {
+
+        const rowData = cell.getRow().getData();
+
+        if (rowData.commenced && cell.getValue()) {
+
+            const start = parseValidDateTime(rowData.commenced);
+            const end = parseValidDateTime(cell.getValue());
+
+            if (start && end && end < start) {
+
+                alert(
+                    'Discharge Completed cannot be earlier than Discharge Commenced.'
+                );
+
+                cell.setValue(cell.getOldValue(), true);
+                return;
+            }
+        }
+    }
+
+    markDirty('hold_completion');
+},
             ajaxResponse: function(url, params, response) {
                 // Sync holds asynchronously then update the table
                 syncHoldCompletionRows(response).then(synced => {
@@ -2300,21 +3249,36 @@
     }
 
     function validateDateSequence(rows, pairs) {
-        for (let i = 0; i < rows.length; i++) {
-            const d = rows[i].getData();
-            for (const [fieldA, labelA, fieldB, labelB] of pairs) {
-                if (d[fieldA] && d[fieldB]) {
-                    const dateA = new Date(d[fieldA]);
-                    const dateB = new Date(d[fieldB]);
-                    if (!isNaN(dateA) && !isNaN(dateB) && dateB < dateA) {
-                        alert(`Row ${i + 1}: "${labelB}" (${d[fieldB]}) must be same or after "${labelA}" (${d[fieldA]}).`);
-                        return false;
-                    }
+    for (let i = 0; i < rows.length; i++) {
+        const d = rows[i].getData();
+        for (const [fieldA, labelA, fieldB, labelB] of pairs) {
+            // Reject bad formats outright, don't silently skip them
+            if (d[fieldA]) {
+                const parsedA = parseValidDateTime(d[fieldA]);
+                if (!parsedA) {
+                    alert(`Row ${i + 1}: "${labelA}" has an invalid date/time (${d[fieldA]}).`);
+                    return false;
+                }
+            }
+            if (d[fieldB]) {
+                const parsedB = parseValidDateTime(d[fieldB]);
+                if (!parsedB) {
+                    alert(`Row ${i + 1}: "${labelB}" has an invalid date/time (${d[fieldB]}).`);
+                    return false;
+                }
+            }
+            if (d[fieldA] && d[fieldB]) {
+                const dateA = parseValidDateTime(d[fieldA]);
+                const dateB = parseValidDateTime(d[fieldB]);
+                if (dateA && dateB && dateB < dateA) {
+                    alert(`Row ${i + 1}: "${labelB}" (${d[fieldB]}) must be same or after "${labelA}" (${d[fieldA]}).`);
+                    return false;
                 }
             }
         }
-        return true;
     }
+    return true;
+}
 
     async function saveSubTable(type, ldudId, silent = false) {
         if (type === 'vessel_ops') {
@@ -2325,6 +3289,151 @@
         if (!subTables[ldudId] || !subTables[ldudId][type]) return;
 
         const rows = subTables[ldudId][type].getRows();
+
+        // ==========================================================
+// Validation: Delays Start / End
+// ==========================================================
+if (type === 'delays') {
+
+    const mainRow = table.getRows().find(
+        r => String(r.getData().id) === String(ldudId)
+    );
+
+    if (!mainRow) {
+        alert('Unable to find the main vessel record.');
+        return;
+    }
+
+    const mainData = mainRow.getData();
+
+    const opsStarted = mainData.ops_started;
+    const opsCompleted = mainData.ops_completed;
+
+    if (!opsStarted) {
+        alert(
+            'Please enter Discharge/Loading Started before saving delays.'
+        );
+        return;
+    }
+
+    const startedDate = parseValidDateTime(opsStarted);
+
+    if (!startedDate) {
+        alert(
+            'Discharge/Loading Started contains an invalid date/time.'
+        );
+        return;
+    }
+
+    let completedDate = null;
+
+    if (opsCompleted) {
+        completedDate = parseValidDateTime(opsCompleted);
+
+        if (!completedDate) {
+            alert(
+                'Discharge/Loading Completed contains an invalid date/time.'
+            );
+            return;
+        }
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+
+        const data = rows[i].getData();
+
+        // -----------------------------
+        // Validate Start
+        // -----------------------------
+        if (data.start_datetime) {
+
+            const startDate = parseValidDateTime(
+                data.start_datetime
+            );
+
+            if (!startDate) {
+                alert(
+                    `Row ${i + 1}: Invalid Start date/time.\n\n` +
+                    `Value: ${data.start_datetime}`
+                );
+                return;
+            }
+
+            if (startDate < startedDate) {
+                alert(
+                    `Row ${i + 1}: Delay Start cannot be earlier than ` +
+                    `Discharge/Loading Started.`
+                );
+                return;
+            }
+
+            if (completedDate && startDate > completedDate) {
+                alert(
+                    `Row ${i + 1}: Delay Start cannot be later than ` +
+                    `Discharge/Loading Completed.`
+                );
+                return;
+            }
+        }
+
+        // -----------------------------
+        // Validate End
+        // -----------------------------
+        if (data.end_datetime) {
+
+            const endDate = parseValidDateTime(
+                data.end_datetime
+            );
+
+            if (!endDate) {
+                alert(
+                    `Row ${i + 1}: Invalid End date/time.\n\n` +
+                    `Value: ${data.end_datetime}`
+                );
+                return;
+            }
+
+            if (endDate < startedDate) {
+                alert(
+                    `Row ${i + 1}: Delay End cannot be earlier than ` +
+                    `Discharge/Loading Started.`
+                );
+                return;
+            }
+
+            if (completedDate && endDate > completedDate) {
+                alert(
+                    `Row ${i + 1}: Delay End cannot be later than ` +
+                    `Discharge/Loading Completed.`
+                );
+                return;
+            }
+
+            // End cannot be before Start
+            if (data.start_datetime) {
+
+                const startDate = parseValidDateTime(
+                    data.start_datetime
+                );
+
+                if (!startDate) {
+                    alert(
+                        `Row ${i + 1}: Invalid Start date/time.`
+                    );
+                    return;
+                }
+
+                if (endDate < startDate) {
+                    alert(
+                        `Row ${i + 1}: Delay End cannot be earlier than ` +
+                        `Delay Start.`
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
 
         // ── Validation: barge_lines — date fields must be in chronological order ──
         if (type === 'barge_lines') {
@@ -2370,19 +3479,103 @@
 
         // Validate hold_completion: completed must be after commenced
         if (type === 'hold_completion') {
-            for (const row of rows) {
-                const d = row.getData();
-                if (d.commenced && d.completed) {
-                    const start = new Date(d.commenced.replace(' ', 'T'));
-                    const end = new Date(d.completed.replace(' ', 'T'));
-                    if (end < start) {
-                        if (!silent) showSubStatus(type, ldudId, `Error: Completed must be same or after Commenced for hold ${d.hold_name || ''}`, true);
-                        return;
-                    }
-                }
+
+    const mainRow = table.getRows().find(
+        r => String(r.getData().id) === String(ldudId)
+    );
+
+    if (!mainRow) {
+        alert('Unable to find the MV Discharge record.');
+        return;
+    }
+
+    const mainData = mainRow.getData();
+
+    // Get MV Discharge Commenced from main table
+    const mvDischargeCommenced = mainData.ops_started;
+
+    if (!mvDischargeCommenced) {
+        alert(
+            'Please enter MV Discharge Commenced before saving Hold Completion.'
+        );
+        return;
+    }
+
+    const mvDate = parseValidDateTime(mvDischargeCommenced);
+
+    if (!mvDate) {
+        alert(
+            'MV Discharge Commenced contains an invalid date/time.'
+        );
+        return;
+    }
+
+    for (const row of rows) {
+
+        const d = row.getData();
+
+        // -----------------------------
+        // Discharge Commenced
+        // -----------------------------
+        if (d.commenced) {
+
+            const commencedDate = parseValidDateTime(d.commenced);
+
+            if (!commencedDate) {
+                alert(
+                    `Hold ${d.hold_name || ''}: Invalid Discharge Commenced date/time.`
+                );
+                return;
+            }
+
+            // MAIN VALIDATION
+            if (commencedDate < mvDate) {
+                alert(
+                    `Hold ${d.hold_name || ''}: Discharge Commenced cannot be earlier than MV Discharge Commenced.\n\n` +
+                    `MV Discharge Commenced: ${mvDischargeCommenced}\n` +
+                    `Entered: ${d.commenced}`
+                );
+                return;
             }
         }
 
+        // -----------------------------
+        // Discharge Completed
+        // -----------------------------
+        if (d.completed) {
+
+            const completedDate = parseValidDateTime(d.completed);
+
+            if (!completedDate) {
+                alert(
+                    `Hold ${d.hold_name || ''}: Invalid Discharge Completed date/time.`
+                );
+                return;
+            }
+
+            // Completed cannot be before MV Discharge Commenced
+            if (completedDate < mvDate) {
+                alert(
+                    `Hold ${d.hold_name || ''}: Discharge Completed cannot be earlier than MV Discharge Commenced.`
+                );
+                return;
+            }
+
+            // Completed cannot be before Commenced
+            if (d.commenced) {
+
+                const commencedDate = parseValidDateTime(d.commenced);
+
+                if (commencedDate && completedDate < commencedDate) {
+                    alert(
+                        `Hold ${d.hold_name || ''}: Discharge Completed cannot be earlier than Discharge Commenced.`
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
         const savePromises = rows.filter(r => r.getData().id).map(async (row) => {
             const data = row.getData();
             const res = await fetch(`/api/module/LDUD01/${type}/save`, {
