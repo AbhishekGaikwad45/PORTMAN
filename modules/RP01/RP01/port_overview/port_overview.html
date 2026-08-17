@@ -248,9 +248,10 @@ html, body {
   border:1px solid var(--border); border-radius:var(--r-lg);
   padding:15px 16px; box-shadow:var(--shadow-sm); overflow:hidden;
   transition:transform .18s ease, box-shadow .18s ease; animation:fadeUp .4s ease both;
+  display:flex; flex-direction:column;
 }
 .kpi-shift-row {
-  display:flex; gap:6px; margin-top:9px; padding-top:8px;
+  display:flex; gap:6px; margin-top:auto; padding-top:8px;
   border-top:1px dashed var(--border-2);
 }
 .shift-pill {
