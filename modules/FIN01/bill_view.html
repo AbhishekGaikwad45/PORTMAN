@@ -134,6 +134,17 @@
         </tr>
         {% endfor %}
     </tbody>
+    <tfoot>
+        {% for uom, qty in qty_totals %}
+        <tr style="background:#f8f9fa;font-weight:600;">
+            <td colspan="2" class="text-right">{{ 'Total Quantity' if loop.first else '' }}</td>
+            <td class="text-right">{{ "%.2f"|format(qty) }}</td>
+            <td>{{ uom }}</td>
+            <td colspan="4"></td>
+            <td></td>
+        </tr>
+        {% endfor %}
+    </tfoot>
 </table>
 
 <div class="totals-section">

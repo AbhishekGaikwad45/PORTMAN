@@ -131,6 +131,7 @@ def view_bill(bill_id):
     return render_template('bill_view.html',
                          bill=bill,
                          bill_lines=bill_lines,
+                         qty_totals=model.quantity_totals(bill_lines),
                          perms=perms,
                          is_approver=is_approver,
                          username=session.get('username'))

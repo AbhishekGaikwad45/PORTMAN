@@ -2,7 +2,7 @@
 GST reconciliation — no DB."""
 from modules.FIN01.model import (
     _can_uninvoice, _can_revert_to_draft, would_overbill, compute_aggregate_gst,
-    _amount_in_words, bill_totals,
+    _amount_in_words, bill_totals, quantity_totals,
 )
 
 
@@ -48,6 +48,16 @@ def test_bill_totals_come_from_stored_lines():
     # Inter-state (IGST) and empty bills
     assert bill_totals([{'line_amount': 100, 'igst_amount': 18}])['total_amount'] == 118.0
     assert bill_totals([])['total_amount'] == 0.0
+
+
+def test_quantity_totals():
+    lines = [{'uom': 'MT', 'quantity': 3887}, {'uom': 'MT', 'quantity': 3831},
+             {'uom': 'KL', 'quantity': 12}]
+    # Per UOM, never one nonsense grand total across tonnes and kilolitres
+    assert quantity_totals(lines) == [('KL', 12.0), ('MT', 7718.0)]
+    # Missing/blank UOM collapses into one bucket; None quantity counts as 0
+    assert quantity_totals([{'quantity': 5}, {'uom': '  ', 'quantity': None}]) == [('', 5.0)]
+    assert quantity_totals([]) == []
 
 
 def test_would_overbill():

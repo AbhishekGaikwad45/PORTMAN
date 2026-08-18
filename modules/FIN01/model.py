@@ -1283,6 +1283,18 @@ def get_bill_by_id(bill_id):
     return dict(row) if row else None
 
 
+def quantity_totals(lines):
+    """Billed quantity per UOM, as [(uom, total)] sorted by uom.
+
+    Kept per UOM because a bill mixes cargo tonnage with service records
+    counted in their own units — one grand total would be a nonsense number."""
+    totals = {}
+    for ln in lines:
+        uom = (ln.get('uom') or '').strip()
+        totals[uom] = totals.get(uom, 0.0) + float(ln.get('quantity') or 0)
+    return [(uom, round(q, 3)) for uom, q in sorted(totals.items())]
+
+
 def get_bill_lines(bill_id):
     """Get all lines for a bill"""
     conn = get_db()
