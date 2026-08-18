@@ -1080,6 +1080,52 @@ def delete_bill(bill_id, username):
         conn.close()
 
 
+def _can_revert_to_draft(bill):
+    """(ok, reason) for pulling an approved bill back to Draft instead of deleting it.
+
+    Draft and Approved bills both hold their cargo/service billed tracking, so
+    the revert is status-only — nothing to release or re-apply."""
+    if not bill:
+        return False, 'Bill not found'
+    if bill.get('bill_status') != 'Approved':
+        return False, f"Only approved bills can be sent back to draft (this one is {bill.get('bill_status')})"
+    return True, ''
+
+
+def revert_bill_to_draft(bill_id, username):
+    """Send an approved, uninvoiced bill back to Draft so it can be edited.
+
+    Returns {'ok': bool, 'bill_number', 'error'}."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT * FROM bill_header WHERE id=%s FOR UPDATE', [bill_id])
+        row = cur.fetchone()
+        bill = dict(row) if row else None
+        ok, reason = _can_revert_to_draft(bill)
+        if not ok:
+            conn.close()
+            return {'ok': False, 'error': reason}
+        cur.execute('SELECT 1 FROM invoice_bill_mapping WHERE bill_id=%s LIMIT 1', [bill_id])
+        if cur.fetchone():
+            conn.close()
+            return {'ok': False, 'error': 'Bill is linked to an invoice — uninvoice it first'}
+
+        cur.execute("""UPDATE bill_header
+                       SET bill_status='Draft', approved_by=NULL, approved_date=NULL
+                       WHERE id=%s""", [bill_id])
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('FIN01', %s, 'Bill reverted to Draft by Admin', %s, %s)""",
+                    [bill_id, f"Bill {bill['bill_number']} sent back from Approved to Draft", username])
+        conn.commit()
+        return {'ok': True, 'bill_number': bill['bill_number']}
+    except Exception as e:
+        conn.rollback()
+        return {'ok': False, 'error': str(e)}
+    finally:
+        conn.close()
+
+
 def get_bill_by_id(bill_id):
     """Get bill header by ID"""
     conn = get_db()

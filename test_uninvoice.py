@@ -1,7 +1,8 @@
 """Pure checks for the admin Uninvoice / Remove-Bill tabs and the aggregate
 GST reconciliation — no DB."""
 from modules.FIN01.model import (
-    _can_uninvoice, would_overbill, compute_aggregate_gst, _amount_in_words,
+    _can_uninvoice, _can_revert_to_draft, would_overbill, compute_aggregate_gst,
+    _amount_in_words,
 )
 
 
@@ -19,6 +20,14 @@ def test_can_uninvoice():
                            'invoice_status': 'Posted to SAP'})[0] is True
     assert _can_uninvoice({'sap_document_number': '   ',
                            'invoice_status': 'Generated'})[0] is True
+
+
+def test_can_revert_to_draft():
+    # Only an approved bill goes back to Draft; everything else is refused
+    assert _can_revert_to_draft({'bill_status': 'Approved'})[0] is True
+    for st in ('Draft', 'Pending Approval', 'Rejected', 'Invoiced', 'Cancelled'):
+        assert _can_revert_to_draft({'bill_status': st})[0] is False
+    assert _can_revert_to_draft(None)[0] is False
 
 
 def test_would_overbill():

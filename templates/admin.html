@@ -689,6 +689,8 @@
             freeing its number so the series continues with no gap — and releases the cargo/service billed
             tracking it held, so those items become billable again. Invoiced bills are not shown; uninvoice
             them first (Uninvoice tab), which returns them here as removable.
+            An <strong>Approved</strong> bill can instead be sent <strong>back to Draft</strong>: the bill and its
+            number are kept, the approval is cleared, and it becomes editable again.
         </p>
         <div class="toolbar">
             <button class="btn btn-save" onclick="loadBillRemoveList()">↻ Refresh</button>
@@ -1686,7 +1688,10 @@ async function loadBillRemoveList() {
             <td style="text-align:right;">${r.total_amount != null ? Number(r.total_amount).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''}</td>
             <td><span style="background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${r.bill_status || ''}</span></td>
             <td>${r.created_by || ''}</td>
-            <td><button class="btn btn-danger" onclick="doBillRemove(${r.id}, '${(r.bill_number||'').replace(/'/g,"\\'")}')">Remove</button></td>
+            <td>
+                ${r.bill_status === 'Approved' ? `<button class="btn btn-save" onclick="doBillToDraft(${r.id}, '${(r.bill_number||'').replace(/'/g,"\\'")}')">&#8617; To Draft</button> ` : ''}
+                <button class="btn btn-danger" onclick="doBillRemove(${r.id}, '${(r.bill_number||'').replace(/'/g,"\\'")}')">Remove</button>
+            </td>
         </tr>
     `).join('');
 }
@@ -1701,6 +1706,21 @@ async function doBillRemove(id, num) {
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
     alert(`Bill ${data.bill_number} removed. Its items are billable again.`);
+    loadBillRemoveList();
+}
+
+async function doBillToDraft(id, num) {
+    if (!confirm(`Send bill "${num}" back to Draft?
+
+The bill and its number are kept — the approval is cleared so it can be edited and re-submitted. Its cargo/service items stay billed to it.`)) return;
+    const res = await fetch('/admin/api/bill-remove/to-draft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    alert(`Bill ${data.bill_number} is back in Draft.`);
     loadBillRemoveList();
 }
 

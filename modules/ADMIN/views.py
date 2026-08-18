@@ -1144,3 +1144,16 @@ def bill_remove_do():
     if not result.get('ok'):
         return jsonify({'error': result.get('error', 'Bill removal failed')}), 400
     return jsonify({'success': True, **result})
+
+
+@bp.route('/api/bill-remove/to-draft', methods=['POST'])
+@admin_required
+def bill_to_draft():
+    from modules.FIN01 import model as fin_model
+    bill_id = (request.json or {}).get('id')
+    if not bill_id:
+        return jsonify({'error': 'Missing id'}), 400
+    result = fin_model.revert_bill_to_draft(bill_id, session.get('username'))
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error', 'Revert to draft failed')}), 400
+    return jsonify({'success': True, **result})
