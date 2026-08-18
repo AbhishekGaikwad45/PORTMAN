@@ -316,23 +316,112 @@ def reapply_bill_sources(cur, bill_id):
                         [bill_id, row['service_record_id']])
 
 
-def reconcile_rejected_bill_sources():
-    """Startup self-heal: bills rejected before rejection started releasing
-    cargo tracking still hold billed_quantity on their declarations, keeping
-    them stuck as non-billable. Release them exactly once.
+def reconcile_billed_tracking(cur=None):
+    """Startup self-heal: rebuild billed tracking from the bills that exist.
 
-    Idempotent: only touches declaration rows whose bill_id still points at
-    the rejected bill, and release_bill_sources clears that link afterwards.
-    ponytail: a declaration partially billed by two bills where the ACTIVE
-    bill marked last is skipped (bill_id points elsewhere) — safe direction,
-    reject that bill again through the UI if it ever comes up."""
-    conn = get_db()
-    cur = get_cursor(conn)
-    cur.execute("SELECT id FROM bill_header WHERE bill_status = 'Rejected'")
-    for row in cur.fetchall():
-        release_bill_sources(cur, row['id'], only_if_still_linked=True)
-    conn.commit()
-    conn.close()
+    billed_quantity / is_billed / bill_id are stored counters on the cargo
+    declaration, so every path that ends a bill has to reverse them by hand —
+    and anything that ever failed to (a rejection from a build that predates
+    release_bill_sources, a bill deleted straight in SQL) leaves that cargo
+    stuck as non-billable with nothing to un-stick it. Recompute the counters
+    from the bill lines that actually sit on live (not rejected, not cancelled)
+    bills, which is what the counters are supposed to mean.
+
+    Only declarations that appear in bill_lines at all are touched, so
+    cutover-marked cargo (is_billed=1, no bill row) keeps its flag. Idempotent.
+    Pass a cursor to join the caller's transaction.
+    Returns {table: rows_repaired}."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
+    dead = list(_DEAD_BILL_STATUSES)
+    repaired = {}
+    for cargo_source_type, (table, total_col) in _CARGO_TABLES.items():
+        # Table/column names come from the _CARGO_TABLES constant, never input.
+        cur.execute(f'''
+            UPDATE {table} d
+            SET billed_quantity = live.q,
+                is_billed = CASE WHEN live.q >= COALESCE(d.{total_col}, 0)
+                                  AND COALESCE(d.{total_col}, 0) > 0 THEN 1 ELSE 0 END,
+                bill_id = live.bill_id
+            FROM (
+                SELECT bl.cargo_source_id AS id,
+                       COALESCE(SUM(CASE WHEN bh.bill_status <> ALL(%s)
+                                         THEN bl.quantity ELSE 0 END), 0) AS q,
+                       MAX(CASE WHEN bh.bill_status <> ALL(%s)
+                                THEN bl.bill_id END) AS bill_id
+                FROM bill_lines bl
+                JOIN bill_header bh ON bh.id = bl.bill_id
+                WHERE bl.cargo_source_type = %s AND bl.cargo_source_id IS NOT NULL
+                GROUP BY bl.cargo_source_id
+            ) live
+            WHERE d.id = live.id
+              -- bill_id IS NULL + flagged billed is the admin cutover tool's own
+              -- signature (it never sets bill_id), and stale tracking looks
+              -- identical. Never guess: those are reported, not repaired.
+              AND d.bill_id IS NOT NULL
+              AND (COALESCE(d.billed_quantity, 0) <> live.q
+                   OR COALESCE(d.is_billed, 0) <> CASE WHEN live.q >= COALESCE(d.{total_col}, 0)
+                                                        AND COALESCE(d.{total_col}, 0) > 0
+                                                       THEN 1 ELSE 0 END)
+        ''', [dead, dead, cargo_source_type])
+        if cur.rowcount:
+            repaired[table] = cur.rowcount
+
+    # Service records carry the same flag with no quantity to split.
+    cur.execute('''
+        UPDATE service_records sr
+        SET is_billed = 0, bill_id = NULL
+        WHERE COALESCE(sr.is_billed, 0) = 1
+          AND sr.bill_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM bill_lines bl WHERE bl.service_record_id = sr.id)
+          AND NOT EXISTS (SELECT 1 FROM bill_lines bl
+                          JOIN bill_header bh ON bh.id = bl.bill_id
+                          WHERE bl.service_record_id = sr.id AND bh.bill_status <> ALL(%s))
+    ''', [dead])
+    if cur.rowcount:
+        repaired['service_records'] = cur.rowcount
+
+    if conn is not None:
+        conn.commit()
+        conn.close()
+    return repaired
+
+
+def stuck_billed_cargo(cur=None):
+    """Cargo flagged billed with no live bill behind it and no bill_id link.
+
+    Two different things land here and the row itself cannot tell them apart:
+    a cutover mark (Admin → Cutover marks is_billed without ever setting
+    bill_id — the cargo really was billed in the old system) and tracking left
+    over from a bill that was rejected or cancelled without releasing it. So
+    these are never auto-repaired: cutover_audit says which is which, and
+    Admin → Cutover → unmark frees the ones that are genuinely stale.
+
+    Returns [{source_type, id, customer_name, total_quantity, billed_quantity}]."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
+    dead = list(_DEAD_BILL_STATUSES)
+    rows = []
+    for cargo_source_type, (table, total_col) in _CARGO_TABLES.items():
+        # Table/column names come from the _CARGO_TABLES constant, never input.
+        cur.execute(f'''
+            SELECT d.id, d.customer_name, d.{total_col} AS total_quantity, d.billed_quantity
+            FROM {table} d
+            WHERE d.bill_id IS NULL
+              AND (COALESCE(d.is_billed, 0) = 1 OR COALESCE(d.billed_quantity, 0) > 0)
+              AND NOT EXISTS (SELECT 1 FROM bill_lines bl
+                              JOIN bill_header bh ON bh.id = bl.bill_id
+                              WHERE bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
+                                AND bh.bill_status <> ALL(%s))
+            ORDER BY d.id
+        ''', [cargo_source_type, dead])
+        for r in cur.fetchall():
+            rows.append({'source_type': cargo_source_type, **dict(r)})
+    if conn is not None:
+        conn.close()
+    return rows
 
 
 def unbill_invoice_sources(cur, invoice_id):
@@ -373,16 +462,20 @@ def unbill_invoice_sources(cur, invoice_id):
 
 # ===== BILL FUNCTIONS =====
 
-def get_next_bill_number():
-    """Generate next bill number, honouring a cutover bill seed as a floor."""
-    conn = get_db()
-    cur = get_cursor(conn)
+def get_next_bill_number(cur=None):
+    """Generate next bill number, honouring a cutover bill seed as a floor.
+
+    Pass the caller's cursor to read inside its transaction."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
     cur.execute(
         "SELECT MAX(CAST(SUBSTR(bill_number, 5) AS INTEGER)) FROM bill_header WHERE bill_number LIKE 'BILL%%'"
     )
     existing_max = (cur.fetchone()['max'] or 0)
     seed = lookup_seed(cur, 'bill')      # doc_series='', financial_year=''
-    conn.close()
+    if conn is not None:
+        conn.close()
     next_num = next_from_seed(existing_max, seed)
     return f"BILL{next_num:04d}"
 
@@ -426,10 +519,12 @@ def get_bill_data(page=1, size=20, status_filter=None):
     return [dict(r) for r in rows], total
 
 
-def save_bill_header(data):
-    """Save bill header"""
-    conn = get_db()
-    cur = get_cursor(conn)
+def save_bill_header(data, cur=None):
+    """Save bill header. Pass the caller's cursor to join its transaction
+    (nothing is committed then — the caller owns commit/rollback)."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
     row_id = data.get('id')
 
     if row_id:
@@ -439,7 +534,7 @@ def save_bill_header(data):
             WHERE id=%s''',
             [data[c] for c in cols] + [row_id])
     else:
-        data['bill_number'] = get_next_bill_number()
+        data['bill_number'] = get_next_bill_number(cur)
         cols = [k for k in data if k != 'id']
         cur.execute(f'''INSERT INTO bill_header
             ({', '.join(cols)})
@@ -448,8 +543,9 @@ def save_bill_header(data):
             [data[c] for c in cols])
         row_id = cur.fetchone()['id']
 
-    conn.commit()
-    conn.close()
+    if conn is not None:
+        conn.commit()
+        conn.close()
     return row_id, data.get('bill_number')
 
 
@@ -1114,6 +1210,9 @@ def revert_bill_to_draft(bill_id, username):
         cur.execute("""UPDATE bill_header
                        SET bill_status='Draft', approved_by=NULL, approved_date=NULL
                        WHERE id=%s""", [bill_id])
+        # Repair any header/line drift while we are here (older bills could be
+        # left with 0.00 GST by a half-written save).
+        recalc_bill_totals(cur, bill_id)
         cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
                        VALUES ('FIN01', %s, 'Bill reverted to Draft by Admin', %s, %s)""",
                     [bill_id, f"Bill {bill['bill_number']} sent back from Approved to Draft", username])
@@ -1124,6 +1223,36 @@ def revert_bill_to_draft(bill_id, username):
         return {'ok': False, 'error': str(e)}
     finally:
         conn.close()
+
+
+def bill_totals(lines):
+    """Header totals from the bill's own stored lines.
+
+    The header is never allowed to carry numbers its lines do not back: GST is
+    derived per line by save_bill_line (from the service master), so summing the
+    request payload — which carries no GST at all — is what once produced a bill
+    with correct line GST and a 0.00 header."""
+    subtotal = sum(float(l.get('line_amount') or 0) for l in lines)
+    cgst = sum(float(l.get('cgst_amount') or 0) for l in lines)
+    sgst = sum(float(l.get('sgst_amount') or 0) for l in lines)
+    igst = sum(float(l.get('igst_amount') or 0) for l in lines)
+    return {'subtotal': round(subtotal, 2), 'cgst_amount': round(cgst, 2),
+            'sgst_amount': round(sgst, 2), 'igst_amount': round(igst, 2),
+            'total_amount': round(subtotal + cgst + sgst + igst, 2)}
+
+
+def recalc_bill_totals(cur, bill_id):
+    """Rewrite a bill header's totals from its stored lines. Caller commits."""
+    cur.execute("""SELECT line_amount, cgst_amount, sgst_amount, igst_amount
+                   FROM bill_lines WHERE bill_id=%s""", [bill_id])
+    t = bill_totals([dict(r) for r in cur.fetchall()])
+    cur.execute("""UPDATE bill_header
+                   SET subtotal=%s, cgst_amount=%s, sgst_amount=%s,
+                       igst_amount=%s, total_amount=%s
+                   WHERE id=%s""",
+                [t['subtotal'], t['cgst_amount'], t['sgst_amount'], t['igst_amount'],
+                 t['total_amount'], bill_id])
+    return t
 
 
 def get_bill_by_id(bill_id):
@@ -1164,10 +1293,14 @@ def get_bill_lines(bill_id):
     return [dict(r) for r in rows]
 
 
-def save_bill_line(data):
-    """Save bill line (supports both EU lines and service records)"""
-    conn = get_db()
-    cur = get_cursor(conn)
+def save_bill_line(data, cur=None):
+    """Save bill line (supports both EU lines and service records).
+
+    Pass the caller's cursor to join its transaction (nothing is committed
+    then — the caller owns commit/rollback)."""
+    conn = None if cur is not None else get_db()
+    if conn is not None:
+        cur = get_cursor(conn)
     existing_line = None
 
     # Look up TDS/TCS config from service master (FSTM01)
@@ -1326,8 +1459,9 @@ def save_bill_line(data):
         cur.execute('UPDATE service_records SET is_billed = 1, bill_id = %s WHERE id = %s',
                      [data.get('bill_id'), data.get('service_record_id')])
 
-    conn.commit()
-    conn.close()
+    if conn is not None:
+        conn.commit()
+        conn.close()
     return row_id
 
 

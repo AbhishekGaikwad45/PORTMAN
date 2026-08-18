@@ -251,13 +251,22 @@ import sap_inbound
 sap_inbound.ensure_token_table()
 app.add_url_rule('/api/sap/callback', view_func=sap_inbound.sap_callback_view, methods=['POST'])
 
-# One-shot self-heal: bills rejected before rejection released cargo tracking
-# left their declarations stuck as non-billable. Idempotent — safe every boot.
+# Self-heal: rebuild cargo/service billed tracking from the bills that exist,
+# so cargo can never stay stuck as non-billable behind a rejected or deleted
+# bill. Idempotent — safe every boot.
 from modules.FIN01 import model as fin01_model
 try:
-    fin01_model.reconcile_rejected_bill_sources()
+    _repaired = fin01_model.reconcile_billed_tracking()
+    if _repaired:
+        app.logger.warning('FIN01 billed-tracking reconciliation repaired %s', _repaired)
+    _stuck = fin01_model.stuck_billed_cargo()
+    if _stuck:
+        app.logger.warning(
+            'FIN01: %d cargo declaration(s) flagged billed with no live bill and no '
+            'bill_id — cutover mark or stale tracking, needs a human: %s',
+            len(_stuck), [(r['source_type'], r['id']) for r in _stuck])
 except Exception:
-    app.logger.exception('FIN01 rejected-bill reconciliation failed at startup')
+    app.logger.exception('FIN01 billed-tracking reconciliation failed at startup')
 
 
 @app.route('/')

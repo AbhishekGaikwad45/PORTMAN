@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, session, jsonify
+from flask import render_template, request, redirect, url_for, session, jsonify, current_app
 from . import bp
 from . import model
 from database import get_user_permissions, get_db, get_cursor, get_module_config
@@ -322,51 +322,46 @@ def save_bill():
     # Extract fields not in bill_header table before saving
     customer_state_code = data.pop('customer_state_code', '') or ''
 
-    row_id, bill_number = model.save_bill_header(data)
-
-    # Save bill lines and calculate totals
-    subtotal = 0
-    cgst_total = 0
-    sgst_total = 0
-    igst_total = 0
-
-    customer_gstin = data.get('customer_gstin') or ''
-
-    for line in lines:
-        line['bill_id'] = row_id
-        line['customer_gstin'] = customer_gstin
-        line['customer_state_code'] = customer_state_code
-        # Map frontend field names to model field names
-        if not line.get('service_name') and line.get('description'):
-            line['service_name'] = line['description']
-        if not line.get('service_description'):
-            line['service_description'] = line.get('description', '')
-        model.save_bill_line(line)
-        subtotal += float(line.get('line_amount') or 0)
-        cgst_total += float(line.get('cgst_amount') or 0)
-        sgst_total += float(line.get('sgst_amount') or 0)
-        igst_total += float(line.get('igst_amount') or 0)
-
-    # Update bill header with calculated totals + mark source records as billed
-    total_amount = subtotal + cgst_total + sgst_total + igst_total
+    # One transaction for the whole bill: header, every line, then the totals
+    # recomputed from what was actually stored. Any failure rolls the whole
+    # thing back — a half-written bill (lines saved, header totals never
+    # updated, so GST and total sat at 0.00) used to survive because the header
+    # and each line committed separately.
     conn = get_db()
     cur = get_cursor(conn)
-    cur.execute('''UPDATE bill_header
-        SET subtotal=%s, cgst_amount=%s, sgst_amount=%s, igst_amount=%s, total_amount=%s
-        WHERE id=%s''',
-        [subtotal, cgst_total, sgst_total, igst_total, total_amount, row_id])
+    try:
+        # Serialise bill-number allocation; the number is MAX-based and only
+        # unique-constrained, and the transaction now stays open past the read.
+        # ponytail: one advisory lock for all bill creation, fine at this volume.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext('fin01_bill_number'))")
 
-    # Mark service records as billed
-    for line in lines:
-        if line.get('line_type') == 'service_record' and line.get('service_record_id'):
-            cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s',
-                        [row_id, line['service_record_id']])
+        row_id, bill_number = model.save_bill_header(data, cur)
 
-    conn.commit()
-    conn.close()
+        customer_gstin = data.get('customer_gstin') or ''
+        for line in lines:
+            line['bill_id'] = row_id
+            line['customer_gstin'] = customer_gstin
+            line['customer_state_code'] = customer_state_code
+            # Map frontend field names to model field names
+            if not line.get('service_name') and line.get('description'):
+                line['service_name'] = line['description']
+            if not line.get('service_description'):
+                line['service_description'] = line.get('description', '')
+            model.save_bill_line(line, cur)
+
+        totals = model.recalc_bill_totals(cur, row_id)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        current_app.logger.exception('Bill save failed — rolled back')
+        return jsonify({'success': False,
+                        'error': f'Bill could not be saved, nothing was written: {e}'})
+    finally:
+        conn.close()
 
     if data.get('bill_status') == 'Pending Approval':
-        _queue_bill_approval_request(row_id, bill_number, data.get('customer_name'), total_amount)
+        _queue_bill_approval_request(row_id, bill_number, data.get('customer_name'),
+                                     totals['total_amount'])
 
     return jsonify({'success': True, 'id': row_id, 'bill_number': bill_number})
 

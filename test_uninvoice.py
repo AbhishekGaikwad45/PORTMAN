@@ -2,7 +2,7 @@
 GST reconciliation — no DB."""
 from modules.FIN01.model import (
     _can_uninvoice, _can_revert_to_draft, would_overbill, compute_aggregate_gst,
-    _amount_in_words,
+    _amount_in_words, bill_totals,
 )
 
 
@@ -28,6 +28,26 @@ def test_can_revert_to_draft():
     for st in ('Draft', 'Pending Approval', 'Rejected', 'Invoiced', 'Cancelled'):
         assert _can_revert_to_draft({'bill_status': st})[0] is False
     assert _can_revert_to_draft(None)[0] is False
+
+
+def test_bill_totals_come_from_stored_lines():
+    # Lines as the browser posts them: amounts only, no GST fields at all.
+    # Summing THOSE is the bug that shipped a bill with 0.00 GST and 0.00 total.
+    payload = [{'line_amount': 678126.02}, {'line_amount': 668356.26}]
+    assert bill_totals(payload)['total_amount'] == 1346482.28
+
+    # Lines as save_bill_line stores them: GST derived from the service master.
+    stored = [{'line_amount': 678126.02, 'cgst_amount': 61031.34, 'sgst_amount': 61031.34},
+              {'line_amount': 668356.26, 'cgst_amount': 60152.06, 'sgst_amount': 60152.06}]
+    t = bill_totals(stored)
+    assert t == {'subtotal': 1346482.28, 'cgst_amount': 121183.40, 'sgst_amount': 121183.40,
+                 'igst_amount': 0.0, 'total_amount': 1588849.08}
+    # Header never disagrees with its lines
+    assert t['total_amount'] == round(sum(l['line_amount'] + l['cgst_amount'] + l['sgst_amount']
+                                          for l in stored), 2)
+    # Inter-state (IGST) and empty bills
+    assert bill_totals([{'line_amount': 100, 'igst_amount': 18}])['total_amount'] == 118.0
+    assert bill_totals([])['total_amount'] == 0.0
 
 
 def test_would_overbill():
