@@ -73,6 +73,37 @@ def _load_berth_layout():
 # D/B is double-banked outboard of it, and so on).
 _TIER = {'A/S': 0, 'D/B': 1, 'T/B': 2, 'F/B': 3, 'S/B': 4}
 
+def _fetch_last_lueu_completion():
+    """Most recent LUEU discharge-completion time per barge/MBC.
+
+    lueu_lines has no dedicated "completed" flag — to_time (paired with
+    entry_date, since to_time alone is just a clock reading) is the
+    closest thing to a completion timestamp for a logged interval.
+    Takes the latest row per barge_name (by entry_date, then id as a
+    tiebreaker within the same date).
+    """
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute("""
+        SELECT DISTINCT ON (UPPER(TRIM(barge_name)))
+               UPPER(TRIM(barge_name)) AS barge_key,
+               entry_date,
+               from_time,
+               to_time
+        FROM lueu_lines
+        WHERE is_deleted IS NOT TRUE
+          AND COALESCE(TRIM(barge_name), '') <> ''
+          AND COALESCE(TRIM(to_time), '') <> ''
+          AND COALESCE(TRIM(entry_date), '') <> ''
+        ORDER BY UPPER(TRIM(barge_name)), entry_date DESC, id DESC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return {
+        r['barge_key']: f"{r['entry_date']} {r['to_time']}".strip()
+        for r in rows
+    }
+
 
 def _fetch_berth_occupancy():
     """Latest saved Barge Position berth layout, refreshed with live balances."""
@@ -94,6 +125,7 @@ def _fetch_berth_occupancy():
 
     live_rows, _ = _fetch_all_barges()
     live = {(b.get('name') or '').strip().upper(): b for b in live_rows}
+    last_completed = _fetch_last_lueu_completion()   # <-- NEW
 
     occupancy = {}
     for item in layout:
@@ -102,10 +134,8 @@ def _fetch_berth_occupancy():
         if not berth or berth == 'WAITING' or not name:
             continue
         lv = live.get(name.upper())
-        # A zero balance means discharge is done, NOT that the berth is free —
-        # _fetch_all_barges() drops a vessel only at cast off, so trust that list.
         if lv is None and live:
-            continue  # dropped from the live list = cast off / removed in LUEU01/LDUD
+            continue
         commenced = (item.get('unloading_commenced') or item.get('commence_discharge_berth') or '').strip()
         if not commenced and lv:
             commenced = (lv.get('unloading_commenced') or lv.get('commence_discharge_berth') or '').strip()
@@ -119,10 +149,9 @@ def _fetch_berth_occupancy():
             'tier':        _TIER.get(position, 0),
             'total_qty':   float((lv.get('total_qty') if lv else None) or item.get('total') or item.get('qty') or 0),
             'balance_qty': balance,
-            # Same vocabulary as the Barge Position berth cards, so the map
-            # colours and the dashboard colours can't drift apart.
             'status':      ('Discharge Completed' if balance <= 0 else 'Under Discharge') if commenced else 'Waiting',
             'commenced':   commenced,
+            'last_completed': last_completed.get(name.upper(), ''),   # <-- NEW
         })
     return occupancy
 
