@@ -292,7 +292,7 @@ html, body {
 .kpi-diff span:last-child { font-family:'JetBrains Mono',monospace; font-weight:700; }
 .kpi-breakdown { margin-top:9px; border-top:1px dashed var(--border-2); padding-top:8px; display:flex; flex-direction:column; gap:4px; }
 .kpi-row { display:flex; justify-content:space-between; font-size:10.5px; color:var(--text2); }
-.kpi-row span:last-child { font-family:'JetBrains Mono',monospace; color:var(--text); font-weight:500; }
+.kpi-row span:last-child { font-family:'JetBrains Mono',monospace; color:#000000 !important; font-weight:700; }
 .kpi-empty { font-size:10.5px; color:var(--text3); }
 
 .kpi-required-footer {
@@ -735,7 +735,8 @@ function showVesselCard(a, b, ev) {
     ${row('BL Qty', fmtNum(a.total_qty) + ' MT')}
     ${row('Balance', fmtNum(a.balance_qty) + ' MT')}
     ${row('Status', a.status || (a.commenced ? 'Discharging' : 'Waiting'))}
-    ${a.commenced ? row('Commenced', a.commenced) : ''}`;
+    ${a.commenced ? row('Commenced', a.commenced) : ''}
+    ${a.last_completed ? row('Last Updated', a.last_completed) : ''}`;
   card.style.display = 'block';
   card.style.left = Math.min(ev.clientX + 10, window.innerWidth - 240) + 'px';
   card.style.top  = Math.min(ev.clientY + 10, window.innerHeight - 200) + 'px';

@@ -248,6 +248,20 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
         """, (ldud_ids,))
         eta_to_dharamtar = {r['ldud_id']: r['barges'] for r in cur.fetchall()}
 
+    # cur.execute("""
+    #     SELECT
+    #         h.mbc_name,
+    #         p.departure_gull_island,
+    #         p.vessel_arrival_port,
+    #         h.cargo_name,
+    #         COALESCE(h.bl_quantity, 0) AS bl_qty
+    #     FROM mbc_header h
+    #     JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
+    #     WHERE p.departure_gull_island IS NOT NULL
+    #       AND TRIM(COALESCE(p.departure_gull_island, '')) <> ''
+    #     ORDER BY p.departure_gull_island
+    # """)
+
     cur.execute("""
         SELECT
             h.mbc_name,
@@ -257,7 +271,8 @@ def _fetch_mother_vessels(from_datetime, to_datetime):
             COALESCE(h.bl_quantity, 0) AS bl_qty
         FROM mbc_header h
         JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id
-        WHERE p.departure_gull_island IS NOT NULL
+        WHERE h.operation_type ILIKE 'Import'
+          AND p.departure_gull_island IS NOT NULL
           AND TRIM(COALESCE(p.departure_gull_island, '')) <> ''
         ORDER BY p.departure_gull_island
     """)
@@ -489,6 +504,26 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
             "unloading_commenced":      "",   # barges use commence_discharge_berth
         })
 
+    # cur.execute("""
+    #     WITH latest_mbc AS (
+    #         SELECT
+    #             h.id,
+    #             h.mbc_name,
+    #             h.cargo_name,
+    #             COALESCE(h.bl_quantity,0) AS bl_qty,
+    #             p.vessel_unloading_berth AS berth,
+    #             p.vessel_arrival_port AS arrival_port,
+    #             p.unloading_commenced,
+    #             p.unloading_completed,
+    #             p.vessel_cast_off AS mbc_cast_off,
+    #             ROW_NUMBER() OVER (
+    #                 PARTITION BY h.id
+    #                 ORDER BY p.id DESC
+    #             ) rn
+    #         FROM mbc_header h
+    #         JOIN mbc_discharge_port_lines p
+    #             ON p.mbc_id = h.id
+    #     )
     cur.execute("""
         WITH latest_mbc AS (
             SELECT
@@ -496,18 +531,23 @@ def _fetch_all_barges(selected_date=None, selected_shift="ALL"):
                 h.mbc_name,
                 h.cargo_name,
                 COALESCE(h.bl_quantity,0) AS bl_qty,
-                p.vessel_unloading_berth AS berth,
-                p.vessel_arrival_port AS arrival_port,
-                p.unloading_commenced,
-                p.unloading_completed,
-                p.vessel_cast_off AS mbc_cast_off,
+                COALESCE(p.vessel_unloading_berth, e.berth_master)       AS berth,
+                COALESCE(p.vessel_arrival_port,   e.arrived_at_port)     AS arrival_port,
+                COALESCE(p.unloading_commenced,   e.loading_commenced)   AS unloading_commenced,
+                COALESCE(p.unloading_completed,   e.loading_completed)   AS unloading_completed,
+                COALESCE(p.vessel_cast_off,       e.cast_off_from_berth) AS mbc_cast_off,
                 ROW_NUMBER() OVER (
                     PARTITION BY h.id
-                    ORDER BY p.id DESC
+                    ORDER BY COALESCE(p.id, e.id) DESC
                 ) rn
             FROM mbc_header h
-            JOIN mbc_discharge_port_lines p
+            LEFT JOIN mbc_discharge_port_lines p
                 ON p.mbc_id = h.id
+                AND h.operation_type ILIKE 'Import'
+            LEFT JOIN mbc_export_load_port_lines e
+                ON e.mbc_id = h.id
+                AND h.operation_type ILIKE 'Export'
+            WHERE p.mbc_id IS NOT NULL OR e.mbc_id IS NOT NULL
         )
         SELECT
             m.*,
@@ -792,39 +832,77 @@ def api_berth_occupancy():
 
         # Completed BARGES
         # Use flexible regex: matches YYYY-MM-DD with space OR T separator
+        # cur.execute(r"""
+        #     SELECT *
+        #     FROM (
+        #         SELECT
+        #             bl.barge_name,
+        #             bl.cargo_name,
+        #             bl.commence_discharge_berth,
+        #             bl.along_side_berth,
+        #             bl.completed_discharge_berth,
+        #             bl.cast_off_port,
+        #             COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+        #             CASE
+        #                 WHEN bl.cast_off_port IS NOT NULL
+        #                      AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+        #                 THEN SUBSTRING(TRIM(bl.cast_off_port), 1, 10)::date
+        #                 WHEN bl.completed_discharge_berth IS NOT NULL
+        #                      AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+        #                 THEN SUBSTRING(TRIM(bl.completed_discharge_berth), 1, 10)::date
+        #                 ELSE NULL
+        #             END AS completed_date
+        #         FROM ldud_barge_lines bl
+        #         JOIN ldud_header h ON h.id = bl.ldud_id
+        #         WHERE COALESCE(TRIM(bl.barge_name),'') <> ''
+        #           AND (
+        #                 (bl.cast_off_port IS NOT NULL
+        #                  AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+        #                 OR
+        #                 (bl.completed_discharge_berth IS NOT NULL
+        #                  AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+        #               )
+        #     ) sub
+        #     WHERE sub.completed_date = %s::date
+        #     ORDER BY sub.barge_name
+        # """, (report_date,))
+
         cur.execute(r"""
             SELECT *
             FROM (
                 SELECT
-                    bl.barge_name,
-                    bl.cargo_name,
-                    bl.commence_discharge_berth,
-                    bl.along_side_berth,
-                    bl.completed_discharge_berth,
-                    bl.cast_off_port,
-                    COALESCE(bl.discharge_quantity, 0) AS bl_qty,
+                    h.mbc_name,
+                    h.cargo_name,
+                    COALESCE(h.bl_quantity, 0) AS bl_qty,
+                    COALESCE(p.unloading_commenced, e.loading_commenced)   AS unloading_commenced,
+                    COALESCE(p.unloading_completed, e.loading_completed)   AS unloading_completed,
+                    COALESCE(p.vessel_cast_off,     e.cast_off_from_berth) AS vessel_cast_off,
                     CASE
-                        WHEN bl.cast_off_port IS NOT NULL
-                             AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]'
-                        THEN SUBSTRING(TRIM(bl.cast_off_port), 1, 10)::date
-                        WHEN bl.completed_discharge_berth IS NOT NULL
-                             AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]'
-                        THEN SUBSTRING(TRIM(bl.completed_discharge_berth), 1, 10)::date
+                        WHEN COALESCE(p.unloading_completed, e.loading_completed) IS NOT NULL
+                             AND TRIM(COALESCE(p.unloading_completed, e.loading_completed)) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(COALESCE(p.unloading_completed, e.loading_completed)), 1, 10)::date
+                        WHEN COALESCE(p.vessel_cast_off, e.cast_off_from_berth) IS NOT NULL
+                             AND TRIM(COALESCE(p.vessel_cast_off, e.cast_off_from_berth)) ~ '^\d{4}-\d{2}-\d{2}[T ]'
+                        THEN SUBSTRING(TRIM(COALESCE(p.vessel_cast_off, e.cast_off_from_berth)), 1, 10)::date
                         ELSE NULL
                     END AS completed_date
-                FROM ldud_barge_lines bl
-                JOIN ldud_header h ON h.id = bl.ldud_id
-                WHERE COALESCE(TRIM(bl.barge_name),'') <> ''
-                  AND (
-                        (bl.cast_off_port IS NOT NULL
-                         AND TRIM(bl.cast_off_port) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                FROM mbc_header h
+                LEFT JOIN mbc_discharge_port_lines p
+                    ON p.mbc_id = h.id
+                    AND h.operation_type ILIKE 'Import'
+                LEFT JOIN mbc_export_load_port_lines e
+                    ON e.mbc_id = h.id
+                    AND h.operation_type ILIKE 'Export'
+                WHERE (
+                        (COALESCE(p.unloading_completed, e.loading_completed) IS NOT NULL
+                         AND TRIM(COALESCE(p.unloading_completed, e.loading_completed)) ~ '^\d{4}-\d{2}-\d{2}[T ]')
                         OR
-                        (bl.completed_discharge_berth IS NOT NULL
-                         AND TRIM(bl.completed_discharge_berth) ~ '^\d{4}-\d{2}-\d{2}[T ]')
+                        (COALESCE(p.vessel_cast_off, e.cast_off_from_berth) IS NOT NULL
+                         AND TRIM(COALESCE(p.vessel_cast_off, e.cast_off_from_berth)) ~ '^\d{4}-\d{2}-\d{2}[T ]')
                       )
             ) sub
             WHERE sub.completed_date = %s::date
-            ORDER BY sub.barge_name
+            ORDER BY sub.mbc_name
         """, (report_date,))
 
         for row in cur.fetchall():

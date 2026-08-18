@@ -385,7 +385,7 @@ def mbc_sof_print(mbc_id):
     bl_qty              = fmt_qty(header.get('bl_quantity') or 0)
     uom                 = header.get('quantity_uom', 'MT')
     load_port_name      = header.get('load_port', '')
-    discharge_port_name = header.get('discharge_port', '')
+    discharge_port_name = '' if op_type == 'export' else header.get('discharge_port', '')
     doc_date_display    = fmt_date_display(header.get('doc_date'))
 
     return render_template('mbc_sof/mbc_sof_print.html',
