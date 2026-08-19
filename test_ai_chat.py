@@ -149,7 +149,7 @@ def test_route_rejects_unknown_source(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
         'source': 'invoices', 'date_col': 'x', 'period': 'this_fy',
         'from_date': '2026-04-01', 'to_date': '2026-06-30'}))
-    with pytest.raises(ValueError, match='not trusted'):
+    with pytest.raises(ValueError, match='Not a trusted'):
         aiviews.route('q', [], CFG)
 
 
@@ -268,3 +268,38 @@ def test_route_resolves_named_period_itself(monkeypatch):
     y = (_d.today() - timedelta(days=1)).isoformat()
     assert out['from_date'] == y and out['to_date'] == y
     assert out['source'] == 'mbc-ops'
+
+
+# ── user-chosen source and period ────────────────────────────────────────────
+
+def test_choosing_both_skips_the_routing_call(monkeypatch):
+    """Nothing to infer means no LLM round trip at all."""
+    def boom(*a, **k):
+        raise AssertionError('routing model should not have been called')
+    monkeypatch.setattr(aiviews.ollama, 'chat', boom)
+
+    out = aiviews.route('anything', [], CFG, 'lueu-equipment', 'last_month')
+    assert out['source'] == 'lueu-equipment'
+    assert out['from_date'] == sources.resolve_period('last_month')[0]
+    assert out['date_col'] == sources.default_date_col('lueu-equipment')
+
+
+def test_choosing_only_the_source_pins_the_enum(monkeypatch):
+    seen = {}
+
+    def fake(messages, cfg=None, schema=None, model=None, **kw):
+        seen['schema'] = schema
+        return json.dumps({'source': 'mbc-tat', 'date_col': 'doc_date',
+                           'period': 'this_fy'})
+    monkeypatch.setattr(aiviews.ollama, 'chat', fake)
+
+    aiviews.route('q', [], CFG, want_source='mbc-tat')
+    assert seen['schema']['properties']['source']['enum'] == ['mbc-tat']
+    assert seen['schema']['properties']['period']['enum'] == sources.PERIODS
+
+
+def test_pinning_the_schema_does_not_mutate_the_shared_one(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'source': 'mbc-tat', 'date_col': 'doc_date', 'period': 'this_fy'}))
+    aiviews.route('q', [], CFG, want_source='mbc-tat', want_period=None)
+    assert aiviews.ROUTE_SCHEMA['properties']['source']['enum'] == sources.ALL_SOURCES

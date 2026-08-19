@@ -154,6 +154,16 @@
 .aic-hint button { background: none; border: none; color: var(--aic-dim); cursor: pointer; font: inherit; text-decoration: underline; }
 .aic-hint button:hover { color: var(--aic-accent); }
 
+.aic-pickers { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.aic-pickers label { font-family: var(--aic-mono); font-size: 10.5px; color: var(--aic-dim); }
+.aic-pickers select {
+    font-family: var(--aic-mono); font-size: 10.5px; color: var(--aic-ink);
+    background: #fff; border: 1px solid var(--aic-line); border-radius: 4px;
+    padding: 3px 6px; cursor: pointer; max-width: 210px;
+}
+.aic-pickers select:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 1px; }
+.aic-pickers .aic-fast { color: var(--aic-accent); font-family: var(--aic-mono); font-size: 10.5px; }
+
 /* ── empty state ───────────────────────────────────────────────────────── */
 .aic-open { padding: 44px 0 0; }
 .aic-open h3 { font-size: 19px; font-weight: 600; margin-bottom: 7px; color: var(--aic-ink); }
@@ -202,19 +212,19 @@
                 <div class="aic-seeds">
                     <button class="aic-seed" onclick="aicSeed(this)">
                         What was yesterday&rsquo;s IBRM discharge?
-                        <em>mbc-ops &middot; cargo tonnage by type</em>
+                        <em>mbc-ops &middot; sums BL Qty by Cargo Type</em>
                     </button>
                     <button class="aic-seed" onclick="aicSeed(this)">
-                        Monthly throughput by cargo type this financial year
-                        <em>mbc-ops &middot; grouped, charted</em>
+                        Monthly BL quantity by cargo type this financial year
+                        <em>mbc-ops &middot; grouped by Year-Month, charted</em>
                     </button>
                     <button class="aic-seed" onclick="aicSeed(this)">
-                        Which equipment logged the most delay minutes last month?
-                        <em>lueu-equipment &middot; delays by equipment</em>
+                        Which equipment handled the most quantity last month?
+                        <em>lueu-equipment &middot; sums Quantity by Equipment</em>
                     </button>
                     <button class="aic-seed" onclick="aicSeed(this)">
-                        Average barge turnaround time by cargo type
-                        <em>mbc-tat &middot; durations in minutes</em>
+                        Average TAT in minutes by cargo type
+                        <em>mbc-tat &middot; averages TAT (min)</em>
                     </button>
                 </div>
             </div>
@@ -223,6 +233,17 @@
 
     <div class="aic-dock">
         <div class="aic-col">
+            <div class="aic-pickers">
+                <label for="aic-source">Source</label>
+                <select id="aic-source" onchange="aicPickerChanged()">
+                    <option value="">Auto (model picks)</option>
+                </select>
+                <label for="aic-period">Period</label>
+                <select id="aic-period" onchange="aicPickerChanged()">
+                    <option value="">Auto (model picks)</option>
+                </select>
+                <span class="aic-fast" id="aic-fast" hidden>routing step skipped</span>
+            </div>
             <div class="aic-form">
                 <textarea id="aic-input" rows="1" placeholder="Ask about cargo, barges, equipment or delays&hellip;"></textarea>
                 <button class="aic-send" id="aic-send" onclick="aicAsk()" title="Send" aria-label="Send">&uarr;</button>
@@ -253,6 +274,42 @@ const aicReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 function aicEsc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
         c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const AIC_PERIOD_LABELS = {
+    today: 'Today', yesterday: 'Yesterday', last_7_days: 'Last 7 days',
+    this_month: 'This month', last_month: 'Last month',
+    this_fy: 'This financial year', last_fy: 'Last financial year',
+    all_time: 'All time'
+};
+
+async function aicLoadPickers() {
+    let meta;
+    try {
+        meta = await (await fetch('/api/module/RP01/ai-chat/sources')).json();
+    } catch (_) { return; }
+
+    const src = document.getElementById('aic-source');
+    meta.sources.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.key; o.textContent = s.key; o.title = s.description;
+        src.appendChild(o);
+    });
+
+    const per = document.getElementById('aic-period');
+    (meta.periods || []).filter(p => p !== 'custom').forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = AIC_PERIOD_LABELS[p] || p;
+        per.appendChild(o);
+    });
+}
+
+// Choosing both leaves nothing to infer, so the server skips the routing
+// call entirely. Worth saying out loud - it is the fastest path.
+function aicPickerChanged() {
+    const both = document.getElementById('aic-source').value &&
+                 document.getElementById('aic-period').value;
+    document.getElementById('aic-fast').hidden = !both;
 }
 
 function aicSeed(btn) {
@@ -325,7 +382,8 @@ function aicRail(d, wall) {
         '<b>' + aicEsc(d.source) + '</b>',
         d.date_col ? 'on ' + aicEsc(d.date_col) : '',
         d.from_date ? aicEsc(d.from_date) + ' → ' + aicEsc(d.to_date) : '',
-        d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : ''
+        d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : '',
+        d.routed_by === 'user' ? 'you chose this' : ''
     ].filter(Boolean).join(' · ');
 
     const counts = [
@@ -451,7 +509,12 @@ async function aicAsk() {
         const res = await fetch('/api/module/RP01/ai-chat/ask', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({question: question, history: aicHistory}),
+            body: JSON.stringify({
+                question: question,
+                history: aicHistory,
+                source: document.getElementById('aic-source').value,
+                period: document.getElementById('aic-period').value
+            }),
             signal: abort.signal
         });
         // A reverse proxy that gives up mid-request answers with an HTML error
@@ -523,6 +586,7 @@ async function aicAsk() {
 
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('aic-input');
+    aicLoadPickers();
     input.addEventListener('input', () => aicGrow(input));
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aicAsk(); }

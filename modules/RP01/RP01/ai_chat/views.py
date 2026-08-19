@@ -90,7 +90,22 @@ def trim_history(history, max_chars):
 
 # -- stage 1: route ----------------------------------------------------------
 
-def route(question, history_msgs, cfg):
+def route(question, history_msgs, cfg, want_source=None, want_period=None):
+    """Pick source + date column + period.
+
+    When the user has chosen both from the UI there is nothing to infer, so the
+    whole LLM call is skipped. When they chose one, the JSON schema is narrowed
+    to that single value, so constrained decoding cannot override them.
+    """
+    if want_source and want_period:
+        return _settle(want_source, None, want_period, {})
+
+    schema = dict(ROUTE_SCHEMA, properties=dict(ROUTE_SCHEMA['properties']))
+    if want_source:
+        schema['properties']['source'] = {'type': 'string', 'enum': [want_source]}
+    if want_period:
+        schema['properties']['period'] = {'type': 'string', 'enum': [want_period]}
+
     system = (
         "You route a question about port operations to exactly one data source.\n"
         "Today is " + date.today().isoformat() + ".\n\n"
@@ -107,24 +122,27 @@ def route(question, history_msgs, cfg):
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
-    out = json.loads(ollama.chat(msgs, cfg=cfg, schema=ROUTE_SCHEMA, num_predict=120))
+    out = json.loads(ollama.chat(msgs, cfg=cfg, schema=schema, num_predict=120))
+    return _settle(out.get('source'), out.get('date_col'),
+                   out.get('period'), out)
 
-    src = out.get('source')
+
+def _settle(src, date_col, period, out):
+    """Validate a routing decision and turn its named period into real dates."""
     if not sources.is_valid(src):
-        raise ValueError('Model picked a source that is not trusted: %r' % (src,))
+        raise ValueError('Not a trusted data source: %r' % (src,))
 
     if src == sources.PORT_OVERVIEW:
         return {'source': src, 'date_col': '', 'period': 'today',
                 'from_date': '', 'to_date': ''}
 
-    date_col = out.get('date_col')
     if date_col not in sources.valid_date_cols(src):
         date_col = sources.default_date_col(src)
 
     # Python owns the date arithmetic. A 3B model gets "yesterday" and financial
     # year boundaries wrong often enough that an off-by-one silently returns the
     # wrong answer, and a named period is far easier for it to pick correctly.
-    period = out.get('period') or 'this_fy'
+    period = period or 'this_fy'
     if period == 'custom':
         frm, to = out.get('from_date', ''), out.get('to_date', '')
         if not _ISO.match(frm or '') or not _ISO.match(to or ''):
@@ -142,18 +160,24 @@ def route(question, history_msgs, cfg):
 # -- stage 3: sql ------------------------------------------------------------
 
 def _sql_system(ddl, rows):
-    samples = json.dumps(rows[:3], default=str)[:1500]
+    # Kept deliberately tight: on CPU this stage is dominated by prompt
+    # ingestion, so every line of schema and every sample row costs seconds.
+    samples = json.dumps(rows[:2], default=str)[:600]
     return (
-        'You write exactly one SQLite SELECT over a single table named "data".\n\n'
-        + ddl + '\n\nSample rows: ' + samples + '\n\n'
+        'Write one SQLite SELECT over a table named "data".\n\n'
+        + ddl + '\n\nExample rows: ' + samples + '\n\n'
         'Rules:\n'
-        '- SQLite dialect. Double-quote every column name; most contain spaces.\n'
-        '- Never use a column that is not in the schema above.\n'
-        '- Aggregate when the question implies a total, average or breakdown.\n'
-        '- Add ORDER BY, and LIMIT when returning detail rows.\n'
-        '- The table is already filtered to the requested date range.\n\n'
-        'Also pick a chart. Use type "none" when the answer is a single number.\n'
-        'chart.x must be a column your SELECT outputs; chart.y must be numeric output columns.'
+        '- Double-quote every column name; most contain spaces.\n'
+        '- Use only columns listed above. Never invent one.\n'
+        '- Only SUM or AVG columns typed INTEGER or REAL. TEXT columns are labels: '
+        'GROUP BY them or COUNT them, never total them.\n'
+        '- "which/who/top/most/least" means GROUP BY the label column and ORDER BY '
+        'the measure DESC.\n'
+        '- The table is already filtered to the date range. Do not filter on dates '
+        'again unless the question asks for a breakdown over time.\n'
+        '- Alias every aggregate, e.g. SUM("Quantity") AS "Total Quantity".\n\n'
+        'Also pick a chart: type "none" when the answer is one number. chart.x must be '
+        'a column your SELECT outputs; chart.y must be numeric output columns.'
     )
 
 
@@ -183,7 +207,7 @@ def generate_and_run(question, history_msgs, conn, ddl, rows, cfg):
     last_err = None
     for attempt in (1, 2):
         out = json.loads(ollama.chat(msgs, cfg=cfg, schema=SQL_SCHEMA, model=model,
-                                     num_predict=500))
+                                     num_predict=300))
         sql = out.get('sql', '')
         try:
             cols, result = sandbox.run(conn, sql, limit=cfg['max_result_rows'])
@@ -225,8 +249,9 @@ def narrate(question, history_msgs, context, cfg):
         '- Add one comparison only when the data shows it: the largest contributor, or '
         'the direction of travel across periods.\n'
         '- If a breakdown runs to more than six rows, give the total and name the top three.\n'
-        '- If the data is empty, say what was searched and what to try instead. '
-        'Do not apologise.\n'
+        '- If the table below has rows, answer from them. Only say there is no data '
+        'when the table is genuinely empty, and then say what was searched and what '
+        'to try instead. Do not apologise.\n'
         '- Never state a number that is not in the data, and never estimate.\n\n'
         + context
     )
@@ -285,8 +310,12 @@ def ai_chat_index():
 @bp.route('/api/module/RP01/ai-chat/sources')
 @login_required
 def ai_chat_sources():
-    return jsonify({'sources': sources.ALL_SOURCES,
-                    'catalog': sources.catalog_prompt()})
+    return jsonify({
+        'sources': [{'key': k, 'description': sources.DESCRIPTIONS[k]}
+                    for k in sources.ALL_SOURCES],
+        'periods': sources.PERIODS,
+        'catalog': sources.catalog_prompt(),
+    })
 
 
 @bp.route('/api/module/RP01/ai-chat/ask', methods=['POST'])
@@ -301,6 +330,13 @@ def ai_chat_ask():
     if not question:
         return jsonify({'error': 'question is required'}), 400
 
+    want_source = (body.get('source') or '').strip() or None
+    want_period = (body.get('period') or '').strip() or None
+    if want_source and not sources.is_valid(want_source):
+        return jsonify({'error': 'Unknown data source: %s' % want_source}), 400
+    if want_period and want_period not in sources.PERIODS:
+        return jsonify({'error': 'Unknown period: %s' % want_period}), 400
+
     history, history_trimmed = trim_history(body.get('history'), cfg['max_history_chars'])
     timing = {}
     source_rows = None
@@ -309,8 +345,9 @@ def ai_chat_ask():
 
     try:
         t = time.time()
-        picked = route(question, history, cfg)
+        picked = route(question, history, cfg, want_source, want_period)
         timing['route'] = round(time.time() - t, 2)
+        routed_by = 'user' if (want_source and want_period) else 'model'
 
         if picked['source'] == sources.PORT_OVERVIEW:
             t = time.time()
@@ -336,7 +373,7 @@ def ai_chat_ask():
                                                         picked['from_date'], picked['to_date'])),
                     row_count=0, rows=[], columns=[], chart=None, chart_error=None,
                     sql=None, sql_retried=False, source_rows=0, timing=timing,
-                    history_trimmed=history_trimmed))
+                    routed_by=routed_by, history_trimmed=history_trimmed))
             if len(rows) > cfg['max_rows']:
                 return jsonify(dict(
                     picked, timing=timing,
@@ -376,6 +413,7 @@ def ai_chat_ask():
         chart=result['chart'],
         chart_error=result['chart_error'],
         source_rows=source_rows,
+        routed_by=routed_by,
         history_trimmed=history_trimmed,
         timing=timing,
     ))
