@@ -24,6 +24,7 @@ from .report_24_hours import views as _report_24_hours_views
 from .daily_progress_report import views as _daily_progress_report_views
 from .two_hour_report import views as _two_hour_report_views  # noqa: registers two-hour-report routes on bp
 from .port_overview import views as _port_overview_views  # noqa: registers port-overview routes on bp
+from .ai_chat import views as _ai_chat_views  # noqa: registers ai-chat routes on bp
 
 def login_required(f):
     @wraps(f)

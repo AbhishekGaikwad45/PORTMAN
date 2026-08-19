@@ -15,6 +15,7 @@
     <button class="tab-btn" onclick="showTab('vessels')">Vessel Closure</button>
     <button class="tab-btn" onclick="showTab('mbc')">MBC Approval</button>
     <button class="tab-btn" onclick="showTab('gst')">GST Config</button>
+    <button class="tab-btn" onclick="showTab('aichat')">AI Config</button>
     <button class="tab-btn" onclick="showTab('sap')">SAP Config</button>
     <button class="tab-btn" onclick="showTab('saptokens')">SAP Tokens</button>
     <button class="tab-btn" onclick="showTab('sapplay')">SAP Playground</button>
@@ -207,6 +208,46 @@
                 </div>
                 <div class="config-row">
                     <label>Email:<br><input type="text" id="gstSellerEmail" placeholder="Optional" style="width:100%;padding:6px;"></label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="aichat-tab" class="tab-content">
+    <div class="admin-section">
+        <h3>AI Chat / Ollama</h3>
+        <div class="toolbar">
+            <button class="btn btn-save" onclick="saveAiConfig()">Save AI Config</button>
+            <button class="btn" onclick="testAiConnection()">Test Connection</button>
+        </div>
+        <div class="config-panel" style="display:block;">
+            <div class="config-group">
+                <div class="config-row">
+                    <label><input type="checkbox" id="aiEnabled"> Enable AI chat (the ask endpoint returns 503 while this is off)</label>
+                </div>
+                <div class="config-row">
+                    <label>Ollama Base URL:<br><input type="text" id="aiBaseUrl" placeholder="http://10.0.0.5:11434" style="width:100%;padding:6px;"></label>
+                    <div style="font-size:11px;color:#c0392b;margin-top:4px;">
+                        Ollama has no authentication. This host must be reachable only from this app server.
+                    </div>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <label>Model (routing + narration):<br><input type="text" id="aiModel" placeholder="llama3.2:3b" style="width:100%;padding:6px;"></label>
+                    <label>SQL Model (blank = same):<br><input type="text" id="aiSqlModel" placeholder="qwen2.5-coder:7b" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>Keep Alive:<br><input type="text" id="aiKeepAlive" placeholder="30m" style="width:100%;padding:6px;"></label>
+                    <label>Timeout (s):<br><input type="number" id="aiTimeout" placeholder="180" style="width:100%;padding:6px;"></label>
+                    <label>Temperature:<br><input type="number" step="0.1" id="aiTemperature" placeholder="0" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                    <label>Max Source Rows:<br><input type="number" id="aiMaxRows" placeholder="50000" style="width:100%;padding:6px;"></label>
+                    <label>Max Result Rows:<br><input type="number" id="aiMaxResultRows" placeholder="5000" style="width:100%;padding:6px;"></label>
+                    <label>Max History Chars:<br><input type="number" id="aiMaxHistoryChars" placeholder="12000" style="width:100%;padding:6px;"></label>
+                </div>
+                <div class="config-row">
+                    <div id="aiTestResult" style="font-size:12px;font-family:monospace;white-space:pre-wrap;"></div>
                 </div>
             </div>
         </div>
@@ -1036,6 +1077,7 @@ function showTab(tab) {
     if (tab === 'vessels') loadLdudVessels();
     if (tab === 'mbc') loadMbcApprovals();
     if (tab === 'gst') loadGstConfig();
+    if (tab === 'aichat') loadAiConfig();
     if (tab === 'sap') loadSapConfig();
     if (tab === 'banks') loadBankAccounts();
     if (tab === 'config') loadAllConfigs();
@@ -1384,6 +1426,74 @@ async function loadGstConfig() {
     document.getElementById('gstSellerPincode').value = config.seller_pincode || '';
     document.getElementById('gstSellerPhone').value = config.seller_phone || '';
     document.getElementById('gstSellerEmail').value = config.seller_email || '';
+}
+
+const AI_DEFAULTS = {
+    base_url: 'http://localhost:11434', model: 'llama3.2:3b', sql_model: '',
+    keep_alive: '30m', timeout: 180, temperature: 0, max_rows: 50000,
+    max_result_rows: 5000, max_history_chars: 12000, enabled: false
+};
+
+async function loadAiConfig() {
+    const saved = await (await fetch('/admin/api/config/AICHAT')).json();
+    const c = Object.assign({}, AI_DEFAULTS, saved);
+    document.getElementById('aiEnabled').checked = !!c.enabled;
+    document.getElementById('aiBaseUrl').value = c.base_url;
+    document.getElementById('aiModel').value = c.model;
+    document.getElementById('aiSqlModel').value = c.sql_model;
+    document.getElementById('aiKeepAlive').value = c.keep_alive;
+    document.getElementById('aiTimeout').value = c.timeout;
+    document.getElementById('aiTemperature').value = c.temperature;
+    document.getElementById('aiMaxRows').value = c.max_rows;
+    document.getElementById('aiMaxResultRows').value = c.max_result_rows;
+    document.getElementById('aiMaxHistoryChars').value = c.max_history_chars;
+}
+
+function _aiNum(id, fallback) {
+    const v = parseFloat(document.getElementById(id).value);
+    return isNaN(v) ? fallback : v;
+}
+
+async function saveAiConfig() {
+    const config = {
+        enabled: document.getElementById('aiEnabled').checked,
+        base_url: document.getElementById('aiBaseUrl').value.trim() || AI_DEFAULTS.base_url,
+        model: document.getElementById('aiModel').value.trim() || AI_DEFAULTS.model,
+        sql_model: document.getElementById('aiSqlModel').value.trim(),
+        keep_alive: document.getElementById('aiKeepAlive').value.trim() || AI_DEFAULTS.keep_alive,
+        timeout: _aiNum('aiTimeout', AI_DEFAULTS.timeout),
+        temperature: _aiNum('aiTemperature', AI_DEFAULTS.temperature),
+        max_rows: _aiNum('aiMaxRows', AI_DEFAULTS.max_rows),
+        max_result_rows: _aiNum('aiMaxResultRows', AI_DEFAULTS.max_result_rows),
+        max_history_chars: _aiNum('aiMaxHistoryChars', AI_DEFAULTS.max_history_chars)
+    };
+    const res = await fetch('/admin/api/config/AICHAT/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(config)
+    });
+    alert(res.ok ? 'AI config saved!' : 'Failed to save AI config');
+}
+
+async function testAiConnection() {
+    const out = document.getElementById('aiTestResult');
+    out.textContent = 'Connecting...';
+    try {
+        const res = await fetch('/admin/api/aichat/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({base_url: document.getElementById('aiBaseUrl').value.trim()})
+        });
+        const d = await res.json();
+        out.textContent = d.success
+            ? 'OK - ' + d.base_url + '
+Installed models:
+  ' + (d.models.join('
+  ') || '(none)')
+            : 'FAILED - ' + d.error;
+    } catch (e) {
+        out.textContent = 'FAILED - ' + e;
+    }
 }
 
 async function saveGstConfig() {

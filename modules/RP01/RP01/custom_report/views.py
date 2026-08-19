@@ -172,16 +172,20 @@ def _build_date_where(source, date_col, from_date, to_date):
     return clause, (from_val, to_val)
 
 
-@bp.route('/api/module/RP01/pivot/data/<source>')
-@login_required
-def pivot_data(source):
-    if source not in VALID_SOURCES:
-        return jsonify({'error': 'Unknown data source'}), 400
+def fetch_source_rows(source, date_col=None, from_date=None, to_date=None):
+    """Run a Custom Report data source and return plain dict rows.
 
-    from_date, to_date = _default_dates()
-    from_date = request.args.get('from_date', from_date)
-    to_date   = request.args.get('to_date',   to_date)
-    date_col  = request.args.get('date_col',  DATE_COL_DEFAULTS.get(source, ''))
+    Split out of the pivot_data view so other callers (RP01 AI chat) reuse
+    these trusted, parameterized queries instead of writing their own SQL.
+    Raises ValueError on an unknown source.
+    """
+    if source not in VALID_SOURCES:
+        raise ValueError('Unknown data source')
+
+    default_from, default_to = _default_dates()
+    from_date = from_date or default_from
+    to_date   = to_date   or default_to
+    date_col  = date_col  or DATE_COL_DEFAULTS.get(source, '')
 
     where_clause, where_params = _build_date_where(source, date_col, from_date, to_date)
 
@@ -536,6 +540,21 @@ def pivot_data(source):
             })
         rows = processed
 
+    return rows
+
+
+@bp.route('/api/module/RP01/pivot/data/<source>')
+@login_required
+def pivot_data(source):
+    try:
+        rows = fetch_source_rows(
+            source,
+            date_col=request.args.get('date_col'),
+            from_date=request.args.get('from_date'),
+            to_date=request.args.get('to_date'),
+        )
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     return jsonify(rows)
 
 
