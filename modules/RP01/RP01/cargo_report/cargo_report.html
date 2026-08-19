@@ -649,7 +649,7 @@
 
                     <!-- NEW -->
                     <th style="padding:12px;border:1px solid #cfd4dc;">
-                        Bill No.
+                        Invoice No.
                     </th>
 
                     <!-- NEW -->
@@ -775,7 +775,7 @@ $(document).ready(function () {
                 item.flag || '-',
 
                 // NEW
-                item.bill_number || 'NA',
+                item.invoice_number || 'NA',
 
                 // NEW: rendered as a small status pill
                 `<span class="status-pill">${item.status || '-'}</span>`
@@ -800,7 +800,7 @@ $(document).ready(function () {
 
             const cells = $(this).find('td');
 
-            // Was 13 columns, now 15 after adding Bill No. and Status.
+            // Was 13 columns, now 15 after adding Invoice No. and Status.
             // Indices below (1, 2, 7) are unaffected since the new
             // columns were appended at the end.
             if (cells.length < 15) return;
