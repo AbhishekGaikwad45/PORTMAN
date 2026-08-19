@@ -3,188 +3,516 @@
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <style>
-    .aic-wrap { padding:14px; max-width:1100px; }
-    .aic-msg { border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; line-height:1.55; }
-    .aic-q { background:#ebf8ff; border:1px solid #bee3f8; }
-    .aic-a { background:#f7fafc; border:1px solid #e2e8f0; }
-    .aic-err { background:#fff5f5; border:1px solid #feb2b2; color:#742a2a; }
-    .aic-meta { font-size:11px; color:#718096; margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; }
-    .aic-meta b { color:#4a5568; font-weight:600; }
-    .aic-wrap details { margin-top:8px; }
-    .aic-wrap summary { cursor:pointer; font-size:11px; color:#3182ce; }
-    .aic-sql { background:#1a202c; color:#e2e8f0; padding:10px; border-radius:4px;
-               font-family:ui-monospace,Consolas,monospace; font-size:11px;
-               white-space:pre-wrap; overflow-x:auto; margin-top:6px; }
-    .aic-tbl { border-collapse:collapse; font-size:11px; margin-top:6px; width:100%; }
-    .aic-tbl th { background:#edf2f7; text-align:left; }
-    .aic-tbl th, .aic-tbl td { border:1px solid #e2e8f0; padding:3px 7px; }
-    .aic-scroll { max-height:320px; overflow:auto; }
-    .aic-chart { margin-top:10px; background:#fff; border:1px solid #e2e8f0;
-                 border-radius:4px; padding:8px; height:300px; }
-    .dark-theme .aic-a  { background:#2d3748; border-color:#4a5568; }
-    .dark-theme .aic-q  { background:#2a4365; border-color:#2c5282; }
-    .dark-theme .aic-tbl th { background:#4a5568; }
-    .dark-theme .aic-chart { background:#2d3748; border-color:#4a5568; }
+/* ── AI chat ──────────────────────────────────────────────────────────────
+   Conversation column like Claude/ChatGPT, with one domain addition: every
+   answer carries a monospace provenance rail. The numbers here end up in
+   reports, so where they came from is part of the answer, not a footnote. */
+
+/* Committed to a light surface on purpose: the charts, the SQL slab and the
+   provenance rail are all tuned against it, and the palette was validated for
+   colour-vision separation on this one surface rather than two. Stays light
+   even when the rest of the app is toggled dark. */
+.aic {
+    --aic-accent:  #205a9c;
+    --aic-ink:     #1f2733;
+    --aic-dim:     #6b7787;
+    --aic-line:    #e2e8f0;
+    --aic-surface: #ffffff;
+    --aic-sunk:    #f2f5f9;
+    --aic-flag:    #b45309;
+    --aic-col:     760px;
+    --aic-mono:    ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 108px);
+    min-height: 420px;
+    background: var(--aic-surface);
+    color: var(--aic-ink);
+}
+.aic-dock { background: var(--aic-surface); }
+.aic-form { background: #f7f9fc; }
+
+.aic-scrollport { flex: 1; overflow-y: auto; scroll-behavior: smooth; padding: 4px 16px 28px; }
+.aic-col { max-width: var(--aic-col); margin: 0 auto; }
+
+/* ── turns ─────────────────────────────────────────────────────────────── */
+.aic-turn { animation: aic-rise .28s cubic-bezier(.22,.8,.3,1) both; }
+@keyframes aic-rise { from { opacity: 0; transform: translateY(8px); } }
+
+.aic-ask {
+    display: flex; justify-content: flex-end;
+    margin: 22px 0 16px;
+}
+.aic-ask span {
+    background: var(--aic-accent); color: #fff;
+    padding: 8px 14px; border-radius: 14px 14px 3px 14px;
+    font-size: 13px; line-height: 1.5; max-width: 78%;
+}
+.aic-say { font-size: 15px; line-height: 1.68; color: var(--aic-ink); }
+.aic-say p { margin: 0 0 10px; }
+.aic-say p:last-child { margin-bottom: 0; }
+
+/* ── provenance rail: the signature element ────────────────────────────── */
+.aic-rail {
+    margin-top: 14px; padding-left: 11px;
+    border-left: 2px solid var(--aic-line);
+    font-family: var(--aic-mono); font-size: 10.5px; line-height: 1.85;
+    color: var(--aic-dim); letter-spacing: .01em;
+}
+.aic-rail b { color: var(--aic-ink); font-weight: 600; }
+.aic-rail .aic-flag { color: var(--aic-flag); font-weight: 600; }
+.aic-rail-row { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+
+/* ── disclosure ────────────────────────────────────────────────────────── */
+.aic-tools { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.aic-tool {
+    font-family: var(--aic-mono); font-size: 10.5px;
+    background: none; border: 1px solid var(--aic-line); color: var(--aic-dim);
+    border-radius: 3px; padding: 3px 9px; cursor: pointer;
+    transition: border-color .15s, color .15s;
+}
+.aic-tool:hover  { border-color: var(--aic-accent); color: var(--aic-accent); }
+.aic-tool[aria-expanded="true"] { border-color: var(--aic-accent); color: var(--aic-accent); }
+.aic-tool:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 1px; }
+
+.aic-panel { display: none; margin-top: 8px; animation: aic-open .2s ease both; }
+.aic-panel.open { display: block; }
+@keyframes aic-open { from { opacity: 0; transform: translateY(-3px); } }
+
+.aic-sql {
+    background: #16202e; color: #d6e2f0; border-radius: 4px;
+    padding: 11px 13px; font-family: var(--aic-mono); font-size: 11px;
+    line-height: 1.65; white-space: pre-wrap; overflow-x: auto;
+}
+.aic-grid { max-height: 340px; overflow: auto; border: 1px solid var(--aic-line); border-radius: 4px; }
+.aic-grid table { border-collapse: collapse; width: 100%; font-family: var(--aic-mono); font-size: 11px; }
+.aic-grid th {
+    position: sticky; top: 0; background: var(--aic-sunk);
+    text-align: left; font-weight: 600; white-space: nowrap;
+}
+.aic-grid th, .aic-grid td { padding: 5px 10px; border-bottom: 1px solid var(--aic-line); }
+.aic-grid td { white-space: nowrap; }
+.aic-grid tr:last-child td { border-bottom: none; }
+.aic-figure { margin-top: 12px; height: 300px; }
+.aic-note { font-size: 11px; color: var(--aic-flag); margin-top: 8px; font-family: var(--aic-mono); }
+.aic-fail {
+    border-left: 2px solid #c53030; padding: 2px 0 2px 11px;
+    font-size: 13px; line-height: 1.6; color: var(--aic-ink);
+}
+.aic-fail code { font-family: var(--aic-mono); font-size: 11px; color: var(--aic-dim); }
+
+/* ── waiting ───────────────────────────────────────────────────────────── */
+.aic-wait { display: flex; align-items: center; gap: 10px; }
+.aic-orbit { display: inline-flex; gap: 4px; }
+.aic-orbit i {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--aic-accent); opacity: .3;
+    animation: aic-pulse 1.25s ease-in-out infinite;
+}
+.aic-orbit i:nth-child(2) { animation-delay: .16s; }
+.aic-orbit i:nth-child(3) { animation-delay: .32s; }
+@keyframes aic-pulse { 40% { opacity: 1; transform: translateY(-3px); } }
+.aic-elapsed { font-family: var(--aic-mono); font-size: 11px; color: var(--aic-dim); }
+.aic-skel { margin-top: 12px; display: grid; gap: 7px; }
+.aic-skel span {
+    height: 11px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--aic-sunk) 25%, var(--aic-line) 50%, var(--aic-sunk) 75%);
+    background-size: 220% 100%;
+    animation: aic-sweep 1.5s linear infinite;
+}
+.aic-skel span:nth-child(2) { width: 88%; }
+.aic-skel span:nth-child(3) { width: 54%; }
+@keyframes aic-sweep { to { background-position: -220% 0; } }
+
+/* ── composer ──────────────────────────────────────────────────────────── */
+.aic-dock { border-top: 1px solid var(--aic-line); padding: 12px 16px 14px; }
+.aic-form {
+    display: flex; gap: 8px; align-items: flex-end;
+    border: 1px solid var(--aic-line); border-radius: 10px;
+    padding: 7px 7px 7px 13px;
+    transition: border-color .15s, box-shadow .15s;
+}
+.aic-form:focus-within { border-color: var(--aic-accent); box-shadow: 0 0 0 3px rgba(32,90,156,.11); }
+.aic-form textarea {
+    flex: 1; border: none; background: none; resize: none;
+    font: inherit; font-size: 14px; line-height: 1.5; color: var(--aic-ink);
+    max-height: 148px; padding: 5px 0;
+}
+.aic-form textarea:focus { outline: none; }
+.aic-send {
+    border: none; border-radius: 7px; background: var(--aic-accent); color: #fff;
+    width: 34px; height: 34px; cursor: pointer; flex-shrink: 0;
+    font-size: 15px; line-height: 1; transition: opacity .15s;
+}
+.aic-send:disabled { opacity: .35; cursor: default; }
+.aic-send:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 2px; }
+.aic-hint {
+    max-width: var(--aic-col); margin: 7px auto 0;
+    font-size: 10.5px; color: var(--aic-dim); font-family: var(--aic-mono);
+    display: flex; justify-content: space-between; gap: 12px;
+}
+.aic-hint button { background: none; border: none; color: var(--aic-dim); cursor: pointer; font: inherit; text-decoration: underline; }
+.aic-hint button:hover { color: var(--aic-accent); }
+
+/* ── empty state ───────────────────────────────────────────────────────── */
+.aic-open { padding: 44px 0 0; }
+.aic-open h3 { font-size: 19px; font-weight: 600; margin-bottom: 7px; color: var(--aic-ink); }
+.aic-open p  { font-size: 13px; color: var(--aic-dim); line-height: 1.6; margin-bottom: 20px; }
+.aic-seeds { display: grid; gap: 7px; }
+.aic-seed {
+    text-align: left; background: none; cursor: pointer;
+    border: 1px solid var(--aic-line); border-radius: 7px;
+    padding: 10px 13px; font: inherit; font-size: 13px; color: var(--aic-ink);
+    transition: border-color .15s, background .15s;
+}
+.aic-seed:hover { border-color: var(--aic-accent); background: var(--aic-sunk); }
+.aic-seed:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 1px; }
+.aic-seed em { display: block; font-style: normal; font-family: var(--aic-mono);
+               font-size: 10px; color: var(--aic-dim); margin-top: 3px; }
+
+@media (max-width: 640px) {
+    .aic-say { font-size: 14px; }
+    .aic-ask span { max-width: 90%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .aic-turn, .aic-panel { animation: none; }
+    .aic-orbit i, .aic-skel span { animation-duration: 0s; }
+    .aic-scrollport { scroll-behavior: auto; }
+}
 </style>
 {% endblock %}
+
 {% block content %}
 <div class="module-header">
-    <h2>AI Chat <span style="font-size:12px;font-weight:400;color:#e53e3e;">— internal test page, admin only</span></h2>
+    <h2>AI Chat</h2>
     <span class="module-code">RP01</span>
+    <span style="font-size:10px;color:#a0aec0;">internal test page &middot; admin only</span>
 </div>
 
-<div class="aic-wrap">
-    <div style="background:#fffbeb;border:1px solid #f6e05e;color:#744210;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px;">
-        Answers come from a language model. <b>Always read the generated SQL</b> before trusting a number.
-        Configure the server in <a href="/admin/">Admin &rarr; AI Config</a>.
+<div class="aic">
+    <div class="aic-scrollport" id="aic-port">
+        <div class="aic-col" id="aic-log">
+            <div class="aic-open" id="aic-open">
+                <h3>Ask about port performance</h3>
+                <p>
+                    Questions run against MBC, Vessel&ndash;Barge and LUEU records. Every answer
+                    shows the source, date range and the SQL behind it &mdash; read the query
+                    before you use a number.
+                </p>
+                <div class="aic-seeds">
+                    <button class="aic-seed" onclick="aicSeed(this)">
+                        What was yesterday&rsquo;s IBRM discharge?
+                        <em>mbc-ops &middot; cargo tonnage by type</em>
+                    </button>
+                    <button class="aic-seed" onclick="aicSeed(this)">
+                        Monthly throughput by cargo type this financial year
+                        <em>mbc-ops &middot; grouped, charted</em>
+                    </button>
+                    <button class="aic-seed" onclick="aicSeed(this)">
+                        Which equipment logged the most delay minutes last month?
+                        <em>lueu-equipment &middot; delays by equipment</em>
+                    </button>
+                    <button class="aic-seed" onclick="aicSeed(this)">
+                        Average barge turnaround time by cargo type
+                        <em>mbc-tat &middot; durations in minutes</em>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div id="aic-log"></div>
-
-    <div style="display:flex;gap:8px;margin-top:14px;">
-        <input type="text" id="aic-input" placeholder="e.g. total IBRM discharged this financial year by month"
-               style="flex:1;padding:9px 12px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;"
-               onkeydown="if(event.key==='Enter')aicAsk()">
-        <button id="aic-send" onclick="aicAsk()"
-                style="background:#3182ce;color:#fff;border:none;padding:9px 20px;border-radius:4px;cursor:pointer;font-size:13px;">Ask</button>
-        <button onclick="aicReset()"
-                style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:9px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Clear</button>
+    <div class="aic-dock">
+        <div class="aic-col">
+            <div class="aic-form">
+                <textarea id="aic-input" rows="1" placeholder="Ask about cargo, barges, equipment or delays&hellip;"></textarea>
+                <button class="aic-send" id="aic-send" onclick="aicAsk()" title="Send" aria-label="Send">&uarr;</button>
+            </div>
+        </div>
+        <div class="aic-hint">
+            <span>Enter sends &middot; Shift+Enter for a new line</span>
+            <button onclick="aicClear()">Clear conversation</button>
+        </div>
     </div>
-    <div id="aic-status" style="font-size:11px;color:#718096;margin-top:6px;min-height:16px;"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// Categorical order is fixed and never cycled; validated for CVD separation
+// against both surfaces. A 7th series folds into whatever SQL returned - the
+// table below the chart stays the source of truth.
+const AIC_HUES = ['#205a9c', '#e18e35', '#7c3aed', '#c05621', '#3182ce', '#97266d'];
+
 let aicHistory = [];
-let aicCharts = [];
+let aicCharts  = [];
+let aicSeq     = 0;
+let aicBusy    = false;
+
+const aicReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function aicEsc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
         c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function aicReset() {
+function aicSeed(btn) {
+    const input = document.getElementById('aic-input');
+    input.value = btn.childNodes[0].textContent.trim();
+    input.focus();
+    aicAsk();
+}
+
+function aicClear() {
     aicHistory = [];
     aicCharts.forEach(c => c.destroy());
     aicCharts = [];
-    document.getElementById('aic-log').innerHTML = '';
-    document.getElementById('aic-status').textContent = '';
+    aicSeq = 0;
+    document.getElementById('aic-log').innerHTML =
+        document.getElementById('aic-open') ? '' : '';
+    location.reload();
 }
 
-function aicAppend(html) {
+function aicGrow(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 148) + 'px';
+}
+
+function aicScroll() {
+    const port = document.getElementById('aic-port');
+    port.scrollTop = port.scrollHeight;
+}
+
+function aicAdd(html) {
+    const open = document.getElementById('aic-open');
+    if (open) open.remove();
     const log = document.getElementById('aic-log');
     log.insertAdjacentHTML('beforeend', html);
-    log.lastElementChild.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    aicScroll();
+    return log.lastElementChild;
 }
 
-function aicTable(columns, rows) {
-    if (!columns.length) return '';
+// Reveal the answer a word at a time. The text already arrived in full - this
+// is presentation, not fake streaming - so it stays fast and is skipped
+// outright when the reader has asked for reduced motion.
+function aicReveal(el, text) {
+    const paras = text.split(/\n{2,}/).filter(Boolean);
+    const html = paras.map(p => '<p>' + aicEsc(p).replace(/\n/g, '<br>') + '</p>').join('');
+    if (aicReduced) { el.innerHTML = html; return Promise.resolve(); }
+
+    el.innerHTML = html;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push({node: walker.currentNode, text: walker.currentNode.nodeValue});
+    nodes.forEach(n => { n.node.nodeValue = ''; });
+
+    return new Promise(resolve => {
+        let i = 0;
+        (function step() {
+            if (i >= nodes.length) return resolve();
+            const n = nodes[i];
+            const words = n.text.split(/(\s+)/);
+            let w = 0;
+            (function word() {
+                if (w >= words.length) { i++; return step(); }
+                n.node.nodeValue += words[w++];
+                if (w % 3 === 0) aicScroll();
+                setTimeout(word, 11);
+            })();
+        })();
+    });
+}
+
+function aicRail(d, wall) {
+    const t = d.timing || {};
+    const stages = Object.keys(t).map(k => k + ' ' + t[k] + 's').join('  ');
+    const bits = [
+        '<b>' + aicEsc(d.source) + '</b>',
+        d.date_col ? 'on ' + aicEsc(d.date_col) : '',
+        d.from_date ? aicEsc(d.from_date) + ' → ' + aicEsc(d.to_date) : '',
+        d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : ''
+    ].filter(Boolean).join(' · ');
+
+    const counts = [
+        d.source_rows != null ? d.source_rows.toLocaleString() + ' scanned' : '',
+        d.row_count   != null ? d.row_count.toLocaleString() + ' returned' : '',
+        wall.toFixed(1) + 's total'
+    ].filter(Boolean).join(' · ');
+
+    const flags = [
+        d.sql_retried     ? '<span class="aic-flag">SQL retried once</span>' : '',
+        d.history_trimmed ? '<span class="aic-flag">earlier turns trimmed</span>' : ''
+    ].filter(Boolean).join(' · ');
+
+    return '<div class="aic-rail">' +
+        '<div class="aic-rail-row">' + bits + '</div>' +
+        '<div class="aic-rail-row">' + counts + (stages ? ' · ' + stages : '') + '</div>' +
+        (flags ? '<div class="aic-rail-row">' + flags + '</div>' : '') +
+    '</div>';
+}
+
+function aicGrid(columns, rows) {
     const head = columns.map(c => '<th>' + aicEsc(c) + '</th>').join('');
-    const body = rows.slice(0, 200).map(
+    const body = rows.slice(0, 300).map(
         r => '<tr>' + r.map(v => '<td>' + aicEsc(v) + '</td>').join('') + '</tr>').join('');
-    const more = rows.length > 200 ? '<div style="font-size:11px;color:#718096;">showing first 200 of ' + rows.length + ' rows</div>' : '';
-    return '<div class="aic-scroll"><table class="aic-tbl"><thead><tr>' + head +
-           '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
+    const over = rows.length > 300
+        ? '<div class="aic-note">first 300 of ' + rows.length.toLocaleString() + ' rows</div>' : '';
+    return '<div class="aic-grid"><table><thead><tr>' + head +
+           '</tr></thead><tbody>' + body + '</tbody></table></div>' + over;
 }
 
-// Chart.js is built from a validated {type,x,y[],title} spec, never from
+function aicToggle(btn) {
+    const panel = btn.closest('.aic-turn').querySelector('#' + btn.dataset.panel);
+    const open = panel.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// Chart.js is built from the validated {type,x,y[],title} spec, never from
 // model-supplied config.
-function aicDrawChart(canvas, spec, columns, rows) {
-    const xi = columns.indexOf(spec.x);
-    const palette = ['#3182ce', '#38a169', '#dd6b20', '#805ad5', '#e53e3e', '#319795'];
-    const datasets = spec.y.map((col, i) => ({
+function aicChart(canvas, spec, columns, rows) {
+    const xi   = columns.indexOf(spec.x);
+    const ink  = '#6b7787';
+    const grid = 'rgba(113,128,150,.14)';
+    const round = spec.type === 'bar' ? {radius: 4, borderSkipped: 'start'} : {};
+    const pie = spec.type === 'pie' || spec.type === 'doughnut';
+
+    const datasets = spec.y.map((col, i) => Object.assign({
         label: col,
         data: rows.map(r => Number(r[columns.indexOf(col)])),
-        backgroundColor: spec.type === 'pie' || spec.type === 'doughnut'
-            ? rows.map((_, j) => palette[j % palette.length])
-            : palette[i % palette.length],
-        borderColor: palette[i % palette.length],
-        borderWidth: spec.type === 'line' ? 2 : 1,
+        backgroundColor: pie ? rows.map((_, j) => AIC_HUES[j % AIC_HUES.length])
+                             : AIC_HUES[i % AIC_HUES.length],
+        borderColor: pie ? '#fff' : AIC_HUES[i % AIC_HUES.length],
+        borderWidth: pie ? 2 : (spec.type === 'line' ? 2 : 0),
+        pointRadius: spec.type === 'line' ? 0 : 4,
+        pointHoverRadius: 5,
+        tension: .25,
         fill: false
-    }));
+    }, round));
+
     aicCharts.push(new Chart(canvas, {
         type: spec.type,
         data: {labels: rows.map(r => String(r[xi])), datasets: datasets},
         options: {
             responsive: true, maintainAspectRatio: false,
-            plugins: {title: {display: !!spec.title, text: spec.title}}
+            animation: aicReduced ? false : {duration: 480, easing: 'easeOutQuart'},
+            interaction: {mode: pie ? 'nearest' : 'index', intersect: false},
+            plugins: {
+                title: {display: !!spec.title, text: spec.title, color: ink,
+                        font: {size: 12, weight: '600'}, padding: {bottom: 10}},
+                legend: {display: spec.y.length > 1 || pie, position: 'bottom',
+                         labels: {color: ink, boxWidth: 10, boxHeight: 10,
+                                  usePointStyle: true, pointStyle: 'circle',
+                                  font: {size: 11}}},
+                tooltip: {backgroundColor: '#2d3748',
+                          padding: 9, cornerRadius: 4, titleFont: {size: 11},
+                          bodyFont: {size: 11}, displayColors: true, boxWidth: 8}
+            },
+            scales: pie ? {} : {
+                x: {ticks: {color: ink, font: {size: 10}, maxRotation: 0, autoSkipPadding: 14},
+                    grid: {display: false}, border: {color: grid}},
+                y: {beginAtZero: true,
+                    ticks: {color: ink, font: {size: 10},
+                            callback: v => Number(v).toLocaleString()},
+                    grid: {color: grid, drawTicks: false}, border: {display: false}}
+            }
         }
     }));
 }
 
 async function aicAsk() {
+    if (aicBusy) return;
     const input = document.getElementById('aic-input');
-    const btn = document.getElementById('aic-send');
-    const status = document.getElementById('aic-status');
+    const send  = document.getElementById('aic-send');
     const question = input.value.trim();
     if (!question) return;
 
+    aicBusy = true;
+    send.disabled = true;
     input.value = '';
-    btn.disabled = true;
-    status.textContent = 'Thinking — routing, querying, then writing the answer. On CPU this takes 20-45s.';
-    aicAppend('<div class="aic-msg aic-q">' + aicEsc(question) + '</div>');
+    aicGrow(input);
+
+    aicAdd('<div class="aic-turn aic-ask"><span>' + aicEsc(question) + '</span></div>');
+
+    const id = 'aic-w' + (++aicSeq);
+    const pending = aicAdd(
+        '<div class="aic-turn" id="' + id + '">' +
+            '<div class="aic-wait">' +
+                '<span class="aic-orbit"><i></i><i></i><i></i></span>' +
+                '<span class="aic-elapsed">Working&hellip; 0.0s</span>' +
+            '</div>' +
+            '<div class="aic-skel"><span></span><span></span><span></span></div>' +
+        '</div>');
 
     const started = Date.now();
-    let data;
+    const tick = setInterval(() => {
+        const el = pending.querySelector('.aic-elapsed');
+        if (el) el.textContent = 'Working… ' + ((Date.now() - started) / 1000).toFixed(1) + 's';
+    }, 100);
+
+    let d;
     try {
         const res = await fetch('/api/module/RP01/ai-chat/ask', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({question: question, history: aicHistory})
         });
-        data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+        d = await res.json();
+        if (!res.ok || d.error) throw new Error(d.error || ('Request failed with HTTP ' + res.status));
     } catch (e) {
-        aicAppend('<div class="aic-msg aic-err">' + aicEsc(e.message) + '</div>');
-        btn.disabled = false;
-        status.textContent = '';
-        input.focus();
+        clearInterval(tick);
+        pending.innerHTML = '<div class="aic-fail">Could not answer that.<br>' +
+                            '<code>' + aicEsc(e.message) + '</code></div>';
+        aicBusy = false; send.disabled = false; input.focus(); aicScroll();
         return;
     }
+    clearInterval(tick);
 
+    const wall = (Date.now() - started) / 1000;
     aicHistory.push({role: 'user', content: question});
-    aicHistory.push({role: 'assistant', content: data.answer || ''});
+    aicHistory.push({role: 'assistant', content: d.answer || ''});
 
-    const t = data.timing || {};
-    const meta = [
-        '<b>source</b> ' + aicEsc(data.source),
-        data.date_col ? '<b>on</b> ' + aicEsc(data.date_col) : '',
-        data.from_date ? aicEsc(data.from_date) + ' &rarr; ' + aicEsc(data.to_date) : '',
-        data.source_rows != null ? '<b>scanned</b> ' + data.source_rows.toLocaleString() : '',
-        data.row_count != null ? '<b>returned</b> ' + data.row_count : '',
-        data.sql_retried ? '<b style="color:#dd6b20">retried once</b>' : '',
-        data.history_trimmed ? '<b style="color:#dd6b20">earlier turns trimmed</b>' : '',
-        '<b>' + ((Date.now() - started) / 1000).toFixed(1) + 's</b> (' +
-            Object.keys(t).map(k => k + ' ' + t[k] + 's').join(', ') + ')'
-    ].filter(Boolean).join('<span style="color:#cbd5e0">|</span>');
-
-    let html = '<div class="aic-msg aic-a">' + aicEsc(data.answer).replace(/\n/g, '<br>');
-    html += '<div class="aic-meta">' + meta + '</div>';
-    if (data.chart_error) {
-        html += '<div style="font-size:11px;color:#dd6b20;margin-top:6px;">chart skipped: ' +
-                aicEsc(data.chart_error) + '</div>';
+    const pid = id + '-sql', gid = id + '-rows';
+    let tools = '';
+    if (d.sql) {
+        tools += '<button class="aic-tool" aria-expanded="false" data-panel="' + pid +
+                 '" onclick="aicToggle(this)">SQL</button>';
     }
-    if (data.chart) html += '<div class="aic-chart"><canvas></canvas></div>';
-    if (data.sql) {
-        html += '<details><summary>Generated SQL</summary><div class="aic-sql">' +
-                aicEsc(data.sql) + '</div></details>';
-    }
-    if (data.columns && data.columns.length) {
-        html += '<details open><summary>Result rows</summary>' +
-                aicTable(data.columns, data.rows || []) + '</details>';
-    }
-    html += '</div>';
-    aicAppend(html);
-
-    if (data.chart) {
-        const canvas = document.querySelector('#aic-log .aic-msg:last-child canvas');
-        if (canvas) aicDrawChart(canvas, data.chart, data.columns, data.rows);
+    if (d.columns && d.columns.length) {
+        tools += '<button class="aic-tool" aria-expanded="false" data-panel="' + gid +
+                 '" onclick="aicToggle(this)">' +
+                 (d.row_count != null ? d.row_count.toLocaleString() + ' rows' : 'Rows') + '</button>';
     }
 
-    btn.disabled = false;
-    status.textContent = '';
+    pending.innerHTML =
+        '<div class="aic-say"></div>' +
+        (d.chart ? '<div class="aic-figure"><canvas></canvas></div>' : '') +
+        (d.chart_error ? '<div class="aic-note">Chart skipped: ' + aicEsc(d.chart_error) + '</div>' : '') +
+        aicRail(d, wall) +
+        (tools ? '<div class="aic-tools">' + tools + '</div>' : '') +
+        (d.sql ? '<div class="aic-panel" id="' + pid + '"><div class="aic-sql">' +
+                 aicEsc(d.sql) + '</div></div>' : '') +
+        (d.columns && d.columns.length
+            ? '<div class="aic-panel" id="' + gid + '">' + aicGrid(d.columns, d.rows || []) + '</div>' : '');
+
+    await aicReveal(pending.querySelector('.aic-say'), d.answer || '');
+
+    if (d.chart) {
+        const canvas = pending.querySelector('canvas');
+        if (canvas) aicChart(canvas, d.chart, d.columns, d.rows);
+    }
+
+    aicBusy = false;
+    send.disabled = false;
     input.focus();
+    aicScroll();
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('aic-input');
+    input.addEventListener('input', () => aicGrow(input));
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aicAsk(); }
+    });
+    input.focus();
+});
 </script>
 {% endblock %}

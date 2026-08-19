@@ -131,7 +131,7 @@ def _stub_chat(monkeypatch, *payloads):
 
 def test_route_falls_back_to_default_date_col(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'not_a_column',
+        'source': 'mbc-ops', 'date_col': 'not_a_column', 'period': 'this_fy',
         'from_date': '2026-04-01', 'to_date': '2026-06-30'}))
     out = aiviews.route('q', [], CFG)
     assert out['date_col'] == sources.default_date_col('mbc-ops')
@@ -139,7 +139,7 @@ def test_route_falls_back_to_default_date_col(monkeypatch):
 
 def test_route_swaps_reversed_date_range(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date',
+        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'custom',
         'from_date': '2026-06-30', 'to_date': '2026-04-01'}))
     out = aiviews.route('q', [], CFG)
     assert out['from_date'] == '2026-04-01' and out['to_date'] == '2026-06-30'
@@ -147,23 +147,24 @@ def test_route_swaps_reversed_date_range(monkeypatch):
 
 def test_route_rejects_unknown_source(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'invoices', 'date_col': 'x',
+        'source': 'invoices', 'date_col': 'x', 'period': 'this_fy',
         'from_date': '2026-04-01', 'to_date': '2026-06-30'}))
-    with pytest.raises(ValueError, match='unknown source'):
+    with pytest.raises(ValueError, match='not trusted'):
         aiviews.route('q', [], CFG)
 
 
 def test_route_rejects_malformed_dates(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date',
+        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'custom',
         'from_date': 'last April', 'to_date': '2026-06-30'}))
-    with pytest.raises(ValueError, match='malformed date'):
+    with pytest.raises(ValueError, match='malformed dates'):
         aiviews.route('q', [], CFG)
 
 
 def test_route_ignores_dates_for_port_overview(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'port-overview', 'date_col': '', 'from_date': '', 'to_date': ''}))
+        'source': 'port-overview', 'date_col': '', 'period': 'today',
+        'from_date': '', 'to_date': ''}))
     assert aiviews.route('q', [], CFG)['source'] == 'port-overview'
 
 
@@ -215,7 +216,7 @@ def test_sql_model_is_used_when_set(monkeypatch):
 # ── catalog ──────────────────────────────────────────────────────────────────
 
 def test_every_source_has_a_one_line_description():
-    assert len(sources.ALL_SOURCES) == 8
+    assert len(sources.ALL_SOURCES) == 6
     for key in sources.ALL_SOURCES:
         desc = sources.DESCRIPTIONS[key]
         assert desc and '\n' not in desc
@@ -224,3 +225,46 @@ def test_every_source_has_a_one_line_description():
 def test_catalog_lists_date_cols_for_pivot_sources():
     text = sources.catalog_prompt()
     assert 'mbc-ops' in text and 'doc_date' in text
+
+
+# ── trusted sources & period resolution ──────────────────────────────────────
+
+def test_untrusted_sources_are_rejected():
+    """vessel-ops has no Cargo Type column, so it can only mislead."""
+    for key in ('vessel-ops', 'vessel-anchorage'):
+        assert not sources.is_valid(key)
+        assert key not in sources.catalog_prompt()
+
+
+def test_trusted_sources_are_the_lueu_barge_and_mbc_ones():
+    assert sources.ALL_SOURCES == ['mbc-ops', 'mbc-tat', 'vessel-barge',
+                                   'lueu-equipment', 'lueu-historical', 'port-overview']
+
+
+def test_periods_resolve_against_a_fixed_today():
+    from datetime import date as _d
+    t = _d(2026, 8, 19)
+    assert sources.resolve_period('today', t) == ('2026-08-19', '2026-08-19')
+    assert sources.resolve_period('yesterday', t) == ('2026-08-18', '2026-08-18')
+    assert sources.resolve_period('last_7_days', t) == ('2026-08-13', '2026-08-19')
+    assert sources.resolve_period('this_month', t) == ('2026-08-01', '2026-08-19')
+    assert sources.resolve_period('last_month', t) == ('2026-07-01', '2026-07-31')
+    assert sources.resolve_period('this_fy', t) == ('2026-04-01', '2026-08-19')
+    assert sources.resolve_period('last_fy', t) == ('2025-04-01', '2026-03-31')
+
+
+def test_financial_year_starts_in_april():
+    from datetime import date as _d
+    assert sources.fy_start(_d(2026, 3, 31)) == _d(2025, 4, 1)
+    assert sources.fy_start(_d(2026, 4, 1)) == _d(2026, 4, 1)
+
+
+def test_route_resolves_named_period_itself(monkeypatch):
+    """The model names a period; Python does the arithmetic."""
+    _stub_chat(monkeypatch, json.dumps({
+        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'yesterday'}))
+    out = aiviews.route('what was yesterdays IBRM discharge', [], CFG)
+    from datetime import date as _d, timedelta
+    y = (_d.today() - timedelta(days=1)).isoformat()
+    assert out['from_date'] == y and out['to_date'] == y
+    assert out['source'] == 'mbc-ops'

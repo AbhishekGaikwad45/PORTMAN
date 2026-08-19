@@ -44,10 +44,11 @@ ROUTE_SCHEMA = {
     'properties': {
         'source':    {'type': 'string', 'enum': sources.ALL_SOURCES},
         'date_col':  {'type': 'string'},
+        'period':    {'type': 'string', 'enum': sources.PERIODS},
         'from_date': {'type': 'string'},
         'to_date':   {'type': 'string'},
     },
-    'required': ['source', 'date_col', 'from_date', 'to_date'],
+    'required': ['source', 'date_col', 'period'],
 }
 
 SQL_SCHEMA = {
@@ -91,13 +92,18 @@ def trim_history(history, max_chars):
 
 def route(question, history_msgs, cfg):
     system = (
-        "You route questions about port operations data to exactly one data source.\n"
-        "Today is " + date.today().isoformat() + ". The financial year runs 1 April to 31 March.\n\n"
+        "You route a question about port operations to exactly one data source.\n"
+        "Today is " + date.today().isoformat() + ".\n\n"
         "Sources:\n" + sources.catalog_prompt() + "\n\n"
-        "Pick the source that can answer the question, one date_col from that source's list, "
-        "and an ISO date range (YYYY-MM-DD).\n"
-        "If no period is stated, use the current financial year.\n"
-        "For port-overview, put today's date in all three date fields."
+        + sources.ROUTING_HINTS + "\n\n"
+        "Rules:\n"
+        "- Pick the source whose key columns can actually answer the question. If the "
+        "question names a cargo type, the source must have a Cargo Type column.\n"
+        "- date_col must come from the chosen source's list.\n"
+        "- period must be one of: " + ', '.join(sources.PERIODS) + ". Use custom only "
+        "when the question names explicit dates, and then also set from_date and to_date "
+        "as YYYY-MM-DD.\n"
+        "- If the question states no period, use this_fy."
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
@@ -105,21 +111,32 @@ def route(question, history_msgs, cfg):
 
     src = out.get('source')
     if not sources.is_valid(src):
-        raise ValueError('Model picked an unknown source: %r' % (src,))
+        raise ValueError('Model picked a source that is not trusted: %r' % (src,))
 
     if src == sources.PORT_OVERVIEW:
-        return {'source': src, 'date_col': '', 'from_date': '', 'to_date': ''}
+        return {'source': src, 'date_col': '', 'period': 'today',
+                'from_date': '', 'to_date': ''}
 
     date_col = out.get('date_col')
     if date_col not in sources.valid_date_cols(src):
         date_col = sources.default_date_col(src)
 
-    frm, to = out.get('from_date', ''), out.get('to_date', '')
-    if not _ISO.match(frm or '') or not _ISO.match(to or ''):
-        raise ValueError('Model returned a malformed date range')
-    if frm > to:
-        frm, to = to, frm
-    return {'source': src, 'date_col': date_col, 'from_date': frm, 'to_date': to}
+    # Python owns the date arithmetic. A 3B model gets "yesterday" and financial
+    # year boundaries wrong often enough that an off-by-one silently returns the
+    # wrong answer, and a named period is far easier for it to pick correctly.
+    period = out.get('period') or 'this_fy'
+    if period == 'custom':
+        frm, to = out.get('from_date', ''), out.get('to_date', '')
+        if not _ISO.match(frm or '') or not _ISO.match(to or ''):
+            raise ValueError('Model asked for a custom range but gave malformed dates')
+        if frm > to:
+            frm, to = to, frm
+    else:
+        if period not in sources.PERIODS:
+            period = 'this_fy'
+        frm, to = sources.resolve_period(period)
+    return {'source': src, 'date_col': date_col, 'period': period,
+            'from_date': frm, 'to_date': to}
 
 
 # -- stage 3: sql ------------------------------------------------------------
@@ -195,10 +212,22 @@ def _as_table(cols, rows):
 
 def narrate(question, history_msgs, context, cfg):
     system = (
-        'You answer questions about port operations from the data given below. '
-        'Be brief and specific, and quote the actual numbers with their units. '
-        'If the data is empty, say so plainly and suggest widening the date range. '
-        'Never invent a number that is not in the data.\n\n' + context
+        'You are a port operations analyst. Answer the question using ONLY the data below.\n\n'
+        'How to answer:\n'
+        '- Lead with the number: "IBRM discharge was 42,150 MT." Never open with '
+        '"Based on the data provided" or "According to".\n'
+        '- One to three sentences. No preamble, no restating the question, no offering '
+        'further help at the end.\n'
+        '- Quantities are metric tonnes (MT) unless the column name says otherwise. '
+        'mbc-tat durations are minutes: convert anything over 120 into hours.\n'
+        '- Format thousands with commas.\n'
+        '- Add one comparison only when the data shows it: the largest contributor, or '
+        'the direction of travel across periods.\n'
+        '- If a breakdown runs to more than six rows, give the total and name the top three.\n'
+        '- If the data is empty, say what was searched and what to try instead. '
+        'Do not apologise.\n'
+        '- Never state a number that is not in the data, and never estimate.\n\n'
+        + context
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
@@ -299,10 +328,14 @@ def ai_chat_ask():
             source_rows = len(rows)
 
             if not rows:
-                return jsonify(dict(picked, answer='No records in that date range.',
-                                    row_count=0, rows=[], columns=[], chart=None,
-                                    sql=None, source_rows=0, timing=timing,
-                                    history_trimmed=history_trimmed))
+                return jsonify(dict(
+                    picked,
+                    answer=('No %s records with a %s between %s and %s. Try a wider period '
+                            'or a different source.' % (picked['source'], picked['date_col'],
+                                                        picked['from_date'], picked['to_date'])),
+                    row_count=0, rows=[], columns=[], chart=None, chart_error=None,
+                    sql=None, sql_retried=False, source_rows=0, timing=timing,
+                    history_trimmed=history_trimmed))
             if len(rows) > cfg['max_rows']:
                 return jsonify(dict(picked, error=(
                     'That range returns %s rows (limit %s). Ask again with a narrower '
