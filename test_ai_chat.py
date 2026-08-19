@@ -124,7 +124,7 @@ def test_history_kept_until_budget_then_oldest_dropped():
 def _stub_chat(monkeypatch, *payloads):
     calls = iter(payloads)
 
-    def fake(messages, cfg=None, schema=None, model=None):
+    def fake(messages, cfg=None, schema=None, model=None, **kw):
         return next(calls)
     monkeypatch.setattr(aiviews.ollama, 'chat', fake)
 
@@ -173,7 +173,7 @@ def test_route_ignores_dates_for_port_overview(monkeypatch):
 def test_bad_sql_is_retried_once_with_the_error(monkeypatch):
     seen = []
 
-    def fake(messages, cfg=None, schema=None, model=None):
+    def fake(messages, cfg=None, schema=None, model=None, **kw):
         seen.append(messages)
         if len(seen) == 1:
             return json.dumps({'sql': 'SELECT "Nope" FROM data',
@@ -203,7 +203,7 @@ def test_sql_gives_up_after_one_retry(monkeypatch):
 def test_sql_model_is_used_when_set(monkeypatch):
     used = []
 
-    def fake(messages, cfg=None, schema=None, model=None):
+    def fake(messages, cfg=None, schema=None, model=None, **kw):
         used.append(model)
         return json.dumps({'sql': 'SELECT 1 AS n FROM data LIMIT 1',
                            'chart': {'type': 'none', 'x': '', 'y': [], 'title': ''}})

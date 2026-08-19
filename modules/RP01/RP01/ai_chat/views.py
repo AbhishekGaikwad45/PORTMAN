@@ -107,7 +107,7 @@ def route(question, history_msgs, cfg):
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
-    out = json.loads(ollama.chat(msgs, cfg=cfg, schema=ROUTE_SCHEMA))
+    out = json.loads(ollama.chat(msgs, cfg=cfg, schema=ROUTE_SCHEMA, num_predict=120))
 
     src = out.get('source')
     if not sources.is_valid(src):
@@ -182,7 +182,8 @@ def generate_and_run(question, history_msgs, conn, ddl, rows, cfg):
 
     last_err = None
     for attempt in (1, 2):
-        out = json.loads(ollama.chat(msgs, cfg=cfg, schema=SQL_SCHEMA, model=model))
+        out = json.loads(ollama.chat(msgs, cfg=cfg, schema=SQL_SCHEMA, model=model,
+                                     num_predict=500))
         sql = out.get('sql', '')
         try:
             cols, result = sandbox.run(conn, sql, limit=cfg['max_result_rows'])
@@ -231,7 +232,7 @@ def narrate(question, history_msgs, context, cfg):
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
-    return ollama.chat(msgs, cfg=cfg).strip()
+    return ollama.chat(msgs, cfg=cfg, num_predict=350).strip()
 
 
 # -- port-overview path ------------------------------------------------------
@@ -337,10 +338,11 @@ def ai_chat_ask():
                     sql=None, sql_retried=False, source_rows=0, timing=timing,
                     history_trimmed=history_trimmed))
             if len(rows) > cfg['max_rows']:
-                return jsonify(dict(picked, error=(
-                    'That range returns %s rows (limit %s). Ask again with a narrower '
-                    'date range.' % (format(len(rows), ','), format(cfg['max_rows'], ',')),
-                ), timing=timing)), 413
+                return jsonify(dict(
+                    picked, timing=timing,
+                    error='That range returns %s rows (limit %s). Ask again with a '
+                          'narrower date range.' % (format(len(rows), ','),
+                                                    format(cfg['max_rows'], ',')))), 413
 
             conn, ddl = sandbox.load(rows)
             try:

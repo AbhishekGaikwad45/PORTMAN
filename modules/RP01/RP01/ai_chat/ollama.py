@@ -27,22 +27,28 @@ def _url(cfg, path):
     return cfg['base_url'].rstrip('/') + path
 
 
-def chat(messages, cfg=None, schema=None, model=None):
+def chat(messages, cfg=None, schema=None, model=None, num_predict=None):
     """One non-streaming /api/chat round trip. Returns the message content.
 
     `schema` is a JSON Schema dict -> Ollama constrains decoding to it, which
     makes malformed JSON impossible and is markedly faster than letting the
     model free-form its way to the same shape.
+
+    `num_predict` caps output tokens. Uncapped, a small model will happily
+    ramble past the answer, and on CPU every stray token is real wall time.
     """
     # ponytail: no streaming yet — nothing consumes it while testing via curl.
     # Add SSE when the chat UI lands; only the narration stage benefits.
     cfg = cfg or get_config()
+    options = {'temperature': cfg['temperature']}
+    if num_predict:
+        options['num_predict'] = num_predict
     payload = {
         'model':      model or cfg['model'],
         'messages':   messages,
         'stream':     False,
         'keep_alive': cfg['keep_alive'],
-        'options':    {'temperature': cfg['temperature']},
+        'options':    options,
     }
     if schema:
         payload['format'] = schema

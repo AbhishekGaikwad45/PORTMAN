@@ -445,21 +445,40 @@ async function aicAsk() {
     }, 100);
 
     let d;
+    const abort = new AbortController();
+    const bail = setTimeout(() => abort.abort(), 300000);
     try {
         const res = await fetch('/api/module/RP01/ai-chat/ask', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({question: question, history: aicHistory})
+            body: JSON.stringify({question: question, history: aicHistory}),
+            signal: abort.signal
         });
-        d = await res.json();
+        // A reverse proxy that gives up mid-request answers with an HTML error
+        // page, not JSON. Read the body as text first so that surfaces as a
+        // timeout the reader can act on, rather than a JSON parse error.
+        const raw = await res.text();
+        try {
+            d = JSON.parse(raw);
+        } catch (_) {
+            throw new Error(res.status === 504 || res.status === 502
+                ? 'The server gave up waiting (HTTP ' + res.status + '). CPU inference ' +
+                  'outran the reverse proxy timeout — raise proxy_read_timeout in nginx.'
+                : 'Server returned ' + res.status + ' as ' +
+                  (res.headers.get('Content-Type') || 'an unknown type') + ', not JSON.');
+        }
         if (!res.ok || d.error) throw new Error(d.error || ('Request failed with HTTP ' + res.status));
     } catch (e) {
+        clearTimeout(bail);
         clearInterval(tick);
+        const msg = e.name === 'AbortError'
+            ? 'Gave up after 5 minutes with no reply from the server.' : e.message;
         pending.innerHTML = '<div class="aic-fail">Could not answer that.<br>' +
-                            '<code>' + aicEsc(e.message) + '</code></div>';
+                            '<code>' + aicEsc(msg) + '</code></div>';
         aicBusy = false; send.disabled = false; input.focus(); aicScroll();
         return;
     }
+    clearTimeout(bail);
     clearInterval(tick);
 
     const wall = (Date.now() - started) / 1000;
