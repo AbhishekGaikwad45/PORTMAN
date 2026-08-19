@@ -348,6 +348,27 @@ def save_config(module_code):
     return jsonify({'success': True})
 
 
+@bp.route('/api/aichat/test', methods=['POST'])
+@admin_required
+def aichat_test():
+    """Ping the Ollama server and list its installed models.
+
+    Takes base_url from the posted body so the box can be tested before the
+    config is saved.
+    """
+    from modules.RP01.RP01.ai_chat import ollama as _ollama
+    cfg = dict(_ollama.get_config())
+    posted = request.json or {}
+    if posted.get('base_url'):
+        cfg['base_url'] = posted['base_url']
+    try:
+        return jsonify({'success': True, 'base_url': cfg['base_url'],
+                        'models': _ollama.list_models(cfg)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': '%s: %s' % (type(e).__name__, e)})
+
+
+
 # ── LDUD Vessel Closure Admin ─────────────────────────────────────────────────
 
 # ── SAP Config ────────────────────────────────────────────────────────────────
