@@ -105,6 +105,13 @@ def _current_bill_max(cur):
     return (cur.fetchone()['m'] or 0)
 
 
+def _current_fdcn_max(cur, doc_series, financial_year):
+    cur.execute(
+        'SELECT MAX(doc_series_seq) AS m FROM fdcn_header WHERE doc_series=%s AND financial_year=%s',
+        [doc_series, financial_year])
+    return (cur.fetchone()['m'] or 0)
+
+
 def set_invoice_seed(doc_series, financial_year, start_seq, username):
     """Upsert an invoice seed after validating against the current max.
     Returns (ok, message)."""
@@ -216,3 +223,30 @@ def mark_items_billed(cargo_items, service_ids, username, billed=True):
                 {'cargo': cargo_items, 'services': service_ids, 'counts': counts},
                 username)
     return True, '', counts
+
+
+def set_fdcn_seed(doc_series, financial_year, start_seq, username):
+    """Upsert a credit/debit-note seed. Keyed like the invoice seed, on the
+    FDCN01 series prefix (e.g. DPPLCN) and its FY format ('26-27').
+    Returns (ok, message)."""
+    if is_locked():
+        return False, 'Cutover is locked.'
+    conn = get_db()
+    cur = get_cursor(conn)
+    current_max = _current_fdcn_max(cur, doc_series, financial_year)
+    ok, msg = validate_start_seq(start_seq, current_max)
+    if not ok:
+        conn.close()
+        return False, msg
+    cur.execute('''
+        INSERT INTO cutover_seed (seed_type, doc_series, financial_year, start_seq, created_by, updated_by, updated_at)
+        VALUES ('fdcn', %s, %s, %s, %s, %s, now())
+        ON CONFLICT (seed_type, doc_series, financial_year)
+        DO UPDATE SET start_seq=EXCLUDED.start_seq, updated_by=EXCLUDED.updated_by, updated_at=now()
+    ''', [doc_series, financial_year, start_seq, username, username])
+    conn.commit()
+    conn.close()
+    write_audit('set_fdcn_seed',
+                {'doc_series': doc_series, 'financial_year': financial_year, 'start_seq': start_seq},
+                username)
+    return True, ''

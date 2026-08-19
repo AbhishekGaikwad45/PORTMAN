@@ -509,7 +509,9 @@ def build_fdcn_payload(fdcn_header, fdcn_lines):
         company=company,
         inv_date=doc_date,
         reference=reference,
-        header_text=reference,
+        # Document_Header_Text carries the CN/DN's OWN number, so a note is
+        # identifiable in SAP even though its Reference is the parent invoice.
+        header_text=doc_number or reference,
         short_text=reference,
         currency='INR',
         invoice_credit=invoice_credit,

@@ -617,6 +617,12 @@
             <div class="cut-field"><label>Bill start at</label><input id="cut-bill-start" type="number" min="1"></div>
             <button class="btn" onclick="cutSetBillSeed()">Set bill start</button>
         </div>
+        <div class="cut-form-row">
+            <div class="cut-field"><label>Credit note series</label><select id="cut-cn-series"></select></div>
+            <div class="cut-field"><label>Financial year</label><input id="cut-cn-fy" placeholder="e.g. 26-27"></div>
+            <div class="cut-field"><label>Start at</label><input id="cut-cn-start" type="number" min="1"></div>
+            <button class="btn" onclick="cutSetCnSeed()">Set credit note start</button>
+        </div>
         <table class="admin-table" id="cutSeedTable">
             <thead><tr><th>Type</th><th>Series</th><th>FY</th><th>Start</th><th>By</th></tr></thead>
             <tbody></tbody>
@@ -2609,6 +2615,23 @@ async function cutLoadSeries() {
             `<option value="${s.prefix}"${s.is_default ? ' selected' : ''}>${s.name} (${s.prefix})</option>`).join('')
             || '<option value="">— no series configured —</option>';
     } catch (e) { sel.innerHTML = '<option value="">— no series configured —</option>'; }
+    cutLoadCnSeries();
+}
+
+// CN series: CNDS01 entries of type CN, plus the built-in DPPLCN fallback that
+// FDCN01 uses when no series is set as default.
+async function cutLoadCnSeries() {
+    const sel = document.getElementById('cut-cn-series');
+    if (!sel) return;
+    let opts = [];
+    try {
+        const list = await (await fetch('/api/module/CNDS01/all')).json();
+        opts = (list || []).filter(s => (s.type || 'CN') === 'CN')
+            .map(s => ({prefix: s.prefix, label: `${s.name} (${s.prefix})`, def: !!s.is_default}));
+    } catch (e) { /* fall through to the built-in prefix */ }
+    if (!opts.some(o => o.prefix === 'DPPLCN')) opts.push({prefix: 'DPPLCN', label: 'DPPLCN (default)', def: false});
+    if (!opts.some(o => o.def)) opts[opts.length - 1].def = true;
+    sel.innerHTML = opts.map(o => `<option value="${o.prefix}"${o.def ? ' selected' : ''}>${o.label}</option>`).join('');
 }
 
 async function cutLoadCustomers() {
@@ -2628,6 +2651,8 @@ function cutInitFY() {
     const fy = (m >= 4) ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
     const el = document.getElementById('cut-inv-fy');
     if (el && !el.value) el.value = fy;   // stored format e.g. "2026-27" (matches create_invoice)
+    const cn = document.getElementById('cut-cn-fy');
+    if (cn && !cn.value) cn.value = fy.slice(2);   // FDCN01 stores "26-27"
 }
 
 async function cutLoadState() {
@@ -2659,6 +2684,15 @@ async function cutSetInvoiceSeed() {
 async function cutSetBillSeed() {
     const ok = await _cutPost('/admin/api/cutover/bill-seed', {
         start_seq: parseInt(document.getElementById('cut-bill-start').value, 10),
+    });
+    if (ok) cutLoadState();
+}
+
+async function cutSetCnSeed() {
+    const ok = await _cutPost('/admin/api/cutover/fdcn-seed', {
+        doc_series: document.getElementById('cut-cn-series').value,
+        financial_year: document.getElementById('cut-cn-fy').value,
+        start_seq: parseInt(document.getElementById('cut-cn-start').value, 10),
     });
     if (ok) cutLoadState();
 }

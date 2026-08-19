@@ -1021,6 +1021,26 @@ def cutover_bill_seed():
     return jsonify({'success': False, 'error': msg}), 403 if 'locked' in msg.lower() else 400
 
 
+@bp.route('/api/cutover/fdcn-seed', methods=['POST'])
+@admin_required
+def cutover_fdcn_seed():
+    """Start number for the FDCN01 credit/debit-note series."""
+    from modules.FDCN01.model import normalize_prefix
+    d = request.json or {}
+    try:
+        start_seq = int(d.get('start_seq'))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'start_seq must be an integer'}), 400
+    ok, msg = cutover_mod.set_fdcn_seed(
+        normalize_prefix(d.get('doc_series')),
+        (d.get('financial_year') or '').strip(),
+        start_seq,
+        session.get('username'))
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': msg}), 403 if 'locked' in msg.lower() else 400
+
+
 @bp.route('/api/cutover/mark-billed', methods=['POST'])
 @admin_required
 def cutover_mark_billed():

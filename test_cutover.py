@@ -116,6 +116,12 @@ def test_set_invoice_seed_blocked_when_locked(monkeypatch):
     assert ok is False and 'locked' in msg.lower()
 
 
+def test_set_fdcn_seed_blocked_when_locked(monkeypatch):
+    monkeypatch.setattr(cutover, 'is_locked', lambda: True)
+    ok, msg = cutover.set_fdcn_seed('DPPLCN', '26-27', 4568, 'tester')
+    assert ok is False and 'locked' in msg.lower()
+
+
 def test_mark_items_billed_blocked_when_locked(monkeypatch):
     monkeypatch.setattr(cutover, 'is_locked', lambda: True)
     ok, msg, counts = cutover.mark_items_billed([{'source_type': 'VCN_IMPORT', 'id': 1}], [], 'tester')

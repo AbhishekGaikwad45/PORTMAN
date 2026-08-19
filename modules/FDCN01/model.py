@@ -1,4 +1,5 @@
 from database import get_db, get_cursor
+from modules.FIN01.model import lookup_seed, next_from_seed
 from datetime import datetime
 
 
@@ -78,7 +79,9 @@ def get_next_doc_number(doc_type, doc_date):
     cur.execute('''SELECT COALESCE(MAX(doc_series_seq), 0) AS max_seq
         FROM fdcn_header WHERE doc_series=%s AND financial_year=%s''', [prefix, fy])
     max_seq = cur.fetchone()['max_seq'] or 0
-    next_seq = max_seq + 1
+    # An admin cutover seed (ADMIN > Cutover) is a floor only: once real notes
+    # pass it, normal incrementing takes over.
+    next_seq = next_from_seed(max_seq, lookup_seed(cur, 'fdcn', prefix, fy))
     conn.close()
 
     doc_number = f'{prefix}/{fy}/{next_seq:04d}'

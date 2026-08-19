@@ -120,7 +120,7 @@ def test_fdcn_cn_uses_original_invoice_reference_in_header_and_items(monkeypatch
     monkeypatch.setattr(sap_builder, '_get_service_gl_map', lambda *a, **k: {'SCRAP': SCRAP_SVC})
 
     fdcn_header = {
-        'doc_number':              'DPPLCN/26-27/50',  # internal Portbird id — not sent to SAP
+        'doc_number':              'DPPLCN/26-27/50',  # goes out as Document_Header_Text
         'original_invoice_number': 'DPPL/26-27/50',
         'doc_date':                '2026-05-06',
         'doc_type':                'CN',
@@ -136,7 +136,7 @@ def test_fdcn_cn_uses_original_invoice_reference_in_header_and_items(monkeypatch
     assert record['Cancellation_Flag'] == ''
     assert record['Reference'] == 'DPPL/26-27/50'             # header = original invoice
     assert record['Text'] == 'DPPL/26-27/50'
-    assert record['Document_Header_Text'] == 'DPPL/26-27/50'
+    assert record['Document_Header_Text'] == 'DPPLCN/26-27/50'   # the CN's own number
     assert record['ITEM'][0]['Reference'] == 'DPPL/26-27/50'  # item   = original invoice
 
 
@@ -159,6 +159,7 @@ def test_fdcn_standalone_falls_back_to_doc_number(monkeypatch):
     assert record['Invoice_Credit'] == 'I'
     assert record['Document_type'] == 'DR'
     assert record['Reference'] == 'DPPLDN/26-27/9'
+    assert record['Document_Header_Text'] == 'DPPLDN/26-27/9'
     assert record['ITEM'][0]['Reference'] == 'DPPLDN/26-27/9'
 
 
