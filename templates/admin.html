@@ -1486,10 +1486,7 @@ async function testAiConnection() {
         });
         const d = await res.json();
         out.textContent = d.success
-            ? 'OK - ' + d.base_url + '
-Installed models:
-  ' + (d.models.join('
-  ') || '(none)')
+            ? 'OK - ' + d.base_url + '\nInstalled models:\n  ' + (d.models.join('\n  ') || '(none)')
             : 'FAILED - ' + d.error;
     } catch (e) {
         out.textContent = 'FAILED - ' + e;
