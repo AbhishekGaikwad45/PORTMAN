@@ -147,6 +147,72 @@ def _fetch_mbc_sof_data(mbc_id):
 # Activity row builders — matching Excel SOF format
 # ---------------------------------------------------------------------------
 
+# def _build_import_activities(load_port, discharge_port):
+#     activities = []
+
+#     lp_source = 'Captured from MBC Operation - Load Port Details'
+
+#     load_port_activities = [
+#         ('Arrived Load Port',  'arrived_load_port'),
+#         ('Alongside Berth',    'alongside_berth'),
+#         ('Loading Commenced',  'loading_commenced'),
+#         ('Loading Completed',  'loading_completed'),
+#         ('Cast Off Load Port', 'cast_off_load_port'),
+#         ('ETA at Gull Island', 'eta'),
+#     ]
+
+#     for label, key in load_port_activities:
+#         val = fmt_dt_display(load_port.get(key))
+
+#         activities.append({
+#             'label': label,
+#             'datetime': val if val else '',
+#             'remark': '',
+#             'source': lp_source
+#         })
+
+#     dp_source = 'Captured from MBC Operation - Discharge Port Details'
+
+#     discharge_activities = [
+#         ('Arrival at Gull Island',                  'arrival_gull_island'),
+#         ('Departure from Gull Island',              'departure_gull_island'),
+#         ('Arrived Yellow Crane',                    'arrived_yellow_crane'),
+#         ('Vessel Arrival at Port',                  'vessel_arrival_port'),
+#         ('Vessel All Made Fast at Unloading Berth', 'vessel_all_made_fast'),
+#         ('Unloading Commenced',                     'unloading_commenced'),
+#         ('Cleaning Commenced',                      'cleaning_commenced'),
+#         ('Cleaning Completed',                      'unloading_completed'),
+#         ('Unloading Completed',                     'unloading_completed'),
+#         ('Vessel Cast Off from Dharamtar Jetty',    'vessel_cast_off'),
+#         ('Sailed Out From Discharge Port',               'sailed_out_load_port'),
+#     ]
+
+#     for label, key in discharge_activities:
+#         val = fmt_dt_display(discharge_port.get(key))
+
+#         activities.append({
+#             'label': label,
+#             'datetime': val if val else '',
+#             'remark': '',
+#             'source': dp_source
+#         })
+
+#     # ADD THESE ONLY ONCE AT THE END
+#     activities.append({
+#         'label': 'Vessel Unloaded By',
+#         'datetime': discharge_port.get('vessel_unloaded_by', '') or '',
+#         'remark': '',
+#         'source': dp_source,
+#     })
+
+#     activities.append({
+#         'label': 'Vessel Unloading Berth',
+#         'datetime': discharge_port.get('vessel_unloading_berth', '') or '',
+#         'remark': '',
+#         'source': dp_source,
+#     })
+
+#     return activities
 def _build_import_activities(load_port, discharge_port):
     activities = []
 
@@ -166,7 +232,7 @@ def _build_import_activities(load_port, discharge_port):
 
         activities.append({
             'label': label,
-            'datetime': val if val else '',
+            'datetime': val if val else '-',
             'remark': '',
             'source': lp_source
         })
@@ -184,7 +250,7 @@ def _build_import_activities(load_port, discharge_port):
         ('Cleaning Completed',                      'unloading_completed'),
         ('Unloading Completed',                     'unloading_completed'),
         ('Vessel Cast Off from Dharamtar Jetty',    'vessel_cast_off'),
-        ('Sailed Out From Discharge Port',               'sailed_out_load_port'),
+        ('Sailed Out From Discharge Port',          'sailed_out_load_port'),
     ]
 
     for label, key in discharge_activities:
@@ -192,31 +258,60 @@ def _build_import_activities(load_port, discharge_port):
 
         activities.append({
             'label': label,
-            'datetime': val if val else '',
+            'datetime': val if val else '-',
             'remark': '',
             'source': dp_source
         })
 
-    # ADD THESE ONLY ONCE AT THE END
+    # Always show these rows.
+    # If value is blank, display "-"
     activities.append({
         'label': 'Vessel Unloaded By',
-        'datetime': discharge_port.get('vessel_unloaded_by', '') or '',
+        'datetime': discharge_port.get('vessel_unloaded_by', '') or '-',
         'remark': '',
         'source': dp_source,
     })
 
     activities.append({
         'label': 'Vessel Unloading Berth',
-        'datetime': discharge_port.get('vessel_unloading_berth', '') or '',
+        'datetime': discharge_port.get('vessel_unloading_berth', '') or '-',
         'remark': '',
         'source': dp_source,
     })
 
     return activities
+# def _build_export_activities(export_load):
+#     source = 'Captured from MBC Operation - Export Load Port Details'
+#     activities = []
+#     for label, key in [
+#         ('Arrived at Port',      'arrived_at_port'),
+#         ('Alongside at Berth',   'alongside_at_berth'),
+#         ('Loading Commenced',    'loading_commenced'),
+#         ('Loading Completed',    'loading_completed'),
+#         ('Cast Off From Berth',  'cast_off_from_berth'),
+#         ('Sailed Out From Port', 'sailed_out_from_port'),
+#         ('ETA at Gull Island',   'eta_at_gull_island'),
+#     ]:
+#         val = fmt_dt_display(export_load.get(key))
+#         if val:
+#             activities.append({'label': label, 'datetime': val, 'remark': '', 'source': source})
+
+#     for label, key in [
+#         ('Vessel Unloaded By', 'unloaded_by'),
+#         ('Berth Master',       'berth_master'),
+#     ]:
+#         v = export_load.get(key) or ''
+#         if v:
+#             activities.append({'label': label, 'datetime': v, 'remark': '', 'source': source})
+
+#     return activities
 
 def _build_export_activities(export_load):
     source = 'Captured from MBC Operation - Export Load Port Details'
     activities = []
+
+    # Always show these activities.
+    # If the timestamp is blank, display "-"
     for label, key in [
         ('Arrived at Port',      'arrived_at_port'),
         ('Alongside at Berth',   'alongside_at_berth'),
@@ -227,16 +322,28 @@ def _build_export_activities(export_load):
         ('ETA at Gull Island',   'eta_at_gull_island'),
     ]:
         val = fmt_dt_display(export_load.get(key))
-        if val:
-            activities.append({'label': label, 'datetime': val, 'remark': '', 'source': source})
 
+        activities.append({
+            'label': label,
+            'datetime': val if val else '-',
+            'remark': '',
+            'source': source
+        })
+
+    # These fields are also shown only when available
     for label, key in [
         ('Vessel Unloaded By', 'unloaded_by'),
         ('Berth Master',       'berth_master'),
     ]:
         v = export_load.get(key) or ''
+
         if v:
-            activities.append({'label': label, 'datetime': v, 'remark': '', 'source': source})
+            activities.append({
+                'label': label,
+                'datetime': v,
+                'remark': '',
+                'source': source
+            })
 
     return activities
 
