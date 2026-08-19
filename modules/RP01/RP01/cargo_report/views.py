@@ -108,7 +108,7 @@ SELECT
     'INDIA' AS flag,
 
     -- NEW: bill number(s) linked to this MBC header via bill_lines
-    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(inv.invoice_numbers, 'NA') AS invoice_number,
 
     -- NEW: document status for MBC
     COALESCE(h.doc_status, '-') AS status
@@ -160,21 +160,24 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
--- NEW: bill_lines aggregated to ONE row per MBC header, so it doesn't
--- fan out the join like a raw join would. cargo_source_type = 'MBC'
--- and cargo_source_id = mbc_header.id per the bill_lines mapping.
--- bill_number itself lives on bill_header, joined via bill_lines.bill_id.
+-- Invoice number/status for MBC:
+-- Match the MBC document number + MBC name against invoice_header.commodity.
+-- One MBC can appear in multiple invoices, so aggregate distinct values.
 LEFT JOIN (
     SELECT
-        bl.cargo_source_id,
-        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
-    FROM bill_lines bl
-    JOIN bill_header bh
-        ON bh.id = bl.bill_id
-    WHERE bl.cargo_source_type = 'MBC'
-    GROUP BY bl.cargo_source_id
-) bln
-    ON bln.cargo_source_id = h.id
+        h2.id AS mbc_id,
+        STRING_AGG(DISTINCT ih.invoice_number, ', ') AS invoice_numbers,
+        STRING_AGG(DISTINCT ih.invoice_status, ', ') AS invoice_statuses
+    FROM mbc_header h2
+    LEFT JOIN invoice_header ih
+        ON ih.commodity IS NOT NULL
+       AND h2.doc_num IS NOT NULL
+       AND h2.mbc_name IS NOT NULL
+       AND ih.commodity ILIKE '%%' ||
+           h2.doc_num || ' / ' || h2.mbc_name || '%%'
+    GROUP BY h2.id
+) inv
+    ON inv.mbc_id = h.id
 
 WHERE dp.unloading_commenced IS NOT NULL
 AND (
@@ -224,8 +227,8 @@ GROUP BY
     dp.unloading_completed,
     v.nationality,
     mbc.actual_discharge,
-    bln.bill_numbers,
-    h.doc_status
+    inv.invoice_numbers,
+    inv.invoice_statuses
 UNION ALL
 
 SELECT
@@ -494,7 +497,7 @@ ORDER BY discharge_commenced DESC;
     'flag': row['flag'] or '-',
 
     # NEW
-    'bill_number': row['bill_number'] or 'NA',
+    'invoice_number': row['invoice_number'] or 'NA',
     'status': row['status'] or '-',
 })
 
@@ -681,19 +684,24 @@ LEFT JOIN (
 ) mbc
     ON mbc.source_id = h.id
 
--- NEW: bill_lines aggregated to ONE row per MBC header. bill_number
--- lives on bill_header, joined via bill_lines.bill_id.
+-- Invoice number/status for MBC:
+-- Match the MBC document number + MBC name against invoice_header.commodity.
+-- One MBC can appear in multiple invoices, so aggregate distinct values.
 LEFT JOIN (
     SELECT
-        bl.cargo_source_id,
-        STRING_AGG(DISTINCT bh.bill_number, ', ') AS bill_numbers
-    FROM bill_lines bl
-    JOIN bill_header bh
-        ON bh.id = bl.bill_id
-    WHERE bl.cargo_source_type = 'MBC'
-    GROUP BY bl.cargo_source_id
-) bln
-    ON bln.cargo_source_id = h.id
+        h2.id AS mbc_id,
+        STRING_AGG(DISTINCT ih.invoice_number, ', ') AS invoice_numbers,
+        STRING_AGG(DISTINCT ih.invoice_status, ', ') AS invoice_statuses
+    FROM mbc_header h2
+    LEFT JOIN invoice_header ih
+        ON ih.commodity IS NOT NULL
+       AND h2.doc_num IS NOT NULL
+       AND h2.mbc_name IS NOT NULL
+       AND ih.commodity ILIKE '%%' ||
+           h2.doc_num || ' / ' || h2.mbc_name || '%%'
+    GROUP BY h2.id
+) inv
+    ON inv.mbc_id = h.id
 
 WHERE dp.unloading_commenced IS NOT NULL
 AND (
@@ -742,8 +750,8 @@ GROUP BY
     dp.unloading_completed,
     v.nationality,
     mbc.actual_discharge,
-    bln.bill_numbers,
-    h.doc_status
+    inv.invoice_numbers,
+    inv.invoice_statuses
 UNION ALL
 
 SELECT
@@ -977,7 +985,7 @@ ORDER BY discharge_commenced DESC;
             'Sr No', 'M.Vessel Name', 'MV/MBC', 'Material PO',
             'Type', 'Cargo', 'B/L Qty.\n(MT)', 'Actual Discharge\n(MT)',
             'Load Port', 'Discharge\nCommence', 'Discharge\nCompleted',
-            'Consignee /\nCustomer', 'Flag', 'Bill No.', 'Status'
+            'Consignee /\nCustomer', 'Flag', 'Invoice No.', 'Status'
         ]
         col_widths = [7, 40, 9, 16, 9, 16, 12, 24, 20, 22, 22, 22, 18, 22, 14]
         num_cols   = len(headers)
@@ -1068,7 +1076,7 @@ else '',
     row['flag'] or '',
 
     # NEW
-    row['bill_number'] or 'NA',
+    row['invoice_number'] or 'NA',
     row['status'] or '-',
 ]
 
