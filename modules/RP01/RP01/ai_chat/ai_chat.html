@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}AI Chat (Test) - RP01{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+    .aic-wrap { padding:14px; max-width:1100px; }
+    .aic-msg { border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; line-height:1.55; }
+    .aic-q { background:#ebf8ff; border:1px solid #bee3f8; }
+    .aic-a { background:#f7fafc; border:1px solid #e2e8f0; }
+    .aic-err { background:#fff5f5; border:1px solid #feb2b2; color:#742a2a; }
+    .aic-meta { font-size:11px; color:#718096; margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; }
+    .aic-meta b { color:#4a5568; font-weight:600; }
+    .aic-wrap details { margin-top:8px; }
+    .aic-wrap summary { cursor:pointer; font-size:11px; color:#3182ce; }
+    .aic-sql { background:#1a202c; color:#e2e8f0; padding:10px; border-radius:4px;
+               font-family:ui-monospace,Consolas,monospace; font-size:11px;
+               white-space:pre-wrap; overflow-x:auto; margin-top:6px; }
+    .aic-tbl { border-collapse:collapse; font-size:11px; margin-top:6px; width:100%; }
+    .aic-tbl th { background:#edf2f7; text-align:left; }
+    .aic-tbl th, .aic-tbl td { border:1px solid #e2e8f0; padding:3px 7px; }
+    .aic-scroll { max-height:320px; overflow:auto; }
+    .aic-chart { margin-top:10px; background:#fff; border:1px solid #e2e8f0;
+                 border-radius:4px; padding:8px; height:300px; }
+    .dark-theme .aic-a  { background:#2d3748; border-color:#4a5568; }
+    .dark-theme .aic-q  { background:#2a4365; border-color:#2c5282; }
+    .dark-theme .aic-tbl th { background:#4a5568; }
+    .dark-theme .aic-chart { background:#2d3748; border-color:#4a5568; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="module-header">
+    <h2>AI Chat <span style="font-size:12px;font-weight:400;color:#e53e3e;">— internal test page, admin only</span></h2>
+    <span class="module-code">RP01</span>
+</div>
+
+<div class="aic-wrap">
+    <div style="background:#fffbeb;border:1px solid #f6e05e;color:#744210;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:14px;">
+        Answers come from a language model. <b>Always read the generated SQL</b> before trusting a number.
+        Configure the server in <a href="/admin/">Admin &rarr; AI Config</a>.
+    </div>
+
+    <div id="aic-log"></div>
+
+    <div style="display:flex;gap:8px;margin-top:14px;">
+        <input type="text" id="aic-input" placeholder="e.g. total IBRM discharged this financial year by month"
+               style="flex:1;padding:9px 12px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;"
+               onkeydown="if(event.key==='Enter')aicAsk()">
+        <button id="aic-send" onclick="aicAsk()"
+                style="background:#3182ce;color:#fff;border:none;padding:9px 20px;border-radius:4px;cursor:pointer;font-size:13px;">Ask</button>
+        <button onclick="aicReset()"
+                style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:9px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Clear</button>
+    </div>
+    <div id="aic-status" style="font-size:11px;color:#718096;margin-top:6px;min-height:16px;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let aicHistory = [];
+let aicCharts = [];
+
+function aicEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function aicReset() {
+    aicHistory = [];
+    aicCharts.forEach(c => c.destroy());
+    aicCharts = [];
+    document.getElementById('aic-log').innerHTML = '';
+    document.getElementById('aic-status').textContent = '';
+}
+
+function aicAppend(html) {
+    const log = document.getElementById('aic-log');
+    log.insertAdjacentHTML('beforeend', html);
+    log.lastElementChild.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function aicTable(columns, rows) {
+    if (!columns.length) return '';
+    const head = columns.map(c => '<th>' + aicEsc(c) + '</th>').join('');
+    const body = rows.slice(0, 200).map(
+        r => '<tr>' + r.map(v => '<td>' + aicEsc(v) + '</td>').join('') + '</tr>').join('');
+    const more = rows.length > 200 ? '<div style="font-size:11px;color:#718096;">showing first 200 of ' + rows.length + ' rows</div>' : '';
+    return '<div class="aic-scroll"><table class="aic-tbl"><thead><tr>' + head +
+           '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
+}
+
+// Chart.js is built from a validated {type,x,y[],title} spec, never from
+// model-supplied config.
+function aicDrawChart(canvas, spec, columns, rows) {
+    const xi = columns.indexOf(spec.x);
+    const palette = ['#3182ce', '#38a169', '#dd6b20', '#805ad5', '#e53e3e', '#319795'];
+    const datasets = spec.y.map((col, i) => ({
+        label: col,
+        data: rows.map(r => Number(r[columns.indexOf(col)])),
+        backgroundColor: spec.type === 'pie' || spec.type === 'doughnut'
+            ? rows.map((_, j) => palette[j % palette.length])
+            : palette[i % palette.length],
+        borderColor: palette[i % palette.length],
+        borderWidth: spec.type === 'line' ? 2 : 1,
+        fill: false
+    }));
+    aicCharts.push(new Chart(canvas, {
+        type: spec.type,
+        data: {labels: rows.map(r => String(r[xi])), datasets: datasets},
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {title: {display: !!spec.title, text: spec.title}}
+        }
+    }));
+}
+
+async function aicAsk() {
+    const input = document.getElementById('aic-input');
+    const btn = document.getElementById('aic-send');
+    const status = document.getElementById('aic-status');
+    const question = input.value.trim();
+    if (!question) return;
+
+    input.value = '';
+    btn.disabled = true;
+    status.textContent = 'Thinking — routing, querying, then writing the answer. On CPU this takes 20-45s.';
+    aicAppend('<div class="aic-msg aic-q">' + aicEsc(question) + '</div>');
+
+    const started = Date.now();
+    let data;
+    try {
+        const res = await fetch('/api/module/RP01/ai-chat/ask', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({question: question, history: aicHistory})
+        });
+        data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+    } catch (e) {
+        aicAppend('<div class="aic-msg aic-err">' + aicEsc(e.message) + '</div>');
+        btn.disabled = false;
+        status.textContent = '';
+        input.focus();
+        return;
+    }
+
+    aicHistory.push({role: 'user', content: question});
+    aicHistory.push({role: 'assistant', content: data.answer || ''});
+
+    const t = data.timing || {};
+    const meta = [
+        '<b>source</b> ' + aicEsc(data.source),
+        data.date_col ? '<b>on</b> ' + aicEsc(data.date_col) : '',
+        data.from_date ? aicEsc(data.from_date) + ' &rarr; ' + aicEsc(data.to_date) : '',
+        data.source_rows != null ? '<b>scanned</b> ' + data.source_rows.toLocaleString() : '',
+        data.row_count != null ? '<b>returned</b> ' + data.row_count : '',
+        data.sql_retried ? '<b style="color:#dd6b20">retried once</b>' : '',
+        data.history_trimmed ? '<b style="color:#dd6b20">earlier turns trimmed</b>' : '',
+        '<b>' + ((Date.now() - started) / 1000).toFixed(1) + 's</b> (' +
+            Object.keys(t).map(k => k + ' ' + t[k] + 's').join(', ') + ')'
+    ].filter(Boolean).join('<span style="color:#cbd5e0">|</span>');
+
+    let html = '<div class="aic-msg aic-a">' + aicEsc(data.answer).replace(/\n/g, '<br>');
+    html += '<div class="aic-meta">' + meta + '</div>';
+    if (data.chart_error) {
+        html += '<div style="font-size:11px;color:#dd6b20;margin-top:6px;">chart skipped: ' +
+                aicEsc(data.chart_error) + '</div>';
+    }
+    if (data.chart) html += '<div class="aic-chart"><canvas></canvas></div>';
+    if (data.sql) {
+        html += '<details><summary>Generated SQL</summary><div class="aic-sql">' +
+                aicEsc(data.sql) + '</div></details>';
+    }
+    if (data.columns && data.columns.length) {
+        html += '<details open><summary>Result rows</summary>' +
+                aicTable(data.columns, data.rows || []) + '</details>';
+    }
+    html += '</div>';
+    aicAppend(html);
+
+    if (data.chart) {
+        const canvas = document.querySelector('#aic-log .aic-msg:last-child canvas');
+        if (canvas) aicDrawChart(canvas, data.chart, data.columns, data.rows);
+    }
+
+    btn.disabled = false;
+    status.textContent = '';
+    input.focus();
+}
+</script>
+{% endblock %}

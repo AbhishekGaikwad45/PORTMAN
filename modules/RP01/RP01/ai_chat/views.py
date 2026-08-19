@@ -17,7 +17,7 @@ import time
 from datetime import date
 from functools import wraps
 
-from flask import jsonify, request, session
+from flask import jsonify, redirect, render_template, request, session, url_for
 
 from .. import bp
 from ..custom_report.views import fetch_source_rows
@@ -232,6 +232,25 @@ def _fetch_overview():
 
 
 # -- endpoints ---------------------------------------------------------------
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if not session.get('is_admin'):
+            return redirect(url_for('home'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@bp.route('/module/RP01/ai-chat/')
+@admin_required
+def ai_chat_index():
+    """Internal test page. Deliberately not linked from rp01.html, and admin
+    gated so being unlinked is not the only thing keeping users out."""
+    return render_template('ai_chat/ai_chat.html', username=session.get('username'))
+
 
 @bp.route('/api/module/RP01/ai-chat/sources')
 @login_required
