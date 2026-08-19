@@ -263,13 +263,9 @@ function aicSeed(btn) {
 }
 
 function aicClear() {
-    aicHistory = [];
-    aicCharts.forEach(c => c.destroy());
-    aicCharts = [];
-    aicSeq = 0;
-    document.getElementById('aic-log').innerHTML =
-        document.getElementById('aic-open') ? '' : '';
-    location.reload();
+    // ponytail: a reload drops history, destroys the charts and restores the
+    // empty state in one line. Nothing on this page is worth preserving.
+    if (!aicBusy) location.reload();
 }
 
 function aicGrow(ta) {
