@@ -634,7 +634,7 @@ SELECT
     COALESCE(v.nationality, '-') AS flag,
 
     -- NEW
-    COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+    COALESCE(inv.invoice_numbers, 'NA') AS invoice_number,
     COALESCE(h.doc_status, '-') AS status
 
 FROM mbc_header h
