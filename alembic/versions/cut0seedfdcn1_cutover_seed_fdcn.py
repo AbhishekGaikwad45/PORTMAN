@@ -4,13 +4,13 @@ The seed_type CHECK was written when only invoices and bills had a cutover
 start number; FDCN01 credit/debit notes now seed the same way, keyed by
 (doc_series prefix, financial_year) exactly like invoices.
 
-Revision ID: e7f8a9b0c1d2
+Revision ID: cut0seedfdcn1
 Revises: d5e6f7a8b9c0
 Create Date: 2026-08-19
 """
 from alembic import op
 
-revision = 'e7f8a9b0c1d2'
+revision = 'cut0seedfdcn1'
 down_revision = 'd5e6f7a8b9c0'
 branch_labels = None
 depends_on = None
