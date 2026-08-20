@@ -36,7 +36,11 @@ MAX_DISPLAY_ROWS = 500
 MAX_RESULT_CHARS = 2500
 MAX_FIXED_CHARS = 2600
 CONTEXT_TTL = 60          # seconds; the dashboard is "live", not per-millisecond
-CHART_TYPES = ['bar', 'line', 'pie', 'doughnut', 'scatter', 'none']
+# Forms chosen for what this data actually does: a headline figure, magnitude
+# by category, change over time, part-to-whole. No radar and no dual axis -
+# both mislead more than they show.
+CHART_TYPES = ['kpi', 'bar', 'hbar', 'stacked_bar', 'line', 'area',
+               'pie', 'doughnut', 'scatter', 'none']
 
 _ISO = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
@@ -94,6 +98,20 @@ SQL_SCHEMA = {
 
 class OutOfScope(Exception):
     """The question is not about this port's operations."""
+
+
+def _models_used(cfg):
+    """Which model served which stage.
+
+    Two different models means Ollama may evict and reload one on every stage
+    when OLLAMA_MAX_LOADED_MODELS is 1 - gigabytes off disk per question, which
+    dwarfs inference itself. Surfacing this makes that visible instead of
+    looking like slow inference.
+    """
+    main = cfg.get('model')
+    sql = cfg.get('sql_model') or main
+    return {'triage': main, 'sql': sql, 'narrate': main,
+            'split': bool(cfg.get('sql_model')) and sql != main}
 
 
 def readonly_connection(cfg):
@@ -374,8 +392,10 @@ def validate_chart(chart, cols):
     """A hallucinated column name must fail visibly, not render an empty chart."""
     if not isinstance(chart, dict) or chart.get('type') in (None, 'none'):
         return None, None
+    kind = chart.get('type')
     x = _match_column(chart.get('x'), cols)
-    if not x:
+    # A kpi tile is just the numbers; a label column is optional decoration.
+    if not x and kind != 'kpi':
         return None, 'chart x-axis %r is not a column in the result' % (chart.get('x'),)
     ys, seen = [], set()
     for y in chart.get('y') or []:
@@ -385,7 +405,7 @@ def validate_chart(chart, cols):
             ys.append(m)
     if not ys:
         return None, 'chart has no numeric y column in the result'
-    return {'type': chart['type'], 'x': x, 'y': ys,
+    return {'type': kind, 'x': x, 'y': ys,
             'title': chart.get('title', '')}, None
 
 
@@ -622,5 +642,6 @@ def ai_chat_ask():
         chart_error=result['chart_error'],
         source_rows=source_rows,
         history_trimmed=history_trimmed,
+        models=_models_used(cfg),
         timing=timing,
     ))

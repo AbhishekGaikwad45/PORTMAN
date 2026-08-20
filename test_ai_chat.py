@@ -415,3 +415,41 @@ def test_seen_columns_correct_a_stale_catalog():
 def test_no_readonly_user_means_the_normal_connection():
     assert aiviews.readonly_connection({}) is None
     assert aiviews.readonly_connection({'db_user': '  '}) is None
+
+
+# ── chart forms ──────────────────────────────────────────────────────────────
+
+def test_all_rendered_chart_forms_are_offered_to_the_model():
+    """The schema enum and the renderer must not drift apart."""
+    for kind in ('kpi', 'bar', 'hbar', 'stacked_bar', 'line', 'area',
+                 'pie', 'doughnut', 'scatter', 'none'):
+        assert kind in aiviews.CHART_TYPES
+    assert aiviews.SQL_SCHEMA['properties']['chart']['properties']['type']['enum'] \
+        == aiviews.CHART_TYPES
+
+
+def test_kpi_needs_no_label_column():
+    chart, err = aiviews.validate_chart(
+        {'type': 'kpi', 'x': '', 'y': ['Total MT'], 'title': 't'}, ['Total MT'])
+    assert err is None and chart['type'] == 'kpi' and chart['x'] is None
+
+
+def test_kpi_still_needs_a_real_value_column():
+    chart, err = aiviews.validate_chart(
+        {'type': 'kpi', 'x': '', 'y': ['Nope'], 'title': 't'}, ['Total MT'])
+    assert chart is None and 'y column' in err
+
+
+def test_non_kpi_forms_still_require_a_label_column():
+    for kind in ('bar', 'hbar', 'stacked_bar', 'area'):
+        chart, err = aiviews.validate_chart(
+            {'type': kind, 'x': '', 'y': ['Total'], 'title': 't'}, ['Equipment', 'Total'])
+        assert chart is None and 'x-axis' in err
+
+
+def test_models_used_flags_a_two_model_split():
+    assert aiviews._models_used({'model': 'q', 'sql_model': ''})['split'] is False
+    assert aiviews._models_used({'model': 'q', 'sql_model': 'q'})['split'] is False
+    split = aiviews._models_used({'model': 'llama3.2:3b', 'sql_model': 'qwen2.5-coder:7b'})
+    assert split['split'] is True
+    assert split['triage'] == 'llama3.2:3b' and split['sql'] == 'qwen2.5-coder:7b'

@@ -417,6 +417,11 @@ function aicRail(d, wall) {
         d.from_date ? aicEsc(d.from_date) + ' → ' + aicEsc(d.to_date) : '',
         d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : '',
         d.needs_query === false ? 'answered from the live dashboard' : '',
+        d.models ? aicEsc(d.models.sql === d.models.triage
+            ? d.models.triage
+            : d.models.triage + ' + ' + d.models.sql) : '',
+        d.models && d.models.split ? '<span class="aic-flag">two models - Ollama may be '
+            + 'reloading between stages</span>' : '',
         d.rows_truncated ? 'result trimmed for display' : ''
     ].filter(Boolean).join(' · ');
 
