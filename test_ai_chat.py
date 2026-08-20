@@ -303,3 +303,36 @@ def test_pinning_the_schema_does_not_mutate_the_shared_one(monkeypatch):
         'source': 'mbc-tat', 'date_col': 'doc_date', 'period': 'this_fy'}))
     aiviews.route('q', [], CFG, want_source='mbc-tat', want_period=None)
     assert aiviews.ROUTE_SCHEMA['properties']['source']['enum'] == sources.ALL_SOURCES
+
+
+# ── chart column matching ────────────────────────────────────────────────────
+
+def test_chart_accepts_the_quoted_names_the_sql_rules_encourage():
+    """The model is told to double-quote columns for SQL and carries the quotes
+    into the chart spec; punctuation must not cost us the chart."""
+    chart, err = aiviews.validate_chart(
+        {'type': 'bar', 'x': '"Equipment"', 'y': ['"Total Quantity"'], 'title': 't'},
+        ['Equipment', 'Total Quantity'])
+    assert err is None
+    assert chart['x'] == 'Equipment' and chart['y'] == ['Total Quantity']
+
+
+def test_chart_matches_case_insensitively():
+    chart, err = aiviews.validate_chart(
+        {'type': 'bar', 'x': 'equipment', 'y': ['TOTAL QUANTITY'], 'title': 't'},
+        ['Equipment', 'Total Quantity'])
+    assert chart['x'] == 'Equipment' and chart['y'] == ['Total Quantity']
+
+
+def test_chart_drops_the_x_column_from_y_and_dedupes():
+    chart, _ = aiviews.validate_chart(
+        {'type': 'bar', 'x': 'Equipment', 'y': ['Equipment', 'Total', '"Total"'], 'title': 't'},
+        ['Equipment', 'Total'])
+    assert chart['y'] == ['Total']
+
+
+def test_chart_still_rejects_a_name_that_is_not_there():
+    chart, err = aiviews.validate_chart(
+        {'type': 'bar', 'x': '"Vessel"', 'y': ['"Total"'], 'title': 't'},
+        ['Equipment', 'Total'])
+    assert chart is None and 'x-axis' in err

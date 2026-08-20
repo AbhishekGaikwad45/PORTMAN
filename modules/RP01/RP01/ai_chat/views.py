@@ -176,21 +176,47 @@ def _sql_system(ddl, rows):
         '- The table is already filtered to the date range. Do not filter on dates '
         'again unless the question asks for a breakdown over time.\n'
         '- Alias every aggregate, e.g. SUM("Quantity") AS "Total Quantity".\n\n'
-        'Also pick a chart: type "none" when the answer is one number. chart.x must be '
-        'a column your SELECT outputs; chart.y must be numeric output columns.'
+        'Also pick a chart. Use "bar" for a breakdown by label, "line" over time, and '
+        '"none" only when the answer is a single number.\n'
+        'chart.x is the label column your SELECT outputs, chart.y the numeric ones. '
+        'Write both as plain names with NO quotes: Equipment, not "Equipment".'
     )
+
+
+def _match_column(name, cols):
+    """Resolve a model-supplied column name to a real result column.
+
+    The SQL rules tell the model to double-quote every column, and it carries
+    those quotes into the chart spec too - it answers with '"Equipment"' where
+    the result column is Equipment. Strip the quoting it was told to add and
+    fall back to a case-insensitive match rather than throwing the chart away
+    over punctuation.
+    """
+    if not isinstance(name, str):
+        return None
+    bare = name.strip().strip('"').strip("'").strip()
+    if bare in cols:
+        return bare
+    lowered = {c.lower(): c for c in cols}
+    return lowered.get(bare.lower())
 
 
 def validate_chart(chart, cols):
     """A hallucinated column name must fail visibly, not render an empty chart."""
     if not isinstance(chart, dict) or chart.get('type') in (None, 'none'):
         return None, None
-    if chart.get('x') not in cols:
+    x = _match_column(chart.get('x'), cols)
+    if not x:
         return None, 'chart x-axis %r is not a column in the result' % (chart.get('x'),)
-    ys = [y for y in chart.get('y') or [] if y in cols]
+    ys, seen = [], set()
+    for y in chart.get('y') or []:
+        m = _match_column(y, cols)
+        if m and m != x and m not in seen:
+            seen.add(m)
+            ys.append(m)
     if not ys:
-        return None, 'chart has no valid y columns in the result'
-    return {'type': chart['type'], 'x': chart['x'], 'y': ys,
+        return None, 'chart has no numeric y column in the result'
+    return {'type': chart['type'], 'x': x, 'y': ys,
             'title': chart.get('title', '')}, None
 
 
@@ -248,7 +274,9 @@ def narrate(question, history_msgs, context, cfg):
         '- Format thousands with commas.\n'
         '- Add one comparison only when the data shows it: the largest contributor, or '
         'the direction of travel across periods.\n'
-        '- If a breakdown runs to more than six rows, give the total and name the top three.\n'
+        '- Never reproduce the table or list it row by row. The reader already has it '
+        'on screen. Summarise instead: the total, the top two or three, and anything '
+        'odd such as rows with no value.\n'
         '- If the table below has rows, answer from them. Only say there is no data '
         'when the table is genuinely empty, and then say what was searched and what '
         'to try instead. Do not apologise.\n'
