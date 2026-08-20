@@ -545,6 +545,13 @@ function aicChart(canvas, spec, columns, rows) {
         fill: area ? 'origin' : false
     }));
 
+    // Denominators the label formatters need: a pie slice is only meaningful
+    // against its own total, and a stack segment against the tallest stack.
+    const sliceTotal = ctx =>
+        ctx.dataset.data.reduce((a, b) => a + (Number(b) || 0), 0) || 1;
+    const stackMax = rows.reduce((m, r) => Math.max(m, spec.y.reduce(
+        (sum, col) => sum + (Number(r[columns.indexOf(col)]) || 0), 0)), 0) || 1;
+
     const cat = {
         ticks: {color: ink, font: {size: 10}, autoSkip: false,
                 maxRotation: horiz ? 0 : 45, minRotation: 0,
@@ -582,15 +589,33 @@ function aicChart(canvas, spec, columns, rows) {
                           displayColors: true, boxWidth: 8,
                           callbacks: {
                               title: items => items[0] ? labels[items[0].dataIndex] : '',
-                              label: c => ' ' + c.dataset.label + ': ' + aicNum(c.parsed[horiz ? 'x' : 'y'])
+                              // Pie and doughnut hand back a bare number here,
+                              // cartesian charts an {x, y} object.
+                              label: c => ' ' + c.dataset.label + ': ' + aicNum(
+                                  (c.parsed && typeof c.parsed === 'object')
+                                      ? c.parsed[horiz ? 'x' : 'y'] : c.parsed)
                           }},
-                // Value labels only where they replace an axis reading rather
-                // than crowd it: a single-series bar chart.
+                // Labels where they replace reading an axis, suppressed where
+                // they would only crowd it: percentages in pie slices, values
+                // inside stack segments big enough to hold them, values at the
+                // end of single-series bars. Lines keep the tooltip instead.
                 datalabels: {
-                    display: isBar && single && !stacked,
-                    anchor: 'end', align: 'end', offset: 3,
-                    color: ink, font: {size: 9.5, family: 'ui-monospace, Consolas, monospace'},
-                    formatter: v => aicShort(v)
+                    display: ctx => {
+                        const v = Number(ctx.dataset.data[ctx.dataIndex]);
+                        if (!isFinite(v) || v === 0) return false;
+                        if (pie) return v / sliceTotal(ctx) >= 0.05;
+                        if (stacked) return v >= stackMax * 0.07;
+                        return isBar && single;
+                    },
+                    anchor: (pie || stacked) ? 'center' : 'end',
+                    align:  (pie || stacked) ? 'center' : 'end',
+                    offset: (pie || stacked) ? 0 : 3,
+                    color:  (pie || stacked) ? '#fff' : ink,
+                    font: {size: 9.5, weight: (pie || stacked) ? '600' : '400',
+                           family: 'ui-monospace, Consolas, monospace'},
+                    formatter: (v, ctx) => pie
+                        ? Math.round(Number(v) / sliceTotal(ctx) * 100) + '%'
+                        : aicShort(v)
                 }
             },
             scales: pie ? {} : (horiz
