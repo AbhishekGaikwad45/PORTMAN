@@ -200,12 +200,6 @@
 }
 .aic-pickers select:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 1px; }
 .aic-pickers .aic-fast { color: var(--aic-accent); font-family: var(--aic-mono); font-size: 10.5px; }
-.aic-cols {
-    font-family: var(--aic-mono); font-size: 10px; line-height: 1.7;
-    color: var(--aic-dim); margin: -2px 0 8px; padding-left: 9px;
-    border-left: 2px solid var(--aic-line);
-}
-.aic-cols b { color: var(--aic-ink); font-weight: 600; }
 
 /* ── empty state ───────────────────────────────────────────────────────── */
 .aic-open { padding: 44px 0 0; }
@@ -283,7 +277,6 @@
                 </select>
                 <span class="aic-fast" id="aic-fast" hidden>period fixed</span>
             </div>
-            <div class="aic-cols" id="aic-cols" hidden></div>
             <div class="aic-form">
                 <textarea id="aic-input" rows="1" placeholder="Ask about cargo, barges, equipment or delays&hellip;"></textarea>
                 <button class="aic-mic" id="aic-mic" onclick="aicMicToggle()" hidden
@@ -312,7 +305,6 @@
 // table below the chart stays the source of truth.
 const AIC_HUES = ['#205a9c', '#e18e35', '#7c3aed', '#c05621', '#3182ce', '#97266d'];
 
-let AIC_META = null;
 let aicHistory = [];
 let aicCharts  = [];
 let aicSeq     = 0;
@@ -338,10 +330,6 @@ async function aicLoadPickers() {
         meta = await (await fetch('/api/module/RP01/ai-chat/sources')).json();
     } catch (_) { return; }
 
-    AIC_META = meta;
-
-    aicShowScope();
-
     const per = document.getElementById('aic-period');
     (meta.periods || []).filter(p => p !== 'custom').forEach(p => {
         const o = document.createElement('option');
@@ -352,19 +340,6 @@ async function aicLoadPickers() {
 
 // Choosing both leaves nothing to infer, so the server skips the routing
 // call entirely. Worth saying out loud - it is the fastest path.
-// Saying what the assistant can see is the difference between guessing at a
-// question and asking one the data can answer.
-function aicShowScope() {
-    const box = document.getElementById('aic-cols');
-    if (!AIC_META) { box.hidden = true; return; }
-    box.hidden = false;
-    box.innerHTML =
-        '<b>Always known:</b> ' + aicEsc((AIC_META.fixed_context || []).join(' · ')) +
-        '<br><b>Queried (' + aicEsc(AIC_META.source) + ') numeric:</b> ' +
-        aicEsc((AIC_META.measures || []).join(', ')) +
-        '<br><b>Group by:</b> ' + aicEsc((AIC_META.labels || []).join(', '));
-}
-
 function aicPickerChanged() {
     document.getElementById('aic-fast').hidden =
         !document.getElementById('aic-period').value;
