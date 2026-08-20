@@ -2,6 +2,7 @@
 {% block title %}AI Chat (Test) - RP01{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
 /* ── AI chat ──────────────────────────────────────────────────────────────
    Conversation column like Claude/ChatGPT, with one domain addition: every
@@ -94,6 +95,7 @@
 .aic-grid td { white-space: nowrap; }
 .aic-grid tr:last-child td { border-bottom: none; }
 .aic-figure { margin-top: 12px; height: 300px; }
+.aic-figure canvas { max-width: 100%; }
 .aic-note { font-size: 11px; color: var(--aic-flag); margin-top: 8px; font-family: var(--aic-mono); }
 .aic-fail {
     border-left: 2px solid #c53030; padding: 2px 0 2px 11px;
@@ -407,7 +409,8 @@ function aicRail(d, wall) {
 function aicGrid(columns, rows) {
     const head = columns.map(c => '<th>' + aicEsc(c) + '</th>').join('');
     const body = rows.slice(0, 300).map(
-        r => '<tr>' + r.map(v => '<td>' + aicEsc(v) + '</td>').join('') + '</tr>').join('');
+        r => '<tr>' + r.map(v => '<td>' + aicEsc(
+            typeof v === 'number' ? aicNum(v) : v) + '</td>').join('') + '</tr>').join('');
     const over = rows.length > 300
         ? '<div class="aic-note">first 300 of ' + rows.length.toLocaleString() + ' rows</div>' : '';
     return '<div class="aic-grid"><table><thead><tr>' + head +
@@ -420,54 +423,110 @@ function aicToggle(btn) {
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
+function aicNum(v) {
+    if (v === null || v === '' || v === undefined) return '';
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    // Aggregates come back with float noise (265238.782). Two decimals is more
+    // precision than any tonnage report uses, and the grid keeps the raw value.
+    return n.toLocaleString(undefined, {maximumFractionDigits: 2});
+}
+
+function aicShort(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return String(v);
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (Math.abs(n) >= 1e3) return Math.round(n / 1e3) + 'k';
+    return aicNum(n);
+}
+
 // Chart.js is built from the validated {type,x,y[],title} spec, never from
 // model-supplied config.
 function aicChart(canvas, spec, columns, rows) {
     const xi   = columns.indexOf(spec.x);
     const ink  = '#6b7787';
     const grid = 'rgba(113,128,150,.14)';
-    const round = spec.type === 'bar' ? {radius: 4, borderSkipped: 'start'} : {};
-    const pie = spec.type === 'pie' || spec.type === 'doughnut';
+    const pie  = spec.type === 'pie' || spec.type === 'doughnut';
+    const labels = rows.map(r => String(r[xi] === null ? '' : r[xi]));
+    const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
 
-    const datasets = spec.y.map((col, i) => Object.assign({
+    // Long category names are the normal case here - operators, equipment,
+    // vessels. Rotating them diagonally makes them hard to read and Chart.js
+    // starts dropping them; turning the bars horizontal lets every label sit
+    // flat and complete.
+    const horiz = spec.type === 'bar' && (longest > 12 || labels.length > 8);
+    const single = spec.y.length === 1;
+
+    if (canvas.parentElement) {
+        canvas.parentElement.style.height =
+            (horiz ? Math.max(220, labels.length * 30 + 90) : 300) + 'px';
+    }
+
+    const datasets = spec.y.map((col, i) => ({
         label: col,
         data: rows.map(r => Number(r[columns.indexOf(col)])),
-        backgroundColor: pie ? rows.map((_, j) => AIC_HUES[j % AIC_HUES.length])
+        backgroundColor: pie ? labels.map((_, j) => AIC_HUES[j % AIC_HUES.length])
                              : AIC_HUES[i % AIC_HUES.length],
         borderColor: pie ? '#fff' : AIC_HUES[i % AIC_HUES.length],
         borderWidth: pie ? 2 : (spec.type === 'line' ? 2 : 0),
+        borderRadius: spec.type === 'bar' ? 4 : 0,
+        borderSkipped: false,
         pointRadius: spec.type === 'line' ? 0 : 4,
         pointHoverRadius: 5,
+        maxBarThickness: horiz ? 22 : 54,
         tension: .25,
         fill: false
-    }, round));
+    }));
+
+    const cat = {
+        ticks: {color: ink, font: {size: 10}, autoSkip: false,
+                maxRotation: horiz ? 0 : 45, minRotation: 0,
+                callback: function (v) {
+                    const l = this.getLabelForValue(v);
+                    return l.length > 26 ? l.slice(0, 25) + '…' : l;
+                }},
+        grid: {display: false}, border: {color: grid}
+    };
+    const val = {
+        beginAtZero: true,
+        ticks: {color: ink, font: {size: 10}, callback: v => aicShort(v)},
+        grid: {color: grid, drawTicks: false}, border: {display: false}
+    };
 
     aicCharts.push(new Chart(canvas, {
         type: spec.type,
-        data: {labels: rows.map(r => String(r[xi])), datasets: datasets},
+        data: {labels: labels, datasets: datasets},
+        plugins: [ChartDataLabels],
         options: {
+            indexAxis: horiz ? 'y' : 'x',
             responsive: true, maintainAspectRatio: false,
             animation: aicReduced ? false : {duration: 480, easing: 'easeOutQuart'},
             interaction: {mode: pie ? 'nearest' : 'index', intersect: false},
+            layout: {padding: {right: horiz && single ? 46 : 6, top: 4}},
             plugins: {
-                title: {display: !!spec.title, text: spec.title, color: ink,
-                        font: {size: 12, weight: '600'}, padding: {bottom: 10}},
-                legend: {display: spec.y.length > 1 || pie, position: 'bottom',
+                title: {display: !!spec.title, text: spec.title, color: '#1f2733',
+                        font: {size: 12, weight: '600'}, padding: {bottom: 12}},
+                legend: {display: !single || pie, position: 'bottom',
                          labels: {color: ink, boxWidth: 10, boxHeight: 10,
                                   usePointStyle: true, pointStyle: 'circle',
                                   font: {size: 11}}},
-                tooltip: {backgroundColor: '#2d3748',
-                          padding: 9, cornerRadius: 4, titleFont: {size: 11},
-                          bodyFont: {size: 11}, displayColors: true, boxWidth: 8}
+                tooltip: {backgroundColor: '#1f2733', padding: 9, cornerRadius: 4,
+                          titleFont: {size: 11}, bodyFont: {size: 11},
+                          displayColors: true, boxWidth: 8,
+                          callbacks: {
+                              title: items => items[0] ? labels[items[0].dataIndex] : '',
+                              label: c => ' ' + c.dataset.label + ': ' + aicNum(c.parsed[horiz ? 'x' : 'y'])
+                          }},
+                // Value labels only where they replace an axis reading rather
+                // than crowd it: a single-series bar chart.
+                datalabels: {
+                    display: spec.type === 'bar' && single,
+                    anchor: 'end', align: 'end', offset: 3,
+                    color: ink, font: {size: 9.5, family: 'ui-monospace, Consolas, monospace'},
+                    formatter: v => aicShort(v)
+                }
             },
-            scales: pie ? {} : {
-                x: {ticks: {color: ink, font: {size: 10}, maxRotation: 0, autoSkipPadding: 14},
-                    grid: {display: false}, border: {color: grid}},
-                y: {beginAtZero: true,
-                    ticks: {color: ink, font: {size: 10},
-                            callback: v => Number(v).toLocaleString()},
-                    grid: {color: grid, drawTicks: false}, border: {display: false}}
-            }
+            scales: pie ? {} : (horiz ? {x: val, y: cat} : {x: cat, y: val})
         }
     }));
 }
