@@ -96,6 +96,25 @@
 .aic-grid tr:last-child td { border-bottom: none; }
 .aic-figure { margin-top: 12px; height: 300px; }
 .aic-figure canvas { max-width: 100%; }
+
+/* A headline figure is text, not pixels - so it can be read and copied. */
+.aic-kpis {
+    margin-top: 12px; display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.aic-kpi {
+    border: 1px solid var(--aic-line); border-left: 3px solid var(--aic-accent);
+    border-radius: 5px; padding: 11px 13px; background: var(--aic-sunk);
+}
+.aic-kpi-val {
+    font-size: 23px; font-weight: 600; line-height: 1.15; color: var(--aic-ink);
+    font-variant-numeric: tabular-nums;
+}
+.aic-kpi-cap {
+    font-family: var(--aic-mono); font-size: 10px; color: var(--aic-dim);
+    margin-top: 5px; text-transform: uppercase; letter-spacing: .04em;
+}
+.aic-kpi-sub { font-size: 12px; color: var(--aic-ink); margin-top: 3px; font-weight: 600; }
 .aic-note { font-size: 11px; color: var(--aic-flag); margin-top: 8px; font-family: var(--aic-mono); }
 .aic-fail {
     border-left: 2px solid #c53030; padding: 2px 0 2px 11px;
@@ -148,6 +167,22 @@
 }
 .aic-send:disabled { opacity: .35; cursor: default; }
 .aic-send:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 2px; }
+
+.aic-mic {
+    border: 1px solid var(--aic-line); border-radius: 7px; background: #fff;
+    color: var(--aic-dim); width: 34px; height: 34px; flex-shrink: 0;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s, border-color .15s, background .15s;
+}
+.aic-mic:hover { color: var(--aic-accent); border-color: var(--aic-accent); }
+.aic-mic:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 2px; }
+.aic-mic:disabled { opacity: .35; cursor: default; }
+.aic-mic[aria-pressed="true"] {
+    background: #c53030; border-color: #c53030; color: #fff;
+    animation: aic-listen 1.4s ease-in-out infinite;
+}
+@keyframes aic-listen { 50% { box-shadow: 0 0 0 5px rgba(197,48,48,.16); } }
+.aic-hint .aic-listening { color: #c53030; font-weight: 600; }
 .aic-hint {
     max-width: var(--aic-col); margin: 7px auto 0;
     font-size: 10.5px; color: var(--aic-dim); font-family: var(--aic-mono);
@@ -194,7 +229,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
     .aic-turn, .aic-panel { animation: none; }
-    .aic-orbit i, .aic-skel span { animation-duration: 0s; }
+    .aic-orbit i, .aic-skel span, .aic-mic[aria-pressed="true"] { animation: none; }
     .aic-scrollport { scroll-behavior: auto; }
 }
 </style>
@@ -251,11 +286,19 @@
             <div class="aic-cols" id="aic-cols" hidden></div>
             <div class="aic-form">
                 <textarea id="aic-input" rows="1" placeholder="Ask about cargo, barges, equipment or delays&hellip;"></textarea>
+                <button class="aic-mic" id="aic-mic" onclick="aicMicToggle()" hidden
+                        aria-pressed="false" title="Dictate a question" aria-label="Dictate a question">
+                    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+                        <path fill="currentColor" d="M8 1.6a2 2 0 0 0-2 2v4.2a2 2 0 1 0 4 0V3.6a2 2 0 0 0-2-2z"/>
+                        <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+                              d="M3.6 7.4a4.4 4.4 0 0 0 8.8 0M8 12.2v2.2"/>
+                    </svg>
+                </button>
                 <button class="aic-send" id="aic-send" onclick="aicAsk()" title="Send" aria-label="Send">&uarr;</button>
             </div>
         </div>
         <div class="aic-hint">
-            <span>Enter sends &middot; Shift+Enter for a new line</span>
+            <span id="aic-hint-text">Enter sends &middot; Shift+Enter for a new line</span>
             <button onclick="aicClear()">Clear conversation</button>
         </div>
     </div>
@@ -454,13 +497,41 @@ function aicShort(v) {
     return aicNum(n);
 }
 
+// A single headline figure is not a chart. Render it as text so it can be
+// read, copied and pasted into a report.
+function aicKpis(spec, columns, rows) {
+    const xi = spec.x ? columns.indexOf(spec.x) : -1;
+    const tiles = [];
+    for (const r of rows.slice(0, 4)) {
+        for (const col of spec.y) {
+            const v = r[columns.indexOf(col)];
+            tiles.push(
+                '<div class="aic-kpi">' +
+                    '<div class="aic-kpi-val">' + aicEsc(aicNum(v)) + '</div>' +
+                    '<div class="aic-kpi-cap">' + aicEsc(col) + '</div>' +
+                    (xi >= 0 ? '<div class="aic-kpi-sub">' + aicEsc(r[xi]) + '</div>' : '') +
+                '</div>');
+            if (tiles.length >= 4) break;
+        }
+        if (tiles.length >= 4) break;
+    }
+    return tiles.join('');
+}
+
 // Chart.js is built from the validated {type,x,y[],title} spec, never from
 // model-supplied config.
 function aicChart(canvas, spec, columns, rows) {
     const xi   = columns.indexOf(spec.x);
     const ink  = '#6b7787';
     const grid = 'rgba(113,128,150,.14)';
-    const pie  = spec.type === 'pie' || spec.type === 'doughnut';
+    const pie     = spec.type === 'pie' || spec.type === 'doughnut';
+    const area    = spec.type === 'area';
+    const stacked = spec.type === 'stacked_bar';
+    const isBar   = spec.type === 'bar' || spec.type === 'hbar' || stacked;
+    // Chart.js has no hbar, area or stacked_bar - they are bar and line with
+    // different options.
+    const kind = isBar ? 'bar' : (area ? 'line' : spec.type);
+
     const labels = rows.map(r => String(r[xi] === null ? '' : r[xi]));
     const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
 
@@ -468,7 +539,8 @@ function aicChart(canvas, spec, columns, rows) {
     // vessels. Rotating them diagonally makes them hard to read and Chart.js
     // starts dropping them; turning the bars horizontal lets every label sit
     // flat and complete.
-    const horiz = spec.type === 'bar' && (longest > 12 || labels.length > 8);
+    const horiz = spec.type === 'hbar' ||
+                  (spec.type === 'bar' && (longest > 12 || labels.length > 8));
     const single = spec.y.length === 1;
 
     if (canvas.parentElement) {
@@ -480,16 +552,17 @@ function aicChart(canvas, spec, columns, rows) {
         label: col,
         data: rows.map(r => Number(r[columns.indexOf(col)])),
         backgroundColor: pie ? labels.map((_, j) => AIC_HUES[j % AIC_HUES.length])
-                             : AIC_HUES[i % AIC_HUES.length],
+                             : (area ? AIC_HUES[i % AIC_HUES.length] + '2e'
+                                     : AIC_HUES[i % AIC_HUES.length]),
         borderColor: pie ? '#fff' : AIC_HUES[i % AIC_HUES.length],
-        borderWidth: pie ? 2 : (spec.type === 'line' ? 2 : 0),
-        borderRadius: spec.type === 'bar' ? 4 : 0,
+        borderWidth: pie ? 2 : (isBar ? 0 : 2),
+        borderRadius: isBar ? 4 : 0,
         borderSkipped: false,
-        pointRadius: spec.type === 'line' ? 0 : 4,
+        pointRadius: (isBar || area || spec.type === 'line') ? 0 : 4,
         pointHoverRadius: 5,
         maxBarThickness: horiz ? 22 : 54,
         tension: .25,
-        fill: false
+        fill: area ? 'origin' : false
     }));
 
     const cat = {
@@ -508,7 +581,7 @@ function aicChart(canvas, spec, columns, rows) {
     };
 
     aicCharts.push(new Chart(canvas, {
-        type: spec.type,
+        type: kind,
         data: {labels: labels, datasets: datasets},
         plugins: [ChartDataLabels],
         options: {
@@ -520,7 +593,7 @@ function aicChart(canvas, spec, columns, rows) {
             plugins: {
                 title: {display: !!spec.title, text: spec.title, color: '#1f2733',
                         font: {size: 12, weight: '600'}, padding: {bottom: 12}},
-                legend: {display: !single || pie, position: 'bottom',
+                legend: {display: !single || pie || stacked, position: 'bottom',
                          labels: {color: ink, boxWidth: 10, boxHeight: 10,
                                   usePointStyle: true, pointStyle: 'circle',
                                   font: {size: 11}}},
@@ -534,15 +607,105 @@ function aicChart(canvas, spec, columns, rows) {
                 // Value labels only where they replace an axis reading rather
                 // than crowd it: a single-series bar chart.
                 datalabels: {
-                    display: spec.type === 'bar' && single,
+                    display: isBar && single && !stacked,
                     anchor: 'end', align: 'end', offset: 3,
                     color: ink, font: {size: 9.5, family: 'ui-monospace, Consolas, monospace'},
                     formatter: v => aicShort(v)
                 }
             },
-            scales: pie ? {} : (horiz ? {x: val, y: cat} : {x: cat, y: val})
+            scales: pie ? {} : (horiz
+                ? {x: Object.assign({stacked: stacked}, val),
+                   y: Object.assign({stacked: stacked}, cat)}
+                : {x: Object.assign({stacked: stacked}, cat),
+                   y: Object.assign({stacked: stacked}, val)})
         }
     }));
+}
+
+// ── dictation ────────────────────────────────────────────────────────────
+// Web Speech API: built into Chrome and Edge, no dependency, no server. Note
+// that Chrome sends the audio to Google for recognition - the spoken question
+// leaves the network, though no port data ever does. Swap in a local
+// whisper.cpp endpoint here if that trade is not acceptable.
+const AIC_SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let aicRec = null;
+let aicListening = false;
+let aicHeardBefore = '';
+
+function aicHint(text, listening) {
+    const el = document.getElementById('aic-hint-text');
+    el.textContent = text;
+    el.className = listening ? 'aic-listening' : '';
+}
+
+function aicHintReset() {
+    aicHint('Enter sends · Shift+Enter for a new line', false);
+}
+
+function aicMicStop() {
+    aicListening = false;
+    document.getElementById('aic-mic').setAttribute('aria-pressed', 'false');
+    aicHintReset();
+}
+
+function aicMicToggle() {
+    if (aicListening) { if (aicRec) aicRec.stop(); return; }
+    if (!AIC_SR) return;
+
+    const input = document.getElementById('aic-input');
+    aicRec = new AIC_SR();
+    aicRec.lang = 'en-IN';
+    aicRec.interimResults = true;
+    aicRec.continuous = false;
+    aicRec.maxAlternatives = 1;
+
+    // Dictation adds to whatever is already typed rather than replacing it.
+    aicHeardBefore = input.value.trim();
+
+    aicRec.onstart = () => {
+        aicListening = true;
+        document.getElementById('aic-mic').setAttribute('aria-pressed', 'true');
+        aicHint('Listening… click the mic again to stop', true);
+    };
+
+    aicRec.onresult = e => {
+        let heard = '';
+        for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+        input.value = (aicHeardBefore ? aicHeardBefore + ' ' : '') + heard.trim();
+        aicGrow(input);
+    };
+
+    aicRec.onerror = e => {
+        aicMicStop();
+        const why = {
+            'not-allowed': 'Microphone blocked. Allow it in the address bar and try again.',
+            'service-not-allowed': 'Microphone blocked by policy.',
+            'no-speech': 'Heard nothing. Try again.',
+            'audio-capture': 'No microphone found.',
+            'network': 'Speech recognition could not reach the network.'
+        }[e.error];
+        aicHint(why || ('Dictation failed: ' + e.error), false);
+    };
+
+    // Deliberately does not send. A misheard question costs a 20 second round
+    // trip, so the text lands in the box for a glance before Enter.
+    aicRec.onend = () => {
+        aicMicStop();
+        input.focus();
+    };
+
+    try {
+        aicRec.start();
+    } catch (err) {
+        aicMicStop();
+        aicHint('Could not start dictation: ' + err.message, false);
+    }
+}
+
+function aicMicInit() {
+    const btn = document.getElementById('aic-mic');
+    if (!AIC_SR || !window.isSecureContext) return;   // needs HTTPS and Chrome/Edge
+    btn.hidden = false;
 }
 
 async function aicAsk() {
@@ -634,7 +797,11 @@ async function aicAsk() {
 
     pending.innerHTML =
         '<div class="aic-say"></div>' +
-        (d.chart ? '<div class="aic-figure"><canvas></canvas></div>' : '') +
+        (d.chart
+            ? (d.chart.type === 'kpi'
+                ? '<div class="aic-kpis">' + aicKpis(d.chart, d.columns, d.rows) + '</div>'
+                : '<div class="aic-figure"><canvas></canvas></div>')
+            : '') +
         (d.chart_error ? '<div class="aic-note">Chart skipped: ' + aicEsc(d.chart_error) + '</div>' : '') +
         aicRail(d, wall) +
         (tools ? '<div class="aic-tools">' + tools + '</div>' : '') +
@@ -645,7 +812,7 @@ async function aicAsk() {
 
     await aicReveal(pending.querySelector('.aic-say'), d.answer || '');
 
-    if (d.chart) {
+    if (d.chart && d.chart.type !== 'kpi') {
         const canvas = pending.querySelector('canvas');
         if (canvas) aicChart(canvas, d.chart, d.columns, d.rows);
     }
@@ -659,6 +826,7 @@ async function aicAsk() {
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('aic-input');
     aicLoadPickers();
+    aicMicInit();
     input.addEventListener('input', () => aicGrow(input));
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aicAsk(); }
