@@ -227,18 +227,44 @@
                     <label><input type="checkbox" id="aiEnabled"> Enable AI chat (the ask endpoint returns 503 while this is off)</label>
                 </div>
                 <div class="config-row">
-                    <label>Ollama Base URL:<br><input type="text" id="aiBaseUrl" placeholder="http://10.0.0.5:11434" style="width:100%;padding:6px;"></label>
-                    <div style="font-size:11px;color:#c0392b;margin-top:4px;">
-                        Ollama has no authentication. This host must be reachable only from this app server.
+                    <label>Model provider:<br>
+                        <select id="aiProvider" onchange="aiProviderChanged()" style="width:100%;padding:6px;">
+                            <option value="ollama">Self-hosted (Ollama)</option>
+                            <option value="gemini">Google Gemini API</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div id="aiOllamaFields">
+                    <div class="config-row">
+                        <label>Ollama Base URL:<br><input type="text" id="aiBaseUrl" placeholder="http://10.0.0.5:11434" style="width:100%;padding:6px;"></label>
+                        <div style="font-size:11px;color:#c0392b;margin-top:4px;">
+                            Ollama has no authentication. This host must be reachable only from this app server.
+                        </div>
                     </div>
                 </div>
-                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-                    <label>Model (all stages):<br><input type="text" id="aiModel" placeholder="qwen2.5-coder:7b" style="width:100%;padding:6px;"></label>
-                    <label>SQL Model (blank = same):<br><input type="text" id="aiSqlModel" placeholder="leave blank" style="width:100%;padding:6px;"></label>
+
+                <div id="aiGeminiFields">
+                    <div class="config-row" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;">
+                        <label>Gemini API key:<br><input type="password" id="aiGeminiKey" placeholder="AIza..." style="width:100%;padding:6px;"></label>
+                        <label>Gemini model:<br><input type="text" id="aiGeminiModel" placeholder="gemini-2.5-flash" style="width:100%;padding:6px;"></label>
+                    </div>
+                    <div style="font-size:11px;color:#c0392b;margin-top:4px;">
+                        Questions and the query results answering them are sent to Google. Berth,
+                        cargo, equipment and target figures leave your network. Ollama keeps all of it
+                        on your own hardware &mdash; choose Gemini only if that trade is acceptable.
+                    </div>
                 </div>
-                <div style="font-size:11px;color:#718096;margin:-4px 0 8px;">
-                    One model handles routing, SQL and narration. Only set a separate SQL model
-                    if you want a small fast model for the other two stages.
+                <div id="aiOllamaModels">
+                    <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <label>Model (all stages):<br><input type="text" id="aiModel" placeholder="qwen2.5-coder:7b" style="width:100%;padding:6px;"></label>
+                        <label>SQL Model (blank = same):<br><input type="text" id="aiSqlModel" placeholder="leave blank" style="width:100%;padding:6px;"></label>
+                    </div>
+                    <div style="font-size:11px;color:#718096;margin:-4px 0 8px;">
+                        One model handles triage, SQL and narration. Set a separate SQL model only if
+                        a small fast model is good enough for the other two &mdash; with
+                        OLLAMA_MAX_LOADED_MODELS at 1, two models means a reload on every stage.
+                    </div>
                 </div>
                 <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                     <label>Read-only DB user:<br><input type="text" id="aiDbUser" placeholder="pb_read" style="width:100%;padding:6px;"></label>
@@ -1503,7 +1529,7 @@ async function testAiConnection() {
         });
         const d = await res.json();
         out.textContent = d.success
-            ? 'OK - ' + d.base_url + '\nInstalled models:\n  ' + (d.models.join('\n  ') || '(none)')
+            ? 'OK - ' + d.target + '\nAvailable models:\n  ' + (d.models.join('\n  ') || '(none)')
             : 'FAILED - ' + d.error;
     } catch (e) {
         out.textContent = 'FAILED - ' + e;

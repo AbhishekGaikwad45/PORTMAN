@@ -356,14 +356,17 @@ def aichat_test():
     Takes base_url from the posted body so the box can be tested before the
     config is saved.
     """
-    from modules.RP01.RP01.ai_chat import ollama as _ollama
-    cfg = dict(_ollama.get_config())
+    from modules.RP01.RP01.ai_chat import llm as _llm
+    cfg = dict(_llm.get_config())
     posted = request.json or {}
-    if posted.get('base_url'):
-        cfg['base_url'] = posted['base_url']
+    # Take the form's current values so a provider can be tested before saving.
+    for field in ('provider', 'base_url', 'gemini_api_key'):
+        if posted.get(field):
+            cfg[field] = posted[field]
+    target = ('Gemini API' if _llm.provider(cfg) == _llm.GEMINI else cfg['base_url'])
     try:
-        return jsonify({'success': True, 'base_url': cfg['base_url'],
-                        'models': _ollama.list_models(cfg)})
+        return jsonify({'success': True, 'target': target,
+                        'models': _llm.list_models(cfg)})
     except Exception as e:
         return jsonify({'success': False, 'error': '%s: %s' % (type(e).__name__, e)})
 

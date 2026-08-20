@@ -126,7 +126,7 @@ def _stub_chat(monkeypatch, *payloads):
 
     def fake(messages, cfg=None, schema=None, model=None, **kw):
         return next(calls)
-    monkeypatch.setattr(aiviews.ollama, 'chat', fake)
+    monkeypatch.setattr(aiviews.llm, 'chat', fake)
 
 
 # ── SQL self-correction ──────────────────────────────────────────────────────
@@ -141,7 +141,7 @@ def test_bad_sql_is_retried_once_with_the_error(monkeypatch):
                                'chart': {'type': 'none', 'x': '', 'y': [], 'title': ''}})
         return json.dumps({'sql': 'SELECT SUM("BL Qty") AS total FROM data',
                            'chart': {'type': 'none', 'x': '', 'y': [], 'title': ''}})
-    monkeypatch.setattr(aiviews.ollama, 'chat', fake)
+    monkeypatch.setattr(aiviews.llm, 'chat', fake)
 
     conn, ddl = sb.load(ROWS)
     out = aiviews.generate_and_run('total?', [], conn, ddl, ROWS, CFG)
@@ -168,7 +168,7 @@ def test_sql_model_is_used_when_set(monkeypatch):
         used.append(model)
         return json.dumps({'sql': 'SELECT 1 AS n FROM data LIMIT 1',
                            'chart': {'type': 'none', 'x': '', 'y': [], 'title': ''}})
-    monkeypatch.setattr(aiviews.ollama, 'chat', fake)
+    monkeypatch.setattr(aiviews.llm, 'chat', fake)
     conn, ddl = sb.load(ROWS)
     aiviews.generate_and_run('q', [], conn, ddl, ROWS, dict(CFG, sql_model='coder:7b'))
     assert used == ['coder:7b']
@@ -229,7 +229,7 @@ def test_user_period_pins_the_schema_enum(monkeypatch):
     def fake(messages, cfg=None, schema=None, model=None, **kw):
         seen['schema'] = schema
         return json.dumps({'in_scope': True, 'needs_query': True, 'period': 'today'})
-    monkeypatch.setattr(aiviews.ollama, 'chat', fake)
+    monkeypatch.setattr(aiviews.llm, 'chat', fake)
 
     out = aiviews.triage('q', [], CFG, want_period='last_month')
     assert seen['schema']['properties']['period']['enum'] == ['last_month']
@@ -533,3 +533,75 @@ def test_narration_forbids_arithmetic():
     src = inspect.getsource(aiviews.narrate)
     assert 'Do NOT do arithmetic' in src
     assert 'never a percentage of a' in src
+
+
+# ── provider switch ──────────────────────────────────────────────────────────
+
+import modules.RP01.RP01.ai_chat.llm as llm
+
+
+def test_provider_defaults_to_self_hosted():
+    assert llm.provider({}) == llm.OLLAMA
+    assert llm.provider({'provider': 'ollama'}) == llm.OLLAMA
+    assert llm.provider({'provider': 'gemini'}) == llm.GEMINI
+    assert llm.provider({'provider': 'nonsense'}) == llm.OLLAMA
+
+
+def test_gemini_schema_conversion():
+    """Gemini wants uppercase types and rejects keys it does not know."""
+    out = llm.to_gemini_schema(aiviews.TRIAGE_SCHEMA)
+    assert out['type'] == 'OBJECT'
+    assert out['properties']['in_scope']['type'] == 'BOOLEAN'
+    assert out['properties']['period']['enum'] == sources.PERIODS
+    assert out['required'] == ['in_scope', 'needs_query', 'period']
+
+
+def test_gemini_schema_handles_arrays():
+    out = llm.to_gemini_schema(aiviews.SQL_SCHEMA)
+    y = out['properties']['chart']['properties']['y']
+    assert y['type'] == 'ARRAY' and y['items']['type'] == 'STRING'
+
+
+def test_gemini_schema_drops_unsupported_keys():
+    out = llm.to_gemini_schema({'type': 'string', 'default': 'x', 'minLength': 2})
+    assert out == {'type': 'STRING'}
+
+
+def test_gemini_messages_split_out_the_system_prompt():
+    system, contents = llm.to_gemini_messages([
+        {'role': 'system', 'content': 'you are an analyst'},
+        {'role': 'user', 'content': 'hello'},
+        {'role': 'assistant', 'content': 'hi'},
+        {'role': 'user', 'content': 'again'},
+    ])
+    assert system == 'you are an analyst'
+    assert [c['role'] for c in contents] == ['user', 'model', 'user']
+    assert contents[0]['parts'][0]['text'] == 'hello'
+
+
+def test_gemini_reply_reading():
+    ok = {'candidates': [{'content': {'parts': [{'text': 'a'}, {'text': 'b'}]}}]}
+    assert llm.read_gemini_reply(ok) == 'ab'
+
+
+def test_gemini_empty_reply_says_why():
+    with pytest.raises(ValueError, match='MAX_TOKENS'):
+        llm.read_gemini_reply({'candidates': [{'finishReason': 'MAX_TOKENS',
+                                               'content': {'parts': []}}]})
+    with pytest.raises(ValueError, match='blocked: SAFETY'):
+        llm.read_gemini_reply({'promptFeedback': {'blockReason': 'SAFETY'}})
+
+
+def test_gemini_without_a_key_fails_clearly():
+    with pytest.raises(ValueError, match='no API key'):
+        llm.chat([{'role': 'user', 'content': 'x'}],
+                 cfg=dict(llm.DEFAULTS, provider='gemini', gemini_api_key=''))
+
+
+def test_models_used_reports_the_provider():
+    g = aiviews._models_used(dict(llm.DEFAULTS, provider='gemini',
+                                  gemini_model='gemini-2.5-pro'))
+    assert g['provider'] == 'gemini' and g['sql'] == 'gemini-2.5-pro'
+    assert g['split'] is False
+    o = aiviews._models_used(dict(llm.DEFAULTS, provider='ollama'))
+    assert o['provider'] == 'ollama'

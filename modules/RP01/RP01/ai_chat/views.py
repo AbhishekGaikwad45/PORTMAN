@@ -29,7 +29,7 @@ from config import DATABASE_URL
 
 from .. import bp
 from ..custom_report.views import fetch_source_rows
-from . import ollama, sandbox, sources
+from . import llm, sandbox, sources
 
 MAX_NARRATE_ROWS = 100
 MAX_DISPLAY_ROWS = 500
@@ -101,16 +101,20 @@ class OutOfScope(Exception):
 
 
 def _models_used(cfg):
-    """Which model served which stage.
+    """Which provider and model served which stage.
 
-    Two different models means Ollama may evict and reload one on every stage
-    when OLLAMA_MAX_LOADED_MODELS is 1 - gigabytes off disk per question, which
-    dwarfs inference itself. Surfacing this makes that visible instead of
+    Two different Ollama models means it may evict and reload one on every
+    stage when OLLAMA_MAX_LOADED_MODELS is 1 - gigabytes off disk per question,
+    which dwarfs inference itself. Surfacing this makes it visible instead of
     looking like slow inference.
     """
+    if llm.provider(cfg) == llm.GEMINI:
+        name = cfg.get('gemini_model') or llm.DEFAULTS['gemini_model']
+        return {'provider': llm.GEMINI, 'triage': name, 'sql': name,
+                'narrate': name, 'split': False}
     main = cfg.get('model')
     sql = cfg.get('sql_model') or main
-    return {'triage': main, 'sql': sql, 'narrate': main,
+    return {'provider': llm.OLLAMA, 'triage': main, 'sql': sql, 'narrate': main,
             'split': bool(cfg.get('sql_model')) and sql != main}
 
 
@@ -372,7 +376,7 @@ def triage(question, history_msgs, cfg, want_period=None):
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
-    out = json.loads(ollama.chat(msgs, cfg=cfg, schema=schema, num_predict=100))
+    out = json.loads(llm.chat(msgs, cfg=cfg, schema=schema, num_predict=100))
 
     if out.get('in_scope') is False:
         raise OutOfScope()
@@ -482,7 +486,7 @@ def generate_and_run(question, history_msgs, conn, ddl, rows, cfg):
 
     last_err = None
     for attempt in (1, 2):
-        out = json.loads(ollama.chat(msgs, cfg=cfg, schema=SQL_SCHEMA, model=model,
+        out = json.loads(llm.chat(msgs, cfg=cfg, schema=SQL_SCHEMA, model=model,
                                      num_predict=300))
         sql = out.get('sql', '')
         try:
@@ -568,7 +572,7 @@ def narrate(question, history_msgs, context, cfg):
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
-    return ollama.chat(msgs, cfg=cfg, num_predict=350).strip()
+    return llm.chat(msgs, cfg=cfg, num_predict=350).strip()
 
 
 # -- endpoints ---------------------------------------------------------------
@@ -600,7 +604,7 @@ def ai_chat_sources():
 @bp.route('/api/module/RP01/ai-chat/ask', methods=['POST'])
 @login_required
 def ai_chat_ask():
-    cfg = ollama.get_config()
+    cfg = llm.get_config()
     if not cfg.get('enabled'):
         return jsonify({'error': 'AI chat is disabled. Enable it in Admin > AI Config.'}), 503
 
