@@ -16,8 +16,12 @@ import sqlite3
 import time
 from datetime import date
 from functools import wraps
+from urllib.parse import quote, urlparse, urlunparse
 
+import psycopg2
 from flask import jsonify, redirect, render_template, request, session, url_for
+
+from config import DATABASE_URL
 
 from .. import bp
 from ..custom_report.views import fetch_source_rows
@@ -43,13 +47,14 @@ def login_required(f):
 ROUTE_SCHEMA = {
     'type': 'object',
     'properties': {
+        'in_scope':  {'type': 'boolean'},
         'source':    {'type': 'string', 'enum': sources.ALL_SOURCES},
         'date_col':  {'type': 'string'},
         'period':    {'type': 'string', 'enum': sources.PERIODS},
         'from_date': {'type': 'string'},
         'to_date':   {'type': 'string'},
     },
-    'required': ['source', 'date_col', 'period'],
+    'required': ['in_scope', 'source', 'date_col', 'period'],
 }
 
 SQL_SCHEMA = {
@@ -71,6 +76,27 @@ SQL_SCHEMA = {
 }
 
 
+def readonly_connection(cfg):
+    """Open the source query on a read-only role, when one is configured.
+
+    Belt and braces on top of the sqlite sandbox: the sandbox stops the model's
+    own SQL touching Postgres, and this stops the whole AI path writing
+    anything even if some other guard fails. Returns None to fall back to the
+    app's normal connection.
+    """
+    user = (cfg.get('db_user') or '').strip()
+    if not user:
+        return None
+    pw = cfg.get('db_password') or ''
+    p = urlparse(DATABASE_URL)
+    netloc = '%s:%s@%s' % (quote(user, safe=''), quote(pw, safe=''), p.hostname)
+    if p.port:
+        netloc += ':%d' % p.port
+    conn = psycopg2.connect(urlunparse(p._replace(netloc=netloc)))
+    conn.cursor().execute('SET default_transaction_read_only = on')
+    return conn
+
+
 # -- history -----------------------------------------------------------------
 
 def trim_history(history, max_chars):
@@ -90,6 +116,10 @@ def trim_history(history, max_chars):
 
 
 # -- stage 1: route ----------------------------------------------------------
+
+class OutOfScope(Exception):
+    """The question is not about this port's operations."""
+
 
 def route(question, history_msgs, cfg, want_source=None, want_period=None):
     """Pick source + date column + period.
@@ -119,11 +149,17 @@ def route(question, history_msgs, cfg, want_source=None, want_period=None):
         "- period must be one of: " + ', '.join(sources.PERIODS) + ". Use custom only "
         "when the question names explicit dates, and then also set from_date and to_date "
         "as YYYY-MM-DD.\n"
-        "- If the question states no period, use this_fy."
+        "- If the question states no period, use this_fy.\n"
+        "- in_scope is false only when the question has nothing to do with this "
+        "port's operations - general knowledge, chit-chat, coding, other companies. "
+        "Anything about cargo, barges, vessels, equipment, shifts, berths, delays, "
+        "throughput or turnaround is in scope, even if this data cannot answer it."
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
     out = json.loads(ollama.chat(msgs, cfg=cfg, schema=schema, num_predict=120))
+    if out.get('in_scope') is False:
+        raise OutOfScope()
     return _settle(out.get('source'), out.get('date_col'),
                    out.get('period'), out)
 
@@ -262,6 +298,34 @@ def _as_table(cols, rows):
     return '\n'.join(out)[:MAX_NARRATE_CHARS]
 
 
+def _fmt(v):
+    if isinstance(v, float) and v == int(v):
+        v = int(v)
+    return '{:,}'.format(v) if isinstance(v, (int, float)) else str(v)
+
+
+def ensure_answer(answer, columns, rows):
+    """Guarantee a single-value result actually appears in the prose.
+
+    Small models narrate around a lone number - "the total has been
+    calculated" with no total in sight. When the result is one cell, state the
+    value outright rather than trusting the model to.
+    """
+    answer = (answer or '').strip()
+    if len(rows) != 1 or len(columns) != 1:
+        return answer or 'No readable answer came back. Check the SQL below.'
+
+    value = rows[0][0]
+    if value is None:
+        return answer or ('%s came back empty for that period.' % columns[0])
+
+    shown = _fmt(value)
+    if answer and (shown in answer or str(value) in answer):
+        return answer
+    stated = '%s: %s' % (columns[0], shown)
+    return stated + ('. ' + answer if answer else '.')
+
+
 def narrate(question, history_msgs, context, cfg):
     system = (
         'You are a port operations analyst. Answer the question using ONLY the data below.\n\n'
@@ -390,8 +454,14 @@ def ai_chat_ask():
             row_count = None
         else:
             t = time.time()
-            rows = fetch_source_rows(picked['source'], picked['date_col'],
-                                     picked['from_date'], picked['to_date'])
+            ro = readonly_connection(cfg)
+            try:
+                rows = fetch_source_rows(picked['source'], picked['date_col'],
+                                         picked['from_date'], picked['to_date'],
+                                         conn=ro)
+            finally:
+                if ro:
+                    ro.close()
             timing['fetch'] = round(time.time() - t, 2)
             source_rows = len(rows)
             if rows:
@@ -421,16 +491,33 @@ def ai_chat_ask():
             finally:
                 conn.close()
 
-            context = ('Result of the query below, %d rows from %s (%s to %s):\n'
-                       % (len(result['rows']), picked['source'],
-                          picked['from_date'], picked['to_date'])
-                       + _as_table(result['columns'], result['rows']))
+            if len(result['rows']) == 1 and len(result['columns']) == 1:
+                context = ('The query returned a single value: %s = %s. '
+                           'Say that number in your answer.'
+                           % (result['columns'][0], _fmt(result['rows'][0][0])))
+            else:
+                context = ('Result of the query below, %d rows from %s (%s to %s):\n'
+                           % (len(result['rows']), picked['source'],
+                              picked['from_date'], picked['to_date'])
+                           + _as_table(result['columns'], result['rows']))
             row_count = len(result['rows'])
 
         t = time.time()
-        answer = narrate(question, history, context, cfg)
+        answer = ensure_answer(narrate(question, history, context, cfg),
+                               result['columns'], result['rows'])
         timing['narrate'] = round(time.time() - t, 2)
 
+    except OutOfScope:
+        return jsonify({
+            'answer': ('I only answer questions about this port’s operations — '
+                       'cargo, barges, vessels, equipment, shifts, berths, delays and '
+                       'turnaround. Ask me one of those.'),
+            'source': None, 'date_col': '', 'period': '', 'from_date': '', 'to_date': '',
+            'sql': None, 'sql_retried': False, 'columns': [], 'rows': [],
+            'row_count': None, 'chart': None, 'chart_error': None, 'source_rows': None,
+            'routed_by': 'model', 'out_of_scope': True,
+            'history_trimmed': history_trimmed, 'timing': timing,
+        })
     except Exception as e:
         return jsonify({'error': '%s: %s' % (type(e).__name__, e), 'timing': timing}), 502
 

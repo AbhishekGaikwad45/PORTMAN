@@ -172,12 +172,16 @@ def _build_date_where(source, date_col, from_date, to_date):
     return clause, (from_val, to_val)
 
 
-def fetch_source_rows(source, date_col=None, from_date=None, to_date=None):
+def fetch_source_rows(source, date_col=None, from_date=None, to_date=None, conn=None):
     """Run a Custom Report data source and return plain dict rows.
 
     Split out of the pivot_data view so other callers (RP01 AI chat) reuse
     these trusted, parameterized queries instead of writing their own SQL.
     Raises ValueError on an unknown source.
+
+    Pass `conn` to run on a specific connection - the AI chat uses a read-only
+    role so nothing on that path can write, whatever else goes wrong. The
+    caller owns a connection it supplies; only one opened here gets closed.
     """
     if source not in VALID_SOURCES:
         raise ValueError('Unknown data source')
@@ -189,7 +193,8 @@ def fetch_source_rows(source, date_col=None, from_date=None, to_date=None):
 
     where_clause, where_params = _build_date_where(source, date_col, from_date, to_date)
 
-    conn = get_db()
+    owned = conn is None
+    conn = conn or get_db()
     cur  = get_cursor(conn)
 
     try:
@@ -483,7 +488,8 @@ def fetch_source_rows(source, date_col=None, from_date=None, to_date=None):
 
         rows = [_row_to_dict(r) for r in cur.fetchall()]
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
     # Post-process lueu sources: compute Diff Hrs from from_time / to_time (HH:MM)
     if source in ('lueu-equipment', 'lueu-historical'):

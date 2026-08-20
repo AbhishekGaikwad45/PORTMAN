@@ -233,8 +233,20 @@
                     </div>
                 </div>
                 <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-                    <label>Model (routing + narration):<br><input type="text" id="aiModel" placeholder="llama3.2:3b" style="width:100%;padding:6px;"></label>
-                    <label>SQL Model (blank = same):<br><input type="text" id="aiSqlModel" placeholder="qwen2.5-coder:7b" style="width:100%;padding:6px;"></label>
+                    <label>Model (all stages):<br><input type="text" id="aiModel" placeholder="qwen2.5-coder:7b" style="width:100%;padding:6px;"></label>
+                    <label>SQL Model (blank = same):<br><input type="text" id="aiSqlModel" placeholder="leave blank" style="width:100%;padding:6px;"></label>
+                </div>
+                <div style="font-size:11px;color:#718096;margin:-4px 0 8px;">
+                    One model handles routing, SQL and narration. Only set a separate SQL model
+                    if you want a small fast model for the other two stages.
+                </div>
+                <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <label>Read-only DB user:<br><input type="text" id="aiDbUser" placeholder="pb_read" style="width:100%;padding:6px;"></label>
+                    <label>Read-only DB password:<br><input type="password" id="aiDbPassword" placeholder="blank = use the app's own login" style="width:100%;padding:6px;"></label>
+                </div>
+                <div style="font-size:11px;color:#718096;margin:-4px 0 8px;">
+                    Source queries for AI chat run as this role, so nothing on that path can write.
+                    Same host, port and database as the app; only the login changes.
                 </div>
                 <div class="config-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
                     <label>Keep Alive:<br><input type="text" id="aiKeepAlive" placeholder="30m" style="width:100%;padding:6px;"></label>
@@ -1429,7 +1441,8 @@ async function loadGstConfig() {
 }
 
 const AI_DEFAULTS = {
-    base_url: 'http://localhost:11434', model: 'llama3.2:3b', sql_model: '',
+    base_url: 'http://localhost:11434', model: 'qwen2.5-coder:7b', sql_model: '',
+    db_user: '', db_password: '',
     keep_alive: '30m', timeout: 180, temperature: 0, max_rows: 50000,
     max_result_rows: 5000, max_history_chars: 12000, enabled: false
 };
@@ -1441,6 +1454,8 @@ async function loadAiConfig() {
     document.getElementById('aiBaseUrl').value = c.base_url;
     document.getElementById('aiModel').value = c.model;
     document.getElementById('aiSqlModel').value = c.sql_model;
+    document.getElementById('aiDbUser').value = c.db_user;
+    document.getElementById('aiDbPassword').value = c.db_password;
     document.getElementById('aiKeepAlive').value = c.keep_alive;
     document.getElementById('aiTimeout').value = c.timeout;
     document.getElementById('aiTemperature').value = c.temperature;
@@ -1460,6 +1475,8 @@ async function saveAiConfig() {
         base_url: document.getElementById('aiBaseUrl').value.trim() || AI_DEFAULTS.base_url,
         model: document.getElementById('aiModel').value.trim() || AI_DEFAULTS.model,
         sql_model: document.getElementById('aiSqlModel').value.trim(),
+        db_user: document.getElementById('aiDbUser').value.trim(),
+        db_password: document.getElementById('aiDbPassword').value,
         keep_alive: document.getElementById('aiKeepAlive').value.trim() || AI_DEFAULTS.keep_alive,
         timeout: _aiNum('aiTimeout', AI_DEFAULTS.timeout),
         temperature: _aiNum('aiTemperature', AI_DEFAULTS.temperature),

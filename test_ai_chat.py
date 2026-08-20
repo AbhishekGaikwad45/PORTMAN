@@ -381,3 +381,58 @@ def test_seen_columns_ignore_internal_ones():
     finally:
         sources._seen_columns.clear()
         sources._seen_columns.update(original)
+
+
+# ── scope guardrail ──────────────────────────────────────────────────────────
+
+def test_off_topic_question_is_refused_before_any_query(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': False, 'source': 'mbc-ops',
+        'date_col': 'doc_date', 'period': 'this_fy'}))
+    with pytest.raises(aiviews.OutOfScope):
+        aiviews.route('write me a python script', [], CFG)
+
+
+def test_in_scope_question_proceeds(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': True, 'source': 'mbc-ops',
+        'date_col': 'doc_date', 'period': 'this_fy'}))
+    assert aiviews.route('IBRM discharge', [], CFG)['source'] == 'mbc-ops'
+
+
+def test_missing_in_scope_is_treated_as_in_scope(monkeypatch):
+    """Only an explicit false refuses; a silent model must not lock users out."""
+    _stub_chat(monkeypatch, json.dumps({
+        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'this_fy'}))
+    assert aiviews.route('q', [], CFG)['source'] == 'mbc-ops'
+
+
+# ── single-value answers ─────────────────────────────────────────────────────
+
+def test_single_value_is_stated_even_if_the_model_omits_it():
+    assert aiviews.ensure_answer('', ['Total MT'], [[35]]) == 'Total MT: 35.'
+    assert aiviews.ensure_answer('The total has been calculated.',
+                                 ['Total MT'], [[35.0]]).startswith('Total MT: 35.')
+
+
+def test_single_value_answer_left_alone_when_the_number_is_there():
+    assert aiviews.ensure_answer('Total was 35 MT.', ['Total MT'], [[35]]) == 'Total was 35 MT.'
+
+
+def test_single_value_formats_thousands():
+    assert aiviews.ensure_answer('', ['Total MT'], [[1240500]]) == 'Total MT: 1,240,500.'
+
+
+def test_null_single_value_says_so():
+    assert 'empty' in aiviews.ensure_answer('', ['Total MT'], [[None]])
+
+
+def test_multi_row_answers_are_not_rewritten():
+    assert aiviews.ensure_answer('BUL-05 led.', ['a', 'b'], [[1, 2], [3, 4]]) == 'BUL-05 led.'
+
+
+# ── read-only connection ─────────────────────────────────────────────────────
+
+def test_no_readonly_user_means_the_normal_connection():
+    assert aiviews.readonly_connection({}) is None
+    assert aiviews.readonly_connection({'db_user': '  '}) is None

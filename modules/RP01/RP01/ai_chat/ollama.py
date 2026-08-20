@@ -6,8 +6,12 @@ from database import get_module_config
 DEFAULTS = {
     'enabled':           False,
     'base_url':          'http://localhost:11434',
-    'model':             'llama3.2:3b',   # routing + narration
+    # One capable model handles all three stages. Splitting only pays if a
+    # small fast model is good enough for routing and narration but not SQL.
+    'model':             'qwen2.5-coder:7b',
     'sql_model':         '',              # blank -> use `model`
+    'db_user':           '',              # read-only DB role for the AI path
+    'db_password':       '',
     'keep_alive':        '30m',           # cold-loading an 18GB model per request is brutal
     'timeout':           180,             # CPU inference is slow; this is not a typo
     'temperature':       0.0,
