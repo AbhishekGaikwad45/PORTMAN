@@ -1467,11 +1467,20 @@ async function loadGstConfig() {
 }
 
 const AI_DEFAULTS = {
+    provider: 'ollama',
+    gemini_api_key: '', gemini_model: 'gemini-2.5-flash',
     base_url: 'http://localhost:11434', model: 'qwen2.5-coder:7b', sql_model: '',
     db_user: '', db_password: '',
     keep_alive: '30m', timeout: 180, temperature: 0, max_rows: 50000,
     max_result_rows: 5000, max_history_chars: 12000, enabled: false
 };
+
+function aiProviderChanged() {
+    const gemini = document.getElementById('aiProvider').value === 'gemini';
+    document.getElementById('aiOllamaFields').style.display = gemini ? 'none' : '';
+    document.getElementById('aiOllamaModels').style.display = gemini ? 'none' : '';
+    document.getElementById('aiGeminiFields').style.display = gemini ? '' : 'none';
+}
 
 async function loadAiConfig() {
     const saved = await (await fetch('/admin/api/config/AICHAT')).json();
@@ -1480,6 +1489,10 @@ async function loadAiConfig() {
     document.getElementById('aiBaseUrl').value = c.base_url;
     document.getElementById('aiModel').value = c.model;
     document.getElementById('aiSqlModel').value = c.sql_model;
+    document.getElementById('aiProvider').value = c.provider;
+    document.getElementById('aiGeminiKey').value = c.gemini_api_key;
+    document.getElementById('aiGeminiModel').value = c.gemini_model;
+    aiProviderChanged();
     document.getElementById('aiDbUser').value = c.db_user;
     document.getElementById('aiDbPassword').value = c.db_password;
     document.getElementById('aiKeepAlive').value = c.keep_alive;
@@ -1501,6 +1514,10 @@ async function saveAiConfig() {
         base_url: document.getElementById('aiBaseUrl').value.trim() || AI_DEFAULTS.base_url,
         model: document.getElementById('aiModel').value.trim() || AI_DEFAULTS.model,
         sql_model: document.getElementById('aiSqlModel').value.trim(),
+        provider: document.getElementById('aiProvider').value,
+        gemini_api_key: document.getElementById('aiGeminiKey').value.trim(),
+        gemini_model: document.getElementById('aiGeminiModel').value.trim()
+                      || AI_DEFAULTS.gemini_model,
         db_user: document.getElementById('aiDbUser').value.trim(),
         db_password: document.getElementById('aiDbPassword').value,
         keep_alive: document.getElementById('aiKeepAlive').value.trim() || AI_DEFAULTS.keep_alive,
@@ -1525,7 +1542,11 @@ async function testAiConnection() {
         const res = await fetch('/admin/api/aichat/test', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({base_url: document.getElementById('aiBaseUrl').value.trim()})
+            body: JSON.stringify({
+                provider: document.getElementById('aiProvider').value,
+                base_url: document.getElementById('aiBaseUrl').value.trim(),
+                gemini_api_key: document.getElementById('aiGeminiKey').value.trim()
+            })
         });
         const d = await res.json();
         out.textContent = d.success

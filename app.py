@@ -261,10 +261,14 @@ try:
         app.logger.warning('FIN01 billed-tracking reconciliation repaired %s', _repaired)
     _stuck = fin01_model.stuck_billed_cargo()
     if _stuck:
+        # Count and a sample only. The full list ran to 862 tuples on one line
+        # every boot, which buried everything else in the log; anyone acting on
+        # this needs the query, not a wall of ids.
+        _sample = ', '.join('%s#%s' % (r['source_type'], r['id']) for r in _stuck[:5])
         app.logger.warning(
             'FIN01: %d cargo declaration(s) flagged billed with no live bill and no '
-            'bill_id — cutover mark or stale tracking, needs a human: %s',
-            len(_stuck), [(r['source_type'], r['id']) for r in _stuck])
+            'bill_id — cutover mark or stale tracking, needs a human. First few: %s%s',
+            len(_stuck), _sample, ', ...' if len(_stuck) > 5 else '')
 except Exception:
     app.logger.exception('FIN01 billed-tracking reconciliation failed at startup')
 
