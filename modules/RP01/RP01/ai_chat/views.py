@@ -211,12 +211,34 @@ def fixed_context(ttl=CONTEXT_TTL):
     return data
 
 
+def _pct(part, whole):
+    """Percentage as a string, or None when it would be meaningless.
+
+    Every ratio the model is allowed to say is worked out here. A small model
+    asked to divide 24,197 by 25,004,386 answered 4.3% - out by a factor of
+    forty-four, stated with total confidence.
+    """
+    try:
+        part, whole = float(part), float(whole)
+    except (TypeError, ValueError):
+        return None
+    if not whole:
+        return None
+    pct = part / whole * 100
+    return ('%.2f' % pct).rstrip('0').rstrip('.') if pct < 10 else '%.1f' % pct
+
+
 def _card_line(card):
     if not isinstance(card, dict):
         return ''
     bits = ['%s MT' % _fmt(card.get('total') or 0)]
     if card.get('target'):
         bits.append('target %s' % _fmt(card['target']))
+        pct = _pct(card.get('total'), card['target'])
+        if pct is not None:
+            bits.append('%s%% of that target' % pct)
+    if card.get('required_daily'):
+        bits.append('daily rate needed %s' % _fmt(card['required_daily']))
     by_type = card.get('by_type') or {}
     if by_type:
         bits.append('by type: ' + ', '.join(
@@ -244,6 +266,12 @@ def render_fixed_context(ctx):
         lines.append('  FY %s targets: base %s MT, effective %s MT'
                      % (tg.get('financial_year'), _fmt(tg.get('fy_base_target') or 0),
                         _fmt(tg.get('fy_effective_target') or 0)))
+        # Stated here so nothing downstream has to divide.
+        fy_card = (ov.get('cargo_cards') or {}).get('current_fy') or {}
+        done = _pct(fy_card.get('total'), tg.get('fy_effective_target'))
+        if done is not None:
+            lines.append('  FY progress: %s MT delivered, %s%% of the effective target'
+                         % (_fmt(fy_card.get('total') or 0), done))
         months = [m for m in (tg.get('monthly') or []) if m.get('base')]
         if months:
             lines.append('  Monthly targets: ' + ', '.join(
@@ -529,7 +557,13 @@ def narrate(question, history_msgs, context, cfg):
         '- If a result table is present and has rows, answer from it. Only say there '
         'is no data when it is genuinely empty, and then say what was searched and '
         'what to try instead. Do not apologise.\n'
-        '- Never state a number that is not in the data, and never estimate.\n\n'
+        '- Never state a number that is not in the data, and never estimate.\n'
+        '- Do NOT do arithmetic. No percentages, shares, differences, averages or '
+        'ratios of your own. Percentages that matter are already given above - copy '
+        'them exactly. If the figure you want is not there, name the two numbers '
+        'instead of deriving one from them.\n'
+        '- Compare like with like. A single day is never a percentage of a '
+        'financial-year target.\n\n'
         + context
     )
     msgs = [{'role': 'system', 'content': system}] + history_msgs + \

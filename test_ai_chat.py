@@ -492,3 +492,44 @@ def test_triage_applies_the_override(monkeypatch):
         'in_scope': True, 'needs_query': False, 'period': 'this_month'}))
     out = aiviews.triage('pie chart of equipment by quantity', [], CFG)
     assert out['needs_query'] is True
+
+
+# ── arithmetic is Python's job ───────────────────────────────────────────────
+
+def test_percentages_are_computed_not_left_to_the_model():
+    """A 3B asked to divide 24,197 by 25,004,386 answered 4.3%."""
+    assert aiviews._pct(24197, 25004386) == '0.1'        # the model said 4.3%
+    assert aiviews._pct(1240500, 4000000) == '31.0'
+    assert aiviews._pct(50, 100) == '50.0'
+
+
+def test_pct_refuses_meaningless_input():
+    assert aiviews._pct(5, 0) is None
+    assert aiviews._pct(None, 100) is None
+    assert aiviews._pct('abc', 100) is None
+
+
+def test_card_line_states_progress_against_target():
+    line = aiviews._card_line({'total': 12345, 'target': 15000,
+                               'by_type': {'IBRM': 12345}})
+    assert '12,345 MT' in line
+    assert 'target 15,000' in line
+    assert '82.3% of that target' in line
+
+
+def test_fy_progress_is_stated_so_nothing_has_to_divide():
+    text = aiviews.render_fixed_context({
+        'overview': {'as_of': 'now',
+                     'cargo_cards': {'current_fy': {'label': 'FY 2026-27',
+                                                    'total': 1240500}},
+                     'berths': []},
+        'targets': {'financial_year': '2026-27', 'fy_base_target': 25000000,
+                    'fy_effective_target': 25004386, 'monthly': []}})
+    assert 'FY progress: 1,240,500 MT delivered, 4.96% of the effective target' in text
+
+
+def test_narration_forbids_arithmetic():
+    import inspect
+    src = inspect.getsource(aiviews.narrate)
+    assert 'Do NOT do arithmetic' in src
+    assert 'never a percentage of a' in src
