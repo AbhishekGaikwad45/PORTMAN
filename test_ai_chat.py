@@ -336,3 +336,48 @@ def test_chart_still_rejects_a_name_that_is_not_there():
         {'type': 'bar', 'x': '"Vessel"', 'y': ['"Total"'], 'title': 't'},
         ['Equipment', 'Total'])
     assert chart is None and 'x-axis' in err
+
+
+# ── column knowledge ─────────────────────────────────────────────────────────
+
+def test_catalog_separates_numeric_columns_from_labels():
+    """The router must be able to see that Delay is a label, not a duration."""
+    text = sources.catalog_prompt()
+    assert 'Numeric (can total/average): Quantity, Diff Hrs' in text
+    assert 'Delay' in text
+    measures, _ = sources.columns_for('lueu-equipment')
+    assert 'Delay' not in measures
+
+
+def test_every_trusted_pivot_source_declares_columns():
+    for key in sources.ALL_SOURCES:
+        if key == sources.PORT_OVERVIEW:
+            continue
+        measures, labels = sources.columns_for(key)
+        assert measures, '%s has no numeric column declared' % key
+        assert labels, '%s has no label column declared' % key
+
+
+def test_seen_columns_correct_a_stale_catalog():
+    """A real query is the authority; the curated list only bootstraps."""
+    original = dict(sources._seen_columns)
+    try:
+        sources.remember_columns('mbc-ops', ['Cargo Type', 'BL Qty', 'Brand New Column'])
+        measures, labels = sources.columns_for('mbc-ops')
+        assert measures == ['BL Qty']
+        assert 'Brand New Column' in labels        # picked up automatically
+        assert 'Customer' not in labels            # gone from the real result
+    finally:
+        sources._seen_columns.clear()
+        sources._seen_columns.update(original)
+
+
+def test_seen_columns_ignore_internal_ones():
+    original = dict(sources._seen_columns)
+    try:
+        sources.remember_columns('lueu-equipment', ['Equipment', 'Quantity', '_from_time'])
+        _, labels = sources.columns_for('lueu-equipment')
+        assert '_from_time' not in labels
+    finally:
+        sources._seen_columns.clear()
+        sources._seen_columns.update(original)

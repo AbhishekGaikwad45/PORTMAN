@@ -165,6 +165,12 @@
 }
 .aic-pickers select:focus-visible { outline: 2px solid var(--aic-accent); outline-offset: 1px; }
 .aic-pickers .aic-fast { color: var(--aic-accent); font-family: var(--aic-mono); font-size: 10.5px; }
+.aic-cols {
+    font-family: var(--aic-mono); font-size: 10px; line-height: 1.7;
+    color: var(--aic-dim); margin: -2px 0 8px; padding-left: 9px;
+    border-left: 2px solid var(--aic-line);
+}
+.aic-cols b { color: var(--aic-ink); font-weight: 600; }
 
 /* ── empty state ───────────────────────────────────────────────────────── */
 .aic-open { padding: 44px 0 0; }
@@ -246,6 +252,7 @@
                 </select>
                 <span class="aic-fast" id="aic-fast" hidden>routing step skipped</span>
             </div>
+            <div class="aic-cols" id="aic-cols" hidden></div>
             <div class="aic-form">
                 <textarea id="aic-input" rows="1" placeholder="Ask about cargo, barges, equipment or delays&hellip;"></textarea>
                 <button class="aic-send" id="aic-send" onclick="aicAsk()" title="Send" aria-label="Send">&uarr;</button>
@@ -266,6 +273,7 @@
 // table below the chart stays the source of truth.
 const AIC_HUES = ['#205a9c', '#e18e35', '#7c3aed', '#c05621', '#3182ce', '#97266d'];
 
+const AIC_COLS = {};
 let aicHistory = [];
 let aicCharts  = [];
 let aicSeq     = 0;
@@ -293,6 +301,7 @@ async function aicLoadPickers() {
 
     const src = document.getElementById('aic-source');
     meta.sources.forEach(s => {
+        AIC_COLS[s.key] = s;
         const o = document.createElement('option');
         o.value = s.key; o.textContent = s.key; o.title = s.description;
         src.appendChild(o);
@@ -309,9 +318,22 @@ async function aicLoadPickers() {
 // Choosing both leaves nothing to infer, so the server skips the routing
 // call entirely. Worth saying out loud - it is the fastest path.
 function aicPickerChanged() {
-    const both = document.getElementById('aic-source').value &&
-                 document.getElementById('aic-period').value;
-    document.getElementById('aic-fast').hidden = !both;
+    const chosen = document.getElementById('aic-source').value;
+    document.getElementById('aic-fast').hidden =
+        !(chosen && document.getElementById('aic-period').value);
+
+    // Showing the columns is the difference between guessing at a question and
+    // asking one the data can answer.
+    const box = document.getElementById('aic-cols');
+    const meta = AIC_COLS[chosen];
+    if (!meta) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML =
+        aicEsc(meta.description) +
+        ((meta.measures || []).length
+            ? '<br><b>Numeric:</b> ' + aicEsc(meta.measures.join(', ')) : '') +
+        ((meta.labels || []).length
+            ? '<br><b>Group by:</b> ' + aicEsc(meta.labels.join(', ')) : '');
 }
 
 function aicSeed(btn) {
@@ -385,7 +407,8 @@ function aicRail(d, wall) {
         d.date_col ? 'on ' + aicEsc(d.date_col) : '',
         d.from_date ? aicEsc(d.from_date) + ' → ' + aicEsc(d.to_date) : '',
         d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : '',
-        d.routed_by === 'user' ? 'you chose this' : ''
+        d.routed_by === 'user' ? 'you chose this' : '',
+        d.rows_truncated ? 'result trimmed for display' : ''
     ].filter(Boolean).join(' · ');
 
     const counts = [
@@ -412,7 +435,7 @@ function aicGrid(columns, rows) {
         r => '<tr>' + r.map(v => '<td>' + aicEsc(
             typeof v === 'number' ? aicNum(v) : v) + '</td>').join('') + '</tr>').join('');
     const over = rows.length > 300
-        ? '<div class="aic-note">first 300 of ' + rows.length.toLocaleString() + ' rows</div>' : '';
+        ? '<div class="aic-note">showing 300 of ' + rows.length.toLocaleString() + ' rows</div>' : '';
     return '<div class="aic-grid"><table><thead><tr>' + head +
            '</tr></thead><tbody>' + body + '</tbody></table></div>' + over;
 }

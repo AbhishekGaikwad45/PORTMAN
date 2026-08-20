@@ -12,7 +12,7 @@ DEFAULTS = {
     'timeout':           180,             # CPU inference is slow; this is not a typo
     'temperature':       0.0,
     'max_rows':          50000,           # source rows loaded into sqlite
-    'max_result_rows':   5000,            # rows returned to the caller
+    'max_result_rows':   2000,            # rows the SQL stage may return
     'max_history_chars': 12000,           # full history is kept until this cap, then oldest drops
 }
 

@@ -24,6 +24,7 @@ from ..custom_report.views import fetch_source_rows
 from . import ollama, sandbox, sources
 
 MAX_NARRATE_ROWS = 100
+MAX_DISPLAY_ROWS = 500
 MAX_NARRATE_CHARS = 4000
 CHART_TYPES = ['bar', 'line', 'pie', 'doughnut', 'scatter', 'none']
 
@@ -339,7 +340,8 @@ def ai_chat_index():
 @login_required
 def ai_chat_sources():
     return jsonify({
-        'sources': [{'key': k, 'description': sources.DESCRIPTIONS[k]}
+        'sources': [dict(zip(('key', 'description', 'measures', 'labels'),
+                             (k, sources.DESCRIPTIONS[k]) + sources.columns_for(k)))
                     for k in sources.ALL_SOURCES],
         'periods': sources.PERIODS,
         'catalog': sources.catalog_prompt(),
@@ -392,6 +394,8 @@ def ai_chat_ask():
                                      picked['from_date'], picked['to_date'])
             timing['fetch'] = round(time.time() - t, 2)
             source_rows = len(rows)
+            if rows:
+                sources.remember_columns(picked['source'], list(rows[0].keys()))
 
             if not rows:
                 return jsonify(dict(
@@ -430,13 +434,15 @@ def ai_chat_ask():
     except Exception as e:
         return jsonify({'error': '%s: %s' % (type(e).__name__, e), 'timing': timing}), 502
 
+    shown = result['rows'][:MAX_DISPLAY_ROWS]
     return jsonify(dict(
         picked,
         answer=answer,
+        rows_truncated=len(result['rows']) > len(shown),
         sql=result['sql'],
         sql_retried=result['retried'],
         columns=result['columns'],
-        rows=result['rows'],
+        rows=shown,
         row_count=row_count,
         chart=result['chart'],
         chart_error=result['chart_error'],

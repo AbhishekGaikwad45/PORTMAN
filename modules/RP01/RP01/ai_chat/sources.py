@@ -22,15 +22,77 @@ PORT_OVERVIEW = 'port-overview'
 CARGO_TYPES = ['IBRM', 'CBRM', 'FLUXES', 'CLINKER', 'SLAG']
 
 DESCRIPTIONS = {
-    'mbc-ops':          'Barge/MBC cargo movements. Key columns: Cargo Type, Cargo Name, BL Qty, Customer, MBC Name, Operation Type, DP Unloading Berth, Doc Date.',
-    'vessel-ops':       'Mother vessel voyages, one row per vessel. Key columns: Vessel, VCN No, Vessel Agent, Cargo, BL Qty (MT), Actual Days, NOR Date. No cargo-type breakdown.',
-    'vessel-barge':     'Vessel-to-barge transfers. Key columns: Vessel, Barge, Trip No, Hold, Discharge Qty, Contractor, Port Crane, Cargo Type.',
-    'vessel-anchorage': 'Vessel waiting and anchorage events. Key columns: Vessel, Anchorage, Anchored, Anchor Aweigh, Cargo Qty, Cargo Type.',
-    'lueu-equipment':   'Equipment and shift utilisation, current records. Key columns: Equipment, Operator, Shift, Berth, Quantity, Delay, Delay Type, Cargo Type, Date.',
-    'lueu-historical':  'Same as lueu-equipment but includes the pre-cutover archive. Use only for dates older than the current records.',
-    'mbc-tat':          'Barge/MBC turnaround times in minutes. Key columns: TAT (min), Loading Time (min), Unloading Time (min), Preberthing (min), MBC Name, Cargo Type.',
-    PORT_OVERVIEW:      'Live dashboard as of right now: today/month/FY throughput against target, berth occupancy, top delays, MBC status, weather. No history.',
+    'mbc-ops':          'Barge/MBC cargo movements, one row per document.',
+    'vessel-ops':       'Mother vessel voyages, one row per vessel.',
+    'vessel-barge':     'Vessel-to-barge transfers: which barge took what from which hold.',
+    'vessel-anchorage': 'Vessel waiting and anchorage events.',
+    'lueu-equipment':   'Equipment and shift utilisation, current records.',
+    'lueu-historical':  'Equipment utilisation including the pre-cutover archive. Use only for dates older than the current records.',
+    'mbc-tat':          'Barge/MBC turnaround, one row per document with each leg timed.',
+    PORT_OVERVIEW:      'Live dashboard as of right now: throughput against target, berth occupancy, top delays, MBC status, weather. No history.',
 }
+
+# What each source actually contains. MEASURES are the only columns that may be
+# summed or averaged; everything in LABELS is text to group by. Splitting them
+# here is what stops the model trying to total a column like Delay, which is a
+# delay *name*, not a duration.
+#
+# These are the starting point, not the last word: _seen_columns below replaces
+# them with the real keys the moment a source is actually queried, so a schema
+# change in custom_report corrects itself rather than silently misleading.
+MEASURES = {
+    'mbc-ops':          ['BL Qty'],
+    'vessel-barge':     ['Discharge Qty', 'Initial Draft Survey Qty', 'Trip No'],
+    'lueu-equipment':   ['Quantity', 'Diff Hrs'],
+    'lueu-historical':  ['Quantity', 'Diff Hrs'],
+    'mbc-tat':          ['TAT (min)', 'Loading Time (min)', 'Unloading Time (min)',
+                         'Preberthing (min)', 'Total at Jaigad (min)',
+                         'Total at Dharamtar (min)', 'Gull Waiting (min)',
+                         'Wait After Load (min)', 'Wait After Unload (min)',
+                         'BL Quantity'],
+}
+
+LABELS = {
+    'mbc-ops':          ['Cargo Type', 'Cargo Name', 'Cargo Category', 'Customer',
+                         'MBC Name', 'Operation Type', 'DP Unloading Berth', 'Status',
+                         'Doc No', 'Doc Date', 'Year', 'Year-Month'],
+    'vessel-barge':     ['Vessel', 'Barge', 'Cargo', 'Cargo Type', 'Hold', 'Contractor',
+                         'Port Crane', 'Crane Loaded From', 'BPT/BFL', 'VCN No',
+                         'Status', 'NOR Date', 'Year', 'Year-Month'],
+    'lueu-equipment':   ['Equipment', 'Operator', 'Shift', 'Shift Incharge', 'Berth',
+                         'Cargo', 'Cargo Type', 'Delay', 'Delay Type', 'System',
+                         'Route', 'Barge / MBC Name', 'UOM', 'Date', 'Year', 'Year-Month'],
+    'lueu-historical':  ['Equipment', 'Operator', 'Shift', 'Shift Incharge', 'Berth',
+                         'Cargo', 'Cargo Type', 'Delay', 'Delay Type', 'System',
+                         'Route', 'Barge / MBC Name', 'UOM', 'Date', 'Year', 'Year-Month'],
+    'mbc-tat':          ['MBC Name', 'Cargo', 'Cargo Type', 'Operation Type', 'Status',
+                         'Doc No', 'Doc Date', 'Year', 'Year-Month'],
+}
+
+# Real column names seen on the last successful fetch, per source.
+_seen_columns = {}
+
+
+def remember_columns(source, columns):
+    """Record the columns a real query returned, so the catalog self-corrects."""
+    if columns:
+        _seen_columns[source] = list(columns)
+
+
+def columns_for(source):
+    """(measures, labels) for a source, preferring what we have actually seen."""
+    measures = list(MEASURES.get(source, []))
+    labels = list(LABELS.get(source, []))
+    seen = _seen_columns.get(source)
+    if seen:
+        # Keep the curated measure/label split, but drop anything that no longer
+        # exists and append columns we did not know about.
+        measures = [c for c in measures if c in seen]
+        labels = [c for c in labels if c in seen]
+        known = set(measures) | set(labels)
+        labels += [c for c in seen if c not in known and not c.startswith('_')]
+    return measures, labels
+
 
 # Explicit tie-breakers for the questions people actually ask. Cheaper and far
 # more reliable than hoping the model infers them from the descriptions.
@@ -103,10 +165,19 @@ def default_date_col(source):
 
 
 def catalog_prompt():
-    """One line per source, with its allowed date columns. Fed to stage 1."""
+    """One line per source: what it is, what can be totalled, what can be
+    grouped. The measure/label split is the part that stops the model routing a
+    tonnage question to a source with no tonnage column."""
     lines = []
     for key in ALL_SOURCES:
+        measures, labels = columns_for(key)
+        parts = ['- %s: %s' % (key, DESCRIPTIONS[key])]
+        if measures:
+            parts.append('  Numeric (can total/average): %s' % ', '.join(measures))
+        if labels:
+            parts.append('  Text (group by only): %s' % ', '.join(labels[:14]))
         cols = valid_date_cols(key)
-        suffix = '  [date_col: %s]' % ', '.join(cols) if cols else '  [date_col: none]'
-        lines.append('- %s: %s%s' % (key, DESCRIPTIONS[key], suffix))
+        if cols:
+            parts.append('  date_col: %s' % ', '.join(cols))
+        lines.append('\n'.join(parts))
     return '\n'.join(lines)
