@@ -453,3 +453,42 @@ def test_models_used_flags_a_two_model_split():
     split = aiviews._models_used({'model': 'llama3.2:3b', 'sql_model': 'qwen2.5-coder:7b'})
     assert split['split'] is True
     assert split['triage'] == 'llama3.2:3b' and split['sql'] == 'qwen2.5-coder:7b'
+
+
+# ── needs_query safety net ───────────────────────────────────────────────────
+
+def test_record_questions_query_even_when_the_model_says_no():
+    """The dashboard holds cargo-type totals only. Answering an equipment
+    question from it substitutes one for the other and states it as fact."""
+    for q in ['make a pie chart of equipments by quantity handled',
+              'which operator handled the most last month',
+              'total hours by shift',
+              'most common delay types',
+              'how much did BUL-05 handle',
+              'crane utilisation this month',
+              'berth wise breakdown']:
+        assert aiviews.needs_records(q, False) is True, q
+
+
+def test_pure_dashboard_questions_still_skip_the_query():
+    for q in ['how are we tracking against this years target',
+              'what is todays throughput',
+              'are we ahead of the monthly target']:
+        assert aiviews.needs_records(q, False) is False, q
+
+
+def test_a_model_yes_is_always_honoured():
+    assert aiviews.needs_records('anything at all', True) is True
+
+
+def test_generic_date_words_do_not_force_a_query():
+    """Year and Date are real columns but every question mentions one."""
+    assert aiviews.needs_records('target for this year', False) is False
+    assert aiviews.needs_records('throughput to date', False) is False
+
+
+def test_triage_applies_the_override(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': True, 'needs_query': False, 'period': 'this_month'}))
+    out = aiviews.triage('pie chart of equipment by quantity', [], CFG)
+    assert out['needs_query'] is True

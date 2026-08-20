@@ -273,6 +273,36 @@ def render_fixed_context(ctx):
 
 # -- stage 1: triage ---------------------------------------------------------
 
+# Words that mean the equipment records are needed, beyond the column names
+# themselves. Machine names show up constantly in real questions.
+_RECORD_WORDS = re.compile(
+    r'\b(equipments?|operators?|shifts?|berths?|delays?|cranes?|unloader|'
+    r'sennebogen|bul[\s-]?\d+|utilis\w*|utiliz\w*|downtime|idle|hours?)\b',
+    re.I)
+
+# Column names too generic to signal anything - nearly every question
+# mentions a date or a cargo.
+_WEAK_VOCAB = {'date', 'year', 'year-month', 'uom', 'cargo', 'cargo type'}
+
+
+def needs_records(question, model_said):
+    """Decide whether the equipment records must be queried.
+
+    Biased hard toward querying, because the failure is silent and confident:
+    answering an equipment question from the dashboard substitutes cargo-type
+    totals for equipment totals and states them as fact. The model may vote
+    yes freely; its "no" only stands when the question mentions nothing the
+    records cover.
+    """
+    if model_said:
+        return True
+    q = (question or '').lower()
+    measures, labels = sources.columns_for(sources.ONLY_SOURCE)
+    vocab = [c.lower() for c in measures + labels
+             if len(c) > 3 and c.lower() not in _WEAK_VOCAB]
+    return bool(any(v in q for v in vocab) or _RECORD_WORDS.search(q))
+
+
 def triage(question, history_msgs, cfg, want_period=None):
     """Decide scope, period, and whether the records need querying.
 
@@ -301,10 +331,13 @@ def triage(question, history_msgs, cfg, want_period=None):
         '- general knowledge, chit-chat, coding, other companies. Anything about '
         'cargo, barges, vessels, equipment, shifts, berths, delays, operators, '
         'throughput or targets is in scope.\n'
-        '- needs_query: true when answering needs the equipment/shift records above '
-        '(anything about equipment, operators, shifts, berths, delays, or a period '
-        'the dashboard does not cover). false when the live dashboard and targets '
-        'already answer it.\n'
+        '- needs_query: TRUE for anything naming equipment, a machine, an operator, '
+        'a shift, a berth, a delay, hours worked, or asking for a breakdown, ranking '
+        'or chart of them. The dashboard holds cargo-type totals only - it cannot '
+        'answer a question about equipment, and guessing from it gives a confidently '
+        'wrong answer. FALSE only for pure dashboard questions: overall throughput '
+        'today or this month, progress against target, which berths are occupied '
+        'right now, the weather.\n'
         '- period: which date range the records should cover. Use custom only when '
         'the question names explicit dates, and then also set from_date and to_date '
         'as YYYY-MM-DD. If no period is stated, use this_month.'
@@ -316,7 +349,7 @@ def triage(question, history_msgs, cfg, want_period=None):
     if out.get('in_scope') is False:
         raise OutOfScope()
     return settle(out.get('period'), out, want_period=want_period,
-                  needs_query=out.get('needs_query') is not False)
+                  needs_query=needs_records(question, out.get('needs_query') is not False))
 
 
 def settle(period, out, want_period=None, needs_query=True):
