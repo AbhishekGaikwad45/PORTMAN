@@ -1,13 +1,12 @@
-"""What the AI chat is allowed to look at, and how it picks.
+"""What the AI chat may query, and how a period is resolved.
 
-Descriptions name the *key columns* on purpose. A 3B model cannot know that
-"IBRM" is a cargo type living in mbc-ops and absent from vessel-ops unless the
-column list tells it, and routing to a source that lacks the column is the
-single most common failure. Keep each entry to one line — small models start
-ignoring options once the choice list gets wordy.
+One source only (see TRUSTED). MEASURES and LABELS split its columns into what
+may be summed and what may only be grouped - that split is what stops the model
+totalling a column like Delay, which is a delay *name*, not a duration.
 
-Full column lists are NOT here: those are read off the live query result at
-request time, so stage 3 can never drift from custom_report.
+The curated lists only bootstrap: remember_columns() records the real keys from
+every successful fetch and columns_for() prefers them, so a schema change in
+custom_report corrects itself instead of quietly misleading the model.
 """
 
 from datetime import date, timedelta
@@ -94,24 +93,15 @@ def columns_for(source):
     return measures, labels
 
 
-# Explicit tie-breakers for the questions people actually ask. Cheaper and far
-# more reliable than hoping the model infers them from the descriptions.
-ROUTING_HINTS = """Choosing between sources:
-- Cargo tonnage, throughput or discharge broken down by cargo type -> mbc-ops
-- Anything naming """ + ', '.join(CARGO_TYPES) + """ (these are Cargo Type values) -> mbc-ops
-- A named vessel, its holds, cranes or the barges it fed -> vessel-barge
-- Equipment, operators, shifts, berths or delays -> lueu-equipment
-- How long barges took -> mbc-tat
-- "right now", "current", "today so far", against-target -> port-overview"""
+# The chat queries exactly one source. Everything else in RP01 either
+# duplicates it or misleads, and a single source means no routing decision to
+# get wrong. Add a key here to widen it again; nothing else needs changing.
+TRUSTED = ['lueu-equipment']
 
-# Only these are trusted to answer questions. vessel-ops and vessel-anchorage
-# are excluded by request - vessel-ops has no Cargo Type column at all, so it
-# can only mislead on the cargo questions people actually ask.
-# To re-enable one, add its key back here.
-TRUSTED = ['mbc-ops', 'mbc-tat', 'vessel-barge', 'lueu-equipment',
-           'lueu-historical', PORT_OVERVIEW]
+ALL_SOURCES = [k for k in TRUSTED if k in VALID_SOURCES]
 
-ALL_SOURCES = [k for k in TRUSTED if k in VALID_SOURCES or k == PORT_OVERVIEW]
+# The only source, named once so callers do not hardcode the string.
+ONLY_SOURCE = ALL_SOURCES[0]
 
 # The model picks a named period; Python does the date arithmetic. Small models
 # are unreliable at working out "yesterday" or a financial-year boundary, and

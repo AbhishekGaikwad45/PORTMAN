@@ -119,7 +119,7 @@ def test_history_kept_until_budget_then_oldest_dropped():
     assert trimmed is False and len(msgs) == 2
 
 
-# ── routing ──────────────────────────────────────────────────────────────────
+# ── triage ─────────────────────────────────────────────────────────────────────
 
 def _stub_chat(monkeypatch, *payloads):
     calls = iter(payloads)
@@ -127,45 +127,6 @@ def _stub_chat(monkeypatch, *payloads):
     def fake(messages, cfg=None, schema=None, model=None, **kw):
         return next(calls)
     monkeypatch.setattr(aiviews.ollama, 'chat', fake)
-
-
-def test_route_falls_back_to_default_date_col(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'not_a_column', 'period': 'this_fy',
-        'from_date': '2026-04-01', 'to_date': '2026-06-30'}))
-    out = aiviews.route('q', [], CFG)
-    assert out['date_col'] == sources.default_date_col('mbc-ops')
-
-
-def test_route_swaps_reversed_date_range(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'custom',
-        'from_date': '2026-06-30', 'to_date': '2026-04-01'}))
-    out = aiviews.route('q', [], CFG)
-    assert out['from_date'] == '2026-04-01' and out['to_date'] == '2026-06-30'
-
-
-def test_route_rejects_unknown_source(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'invoices', 'date_col': 'x', 'period': 'this_fy',
-        'from_date': '2026-04-01', 'to_date': '2026-06-30'}))
-    with pytest.raises(ValueError, match='Not a trusted'):
-        aiviews.route('q', [], CFG)
-
-
-def test_route_rejects_malformed_dates(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'custom',
-        'from_date': 'last April', 'to_date': '2026-06-30'}))
-    with pytest.raises(ValueError, match='malformed dates'):
-        aiviews.route('q', [], CFG)
-
-
-def test_route_ignores_dates_for_port_overview(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'port-overview', 'date_col': '', 'period': 'today',
-        'from_date': '', 'to_date': ''}))
-    assert aiviews.route('q', [], CFG)['source'] == 'port-overview'
 
 
 # ── SQL self-correction ──────────────────────────────────────────────────────
@@ -215,94 +176,138 @@ def test_sql_model_is_used_when_set(monkeypatch):
 
 # ── catalog ──────────────────────────────────────────────────────────────────
 
-def test_every_source_has_a_one_line_description():
-    assert len(sources.ALL_SOURCES) == 6
-    for key in sources.ALL_SOURCES:
-        desc = sources.DESCRIPTIONS[key]
-        assert desc and '\n' not in desc
+def test_only_lueu_equipment_is_queryable():
+    assert sources.ALL_SOURCES == ['lueu-equipment']
+    assert sources.ONLY_SOURCE == 'lueu-equipment'
+    for gone in ('mbc-ops', 'mbc-tat', 'vessel-barge', 'vessel-ops', 'port-overview'):
+        assert not sources.is_valid(gone)
 
 
-def test_catalog_lists_date_cols_for_pivot_sources():
+def test_catalog_describes_the_one_source_with_its_date_col():
     text = sources.catalog_prompt()
-    assert 'mbc-ops' in text and 'doc_date' in text
+    assert 'lueu-equipment' in text and 'entry_date' in text
+    assert 'mbc-ops' not in text
 
 
-# ── trusted sources & period resolution ──────────────────────────────────────
+# ── triage ────────────────────────────────────────────────────────────────────
 
-def test_untrusted_sources_are_rejected():
-    """vessel-ops has no Cargo Type column, so it can only mislead."""
-    for key in ('vessel-ops', 'vessel-anchorage'):
-        assert not sources.is_valid(key)
-        assert key not in sources.catalog_prompt()
-
-
-def test_trusted_sources_are_the_lueu_barge_and_mbc_ones():
-    assert sources.ALL_SOURCES == ['mbc-ops', 'mbc-tat', 'vessel-barge',
-                                   'lueu-equipment', 'lueu-historical', 'port-overview']
-
-
-def test_periods_resolve_against_a_fixed_today():
-    from datetime import date as _d
-    t = _d(2026, 8, 19)
-    assert sources.resolve_period('today', t) == ('2026-08-19', '2026-08-19')
-    assert sources.resolve_period('yesterday', t) == ('2026-08-18', '2026-08-18')
-    assert sources.resolve_period('last_7_days', t) == ('2026-08-13', '2026-08-19')
-    assert sources.resolve_period('this_month', t) == ('2026-08-01', '2026-08-19')
-    assert sources.resolve_period('last_month', t) == ('2026-07-01', '2026-07-31')
-    assert sources.resolve_period('this_fy', t) == ('2026-04-01', '2026-08-19')
-    assert sources.resolve_period('last_fy', t) == ('2025-04-01', '2026-03-31')
-
-
-def test_financial_year_starts_in_april():
-    from datetime import date as _d
-    assert sources.fy_start(_d(2026, 3, 31)) == _d(2025, 4, 1)
-    assert sources.fy_start(_d(2026, 4, 1)) == _d(2026, 4, 1)
-
-
-def test_route_resolves_named_period_itself(monkeypatch):
-    """The model names a period; Python does the arithmetic."""
+def test_triage_resolves_the_period_itself(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'yesterday'}))
-    out = aiviews.route('what was yesterdays IBRM discharge', [], CFG)
+        'in_scope': True, 'needs_query': True, 'period': 'yesterday'}))
+    out = aiviews.triage('what did BUL-01 handle yesterday', [], CFG)
     from datetime import date as _d, timedelta
     y = (_d.today() - timedelta(days=1)).isoformat()
     assert out['from_date'] == y and out['to_date'] == y
-    assert out['source'] == 'mbc-ops'
-
-
-# ── user-chosen source and period ────────────────────────────────────────────
-
-def test_choosing_both_skips_the_routing_call(monkeypatch):
-    """Nothing to infer means no LLM round trip at all."""
-    def boom(*a, **k):
-        raise AssertionError('routing model should not have been called')
-    monkeypatch.setattr(aiviews.ollama, 'chat', boom)
-
-    out = aiviews.route('anything', [], CFG, 'lueu-equipment', 'last_month')
     assert out['source'] == 'lueu-equipment'
-    assert out['from_date'] == sources.resolve_period('last_month')[0]
-    assert out['date_col'] == sources.default_date_col('lueu-equipment')
+    assert out['date_col'] == 'entry_date'
+    assert out['needs_query'] is True
 
 
-def test_choosing_only_the_source_pins_the_enum(monkeypatch):
+def test_triage_can_skip_the_query_entirely(monkeypatch):
+    """A dashboard question must not pay for the SQL stage."""
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': True, 'needs_query': False, 'period': 'today'}))
+    assert aiviews.triage('how are we doing against target', [], CFG)['needs_query'] is False
+
+
+def test_triage_refuses_off_topic(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': False, 'needs_query': False, 'period': 'today'}))
+    with pytest.raises(aiviews.OutOfScope):
+        aiviews.triage('write me a python script', [], CFG)
+
+
+def test_missing_in_scope_is_treated_as_in_scope(monkeypatch):
+    """Only an explicit false refuses; a silent model must not lock users out."""
+    _stub_chat(monkeypatch, json.dumps({'needs_query': True, 'period': 'today'}))
+    assert aiviews.triage('q', [], CFG)['needs_query'] is True
+
+
+def test_user_period_pins_the_schema_enum(monkeypatch):
     seen = {}
 
     def fake(messages, cfg=None, schema=None, model=None, **kw):
         seen['schema'] = schema
-        return json.dumps({'source': 'mbc-tat', 'date_col': 'doc_date',
-                           'period': 'this_fy'})
+        return json.dumps({'in_scope': True, 'needs_query': True, 'period': 'today'})
     monkeypatch.setattr(aiviews.ollama, 'chat', fake)
 
-    aiviews.route('q', [], CFG, want_source='mbc-tat')
-    assert seen['schema']['properties']['source']['enum'] == ['mbc-tat']
-    assert seen['schema']['properties']['period']['enum'] == sources.PERIODS
+    out = aiviews.triage('q', [], CFG, want_period='last_month')
+    assert seen['schema']['properties']['period']['enum'] == ['last_month']
+    assert out['period'] == 'last_month'
+    assert aiviews.TRIAGE_SCHEMA['properties']['period']['enum'] == sources.PERIODS
 
 
-def test_pinning_the_schema_does_not_mutate_the_shared_one(monkeypatch):
+def test_triage_rejects_malformed_custom_dates(monkeypatch):
     _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-tat', 'date_col': 'doc_date', 'period': 'this_fy'}))
-    aiviews.route('q', [], CFG, want_source='mbc-tat', want_period=None)
-    assert aiviews.ROUTE_SCHEMA['properties']['source']['enum'] == sources.ALL_SOURCES
+        'in_scope': True, 'needs_query': True, 'period': 'custom',
+        'from_date': 'last April', 'to_date': '2026-06-30'}))
+    with pytest.raises(ValueError, match='malformed dates'):
+        aiviews.triage('q', [], CFG)
+
+
+def test_triage_swaps_a_reversed_custom_range(monkeypatch):
+    _stub_chat(monkeypatch, json.dumps({
+        'in_scope': True, 'needs_query': True, 'period': 'custom',
+        'from_date': '2026-06-30', 'to_date': '2026-04-01'}))
+    out = aiviews.triage('q', [], CFG)
+    assert out['from_date'] == '2026-04-01' and out['to_date'] == '2026-06-30'
+
+
+# ── fixed context ────────────────────────────────────────────────────────────
+
+OVERVIEW = {
+    'as_of': '2026-08-20 14:00:00',
+    'cargo_cards': {
+        'today': {'label': 'Today', 'total': 12345.0, 'target': 15000,
+                  'by_type': {'IBRM': 8000.0, 'CBRM': 4345.0},
+                  'by_shift': {'A': 7000.0, 'B': 5345.0}},
+        'current_fy': {'label': 'FY 2026-27', 'total': 1240500.0,
+                       'target': 4000000, 'by_type': {'IBRM': 900000.0}},
+    },
+    'berths': [{'berth': 'BERTH 8', 'assets': [{'name': 'JSW SURYAGAD'}]},
+               {'berth': 'BERTH 9', 'assets': []}],
+    'delays': [{'delay': 'Crane breakdown', 'minutes': 120}],
+    'mbc_status': [{'mbc_name': 'X', 'mbc_status': 'Discharging'}],
+    'shift_incharge': 'A. Patel',
+    'upcoming': [], 'notes': '', 'weather': {'temp': 31},
+}
+TARGETS = {'financial_year': '2026-27', 'fy_base_target': 4000000,
+           'fy_effective_target': 4200000,
+           'monthly': [{'month': 'April', 'base': 300000, 'outlook': 320000},
+                       {'month': 'May', 'base': 350000, 'outlook': None}]}
+
+
+def test_fixed_context_states_throughput_targets_and_berths():
+    text = aiviews.render_fixed_context({'overview': OVERVIEW, 'targets': TARGETS})
+    assert 'Today: 12,345 MT | target 15,000' in text
+    assert 'IBRM 8,000' in text
+    assert 'base 4,000,000 MT, effective 4,200,000 MT' in text
+    assert 'Apr 300,000/outlook 320,000' in text
+    assert 'BERTH 8' in text
+    assert 'BERTH 9' not in text          # empty berths are noise
+    assert 'A. Patel' in text
+
+
+def test_fixed_context_is_capped():
+    big = dict(OVERVIEW, mbc_status=[{'mbc_name': 'M%d' % i} for i in range(500)])
+    text = aiviews.render_fixed_context({'overview': big, 'targets': TARGETS})
+    assert len(text) <= aiviews.MAX_FIXED_CHARS
+
+
+def test_fixed_context_survives_missing_pieces():
+    assert aiviews.render_fixed_context({}) .startswith('LIVE PORT DASHBOARD')
+    assert aiviews.render_fixed_context({'overview': {}, 'targets': {}})
+
+
+def test_fixed_context_is_cached(monkeypatch):
+    calls = []
+    monkeypatch.setattr(aiviews, '_fetch_overview', lambda: (calls.append(1), OVERVIEW)[1])
+    monkeypatch.setattr(aiviews, '_fetch_targets', lambda: TARGETS)
+    aiviews._cache.update(at=0.0, data=None)
+    aiviews.fixed_context()
+    aiviews.fixed_context()
+    assert len(calls) == 1
+    aiviews._cache.update(at=0.0, data=None)
 
 
 # ── chart column matching ────────────────────────────────────────────────────
@@ -318,7 +323,7 @@ def test_chart_accepts_the_quoted_names_the_sql_rules_encourage():
 
 
 def test_chart_matches_case_insensitively():
-    chart, err = aiviews.validate_chart(
+    chart, _ = aiviews.validate_chart(
         {'type': 'bar', 'x': 'equipment', 'y': ['TOTAL QUANTITY'], 'title': 't'},
         ['Equipment', 'Total Quantity'])
     assert chart['x'] == 'Equipment' and chart['y'] == ['Total Quantity']
@@ -336,75 +341,6 @@ def test_chart_still_rejects_a_name_that_is_not_there():
         {'type': 'bar', 'x': '"Vessel"', 'y': ['"Total"'], 'title': 't'},
         ['Equipment', 'Total'])
     assert chart is None and 'x-axis' in err
-
-
-# ── column knowledge ─────────────────────────────────────────────────────────
-
-def test_catalog_separates_numeric_columns_from_labels():
-    """The router must be able to see that Delay is a label, not a duration."""
-    text = sources.catalog_prompt()
-    assert 'Numeric (can total/average): Quantity, Diff Hrs' in text
-    assert 'Delay' in text
-    measures, _ = sources.columns_for('lueu-equipment')
-    assert 'Delay' not in measures
-
-
-def test_every_trusted_pivot_source_declares_columns():
-    for key in sources.ALL_SOURCES:
-        if key == sources.PORT_OVERVIEW:
-            continue
-        measures, labels = sources.columns_for(key)
-        assert measures, '%s has no numeric column declared' % key
-        assert labels, '%s has no label column declared' % key
-
-
-def test_seen_columns_correct_a_stale_catalog():
-    """A real query is the authority; the curated list only bootstraps."""
-    original = dict(sources._seen_columns)
-    try:
-        sources.remember_columns('mbc-ops', ['Cargo Type', 'BL Qty', 'Brand New Column'])
-        measures, labels = sources.columns_for('mbc-ops')
-        assert measures == ['BL Qty']
-        assert 'Brand New Column' in labels        # picked up automatically
-        assert 'Customer' not in labels            # gone from the real result
-    finally:
-        sources._seen_columns.clear()
-        sources._seen_columns.update(original)
-
-
-def test_seen_columns_ignore_internal_ones():
-    original = dict(sources._seen_columns)
-    try:
-        sources.remember_columns('lueu-equipment', ['Equipment', 'Quantity', '_from_time'])
-        _, labels = sources.columns_for('lueu-equipment')
-        assert '_from_time' not in labels
-    finally:
-        sources._seen_columns.clear()
-        sources._seen_columns.update(original)
-
-
-# ── scope guardrail ──────────────────────────────────────────────────────────
-
-def test_off_topic_question_is_refused_before_any_query(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'in_scope': False, 'source': 'mbc-ops',
-        'date_col': 'doc_date', 'period': 'this_fy'}))
-    with pytest.raises(aiviews.OutOfScope):
-        aiviews.route('write me a python script', [], CFG)
-
-
-def test_in_scope_question_proceeds(monkeypatch):
-    _stub_chat(monkeypatch, json.dumps({
-        'in_scope': True, 'source': 'mbc-ops',
-        'date_col': 'doc_date', 'period': 'this_fy'}))
-    assert aiviews.route('IBRM discharge', [], CFG)['source'] == 'mbc-ops'
-
-
-def test_missing_in_scope_is_treated_as_in_scope(monkeypatch):
-    """Only an explicit false refuses; a silent model must not lock users out."""
-    _stub_chat(monkeypatch, json.dumps({
-        'source': 'mbc-ops', 'date_col': 'doc_date', 'period': 'this_fy'}))
-    assert aiviews.route('q', [], CFG)['source'] == 'mbc-ops'
 
 
 # ── single-value answers ─────────────────────────────────────────────────────
@@ -429,6 +365,49 @@ def test_null_single_value_says_so():
 
 def test_multi_row_answers_are_not_rewritten():
     assert aiviews.ensure_answer('BUL-05 led.', ['a', 'b'], [[1, 2], [3, 4]]) == 'BUL-05 led.'
+
+
+# ── period resolution ────────────────────────────────────────────────────────
+
+def test_periods_resolve_against_a_fixed_today():
+    from datetime import date as _d
+    t = _d(2026, 8, 19)
+    assert sources.resolve_period('today', t) == ('2026-08-19', '2026-08-19')
+    assert sources.resolve_period('yesterday', t) == ('2026-08-18', '2026-08-18')
+    assert sources.resolve_period('last_7_days', t) == ('2026-08-13', '2026-08-19')
+    assert sources.resolve_period('this_month', t) == ('2026-08-01', '2026-08-19')
+    assert sources.resolve_period('last_month', t) == ('2026-07-01', '2026-07-31')
+    assert sources.resolve_period('this_fy', t) == ('2026-04-01', '2026-08-19')
+    assert sources.resolve_period('last_fy', t) == ('2025-04-01', '2026-03-31')
+
+
+def test_financial_year_starts_in_april():
+    from datetime import date as _d
+    assert sources.fy_start(_d(2026, 3, 31)) == _d(2025, 4, 1)
+    assert sources.fy_start(_d(2026, 4, 1)) == _d(2026, 4, 1)
+
+
+# ── column knowledge ─────────────────────────────────────────────────────────
+
+def test_delay_is_a_label_not_a_measure():
+    measures, labels = sources.columns_for('lueu-equipment')
+    assert 'Delay' in labels and 'Delay' not in measures
+    assert measures == ['Quantity', 'Diff Hrs']
+
+
+def test_seen_columns_correct_a_stale_catalog():
+    original = dict(sources._seen_columns)
+    try:
+        sources.remember_columns('lueu-equipment',
+                                 ['Equipment', 'Quantity', 'Brand New Column', '_from_time'])
+        measures, labels = sources.columns_for('lueu-equipment')
+        assert measures == ['Quantity']            # Diff Hrs gone from the result
+        assert 'Brand New Column' in labels        # picked up automatically
+        assert '_from_time' not in labels          # internal columns stay hidden
+        assert 'Operator' not in labels            # no longer in the real result
+    finally:
+        sources._seen_columns.clear()
+        sources._seen_columns.update(original)
 
 
 # ── read-only connection ─────────────────────────────────────────────────────

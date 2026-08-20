@@ -204,7 +204,6 @@
 <div class="module-header">
     <h2>AI Chat</h2>
     <span class="module-code">RP01</span>
-    <span style="font-size:10px;color:#a0aec0;">internal test page &middot; admin only</span>
 </div>
 
 <div class="aic">
@@ -213,26 +212,27 @@
             <div class="aic-open" id="aic-open">
                 <h3>Ask about port performance</h3>
                 <p>
-                    Questions run against MBC, Vessel&ndash;Barge and LUEU records. Every answer
-                    shows the source, date range and the SQL behind it &mdash; read the query
-                    before you use a number.
+                    The live dashboard and this year&rsquo;s targets are always in view.
+                    Anything deeper is queried from the equipment and shift records.
+                    Every answer shows its date range and the SQL behind it &mdash; read the
+                    query before you use a number.
                 </p>
                 <div class="aic-seeds">
                     <button class="aic-seed" onclick="aicSeed(this)">
-                        What was yesterday&rsquo;s IBRM discharge?
-                        <em>mbc-ops &middot; sums BL Qty by Cargo Type</em>
-                    </button>
-                    <button class="aic-seed" onclick="aicSeed(this)">
-                        Monthly BL quantity by cargo type this financial year
-                        <em>mbc-ops &middot; grouped by Year-Month, charted</em>
+                        How are we tracking against this year&rsquo;s target?
+                        <em>live dashboard &middot; no query needed</em>
                     </button>
                     <button class="aic-seed" onclick="aicSeed(this)">
                         Which equipment handled the most quantity last month?
-                        <em>lueu-equipment &middot; sums Quantity by Equipment</em>
+                        <em>equipment records &middot; Quantity by Equipment</em>
                     </button>
                     <button class="aic-seed" onclick="aicSeed(this)">
-                        Average TAT in minutes by cargo type
-                        <em>mbc-tat &middot; averages TAT (min)</em>
+                        Total hours logged per shift this month
+                        <em>equipment records &middot; Diff Hrs by Shift</em>
+                    </button>
+                    <button class="aic-seed" onclick="aicSeed(this)">
+                        Most common delay types last month
+                        <em>equipment records &middot; counted by Delay Type</em>
                     </button>
                 </div>
             </div>
@@ -242,15 +242,11 @@
     <div class="aic-dock">
         <div class="aic-col">
             <div class="aic-pickers">
-                <label for="aic-source">Source</label>
-                <select id="aic-source" onchange="aicPickerChanged()">
-                    <option value="">Auto (model picks)</option>
-                </select>
                 <label for="aic-period">Period</label>
                 <select id="aic-period" onchange="aicPickerChanged()">
                     <option value="">Auto (model picks)</option>
                 </select>
-                <span class="aic-fast" id="aic-fast" hidden>routing step skipped</span>
+                <span class="aic-fast" id="aic-fast" hidden>period fixed</span>
             </div>
             <div class="aic-cols" id="aic-cols" hidden></div>
             <div class="aic-form">
@@ -273,7 +269,7 @@
 // table below the chart stays the source of truth.
 const AIC_HUES = ['#205a9c', '#e18e35', '#7c3aed', '#c05621', '#3182ce', '#97266d'];
 
-const AIC_COLS = {};
+let AIC_META = null;
 let aicHistory = [];
 let aicCharts  = [];
 let aicSeq     = 0;
@@ -299,13 +295,9 @@ async function aicLoadPickers() {
         meta = await (await fetch('/api/module/RP01/ai-chat/sources')).json();
     } catch (_) { return; }
 
-    const src = document.getElementById('aic-source');
-    meta.sources.forEach(s => {
-        AIC_COLS[s.key] = s;
-        const o = document.createElement('option');
-        o.value = s.key; o.textContent = s.key; o.title = s.description;
-        src.appendChild(o);
-    });
+    AIC_META = meta;
+
+    aicShowScope();
 
     const per = document.getElementById('aic-period');
     (meta.periods || []).filter(p => p !== 'custom').forEach(p => {
@@ -317,23 +309,22 @@ async function aicLoadPickers() {
 
 // Choosing both leaves nothing to infer, so the server skips the routing
 // call entirely. Worth saying out loud - it is the fastest path.
-function aicPickerChanged() {
-    const chosen = document.getElementById('aic-source').value;
-    document.getElementById('aic-fast').hidden =
-        !(chosen && document.getElementById('aic-period').value);
-
-    // Showing the columns is the difference between guessing at a question and
-    // asking one the data can answer.
+// Saying what the assistant can see is the difference between guessing at a
+// question and asking one the data can answer.
+function aicShowScope() {
     const box = document.getElementById('aic-cols');
-    const meta = AIC_COLS[chosen];
-    if (!meta) { box.hidden = true; return; }
+    if (!AIC_META) { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML =
-        aicEsc(meta.description) +
-        ((meta.measures || []).length
-            ? '<br><b>Numeric:</b> ' + aicEsc(meta.measures.join(', ')) : '') +
-        ((meta.labels || []).length
-            ? '<br><b>Group by:</b> ' + aicEsc(meta.labels.join(', ')) : '');
+        '<b>Always known:</b> ' + aicEsc((AIC_META.fixed_context || []).join(' · ')) +
+        '<br><b>Queried (' + aicEsc(AIC_META.source) + ') numeric:</b> ' +
+        aicEsc((AIC_META.measures || []).join(', ')) +
+        '<br><b>Group by:</b> ' + aicEsc((AIC_META.labels || []).join(', '));
+}
+
+function aicPickerChanged() {
+    document.getElementById('aic-fast').hidden =
+        !document.getElementById('aic-period').value;
 }
 
 function aicSeed(btn) {
@@ -403,11 +394,11 @@ function aicRail(d, wall) {
     const t = d.timing || {};
     const stages = Object.keys(t).map(k => k + ' ' + t[k] + 's').join('  ');
     const bits = [
-        '<b>' + aicEsc(d.source) + '</b>',
+        d.source ? '<b>' + aicEsc(d.source) + '</b>' : '<b>live dashboard</b>',
         d.date_col ? 'on ' + aicEsc(d.date_col) : '',
         d.from_date ? aicEsc(d.from_date) + ' → ' + aicEsc(d.to_date) : '',
         d.period && d.period !== 'custom' ? '(' + aicEsc(d.period) + ')' : '',
-        d.routed_by === 'user' ? 'you chose this' : '',
+        d.needs_query === false ? 'answered from the live dashboard' : '',
         d.rows_truncated ? 'result trimmed for display' : ''
     ].filter(Boolean).join(' · ');
 
@@ -594,7 +585,6 @@ async function aicAsk() {
             body: JSON.stringify({
                 question: question,
                 history: aicHistory,
-                source: document.getElementById('aic-source').value,
                 period: document.getElementById('aic-period').value
             }),
             signal: abort.signal
