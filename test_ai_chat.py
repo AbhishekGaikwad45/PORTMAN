@@ -605,3 +605,84 @@ def test_models_used_reports_the_provider():
     assert g['split'] is False
     o = aiviews._models_used(dict(llm.DEFAULTS, provider='ollama'))
     assert o['provider'] == 'ollama'
+
+
+# ── series pivots and chart memory ───────────────────────────────────────────
+
+def test_chart_accepts_a_series_column():
+    chart, err = aiviews.validate_chart(
+        {'type': 'stacked_bar', 'x': 'Shift', 'series': 'Cargo Type',
+         'y': ['Total Quantity'], 'title': 't'},
+        ['Shift', 'Cargo Type', 'Total Quantity'])
+    assert err is None and chart['series'] == 'Cargo Type'
+
+
+def test_series_is_dropped_when_it_duplicates_an_axis():
+    for dupe in ('Shift', 'Total Quantity'):
+        chart, _ = aiviews.validate_chart(
+            {'type': 'stacked_bar', 'x': 'Shift', 'series': dupe,
+             'y': ['Total Quantity'], 'title': 't'},
+            ['Shift', 'Total Quantity'])
+        assert chart['series'] is None
+
+
+def test_series_is_dropped_when_the_column_is_invented():
+    chart, _ = aiviews.validate_chart(
+        {'type': 'stacked_bar', 'x': 'Shift', 'series': 'Nope',
+         'y': ['Total Quantity'], 'title': 't'}, ['Shift', 'Total Quantity'])
+    assert chart['series'] is None
+
+
+def test_no_chart_is_drawn_for_an_empty_result():
+    """An empty result produced a chart with bare axes and a lone legend."""
+    chart, err = aiviews.validate_chart(
+        {'type': 'bar', 'x': 'Shift', 'y': ['Total Quantity'], 'title': 't'},
+        ['Shift', 'Total Quantity'], row_count=0)
+    assert chart is None and 'no rows' in err
+
+
+def test_previous_turn_note_carries_the_query_and_chart():
+    note = aiviews.previous_turn_note({
+        'sql': 'SELECT "Shift", SUM("Quantity") AS q FROM data GROUP BY 1',
+        'chart': {'type': 'bar', 'x': 'Shift', 'y': ['q'], 'series': None}})
+    assert 'SELECT "Shift"' in note
+    assert 'shown as bar' in note and 'x Shift' in note
+    assert 'build on it' in note
+
+
+def test_previous_turn_note_mentions_the_series():
+    note = aiviews.previous_turn_note({
+        'sql': 'SELECT 1', 'chart': {'type': 'stacked_bar', 'x': 'Shift',
+                                     'y': ['q'], 'series': 'Cargo Type'}})
+    assert 'series Cargo Type' in note
+
+
+def test_previous_turn_note_absent_without_a_query():
+    assert aiviews.previous_turn_note(None) is None
+    assert aiviews.previous_turn_note({}) is None
+    assert aiviews.previous_turn_note({'sql': '   '}) is None
+
+
+def test_previous_query_reaches_the_sql_prompt(monkeypatch):
+    seen = []
+
+    def fake(messages, cfg=None, schema=None, model=None, **kw):
+        seen.append(messages[0]['content'])
+        return json.dumps({'sql': 'SELECT SUM("BL Qty") AS total FROM data',
+                           'chart': {'type': 'none', 'x': '', 'y': [], 'title': ''}})
+    monkeypatch.setattr(aiviews.llm, 'chat', fake)
+
+    conn, ddl = sb.load(ROWS)
+    aiviews.generate_and_run('split that by cargo type', [], conn, ddl, ROWS, CFG,
+                             last={'sql': 'SELECT "Cargo Type" FROM data',
+                                   'chart': {'type': 'bar', 'x': 'Cargo Type',
+                                             'y': ['total']}})
+    assert 'previous question was answered with' in seen[0]
+    assert 'SELECT "Cargo Type" FROM data' in seen[0]
+
+
+def test_sql_prompt_teaches_the_series_pivot():
+    prompt = aiviews._sql_system('CREATE TABLE data ("Shift" TEXT)', [{'Shift': 'A'}])
+    assert 'chart.series' in prompt
+    assert 'GROUP BY 1, 2' in prompt
+    assert 'stacked_bar' in prompt

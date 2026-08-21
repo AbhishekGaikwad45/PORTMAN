@@ -84,10 +84,15 @@ SQL_SCHEMA = {
         'chart': {
             'type': 'object',
             'properties': {
-                'type':  {'type': 'string', 'enum': CHART_TYPES},
-                'x':     {'type': 'string'},
-                'y':     {'type': 'array', 'items': {'type': 'string'}},
-                'title': {'type': 'string'},
+                'type':   {'type': 'string', 'enum': CHART_TYPES},
+                'x':      {'type': 'string'},
+                'y':      {'type': 'array', 'items': {'type': 'string'}},
+                # Optional. SQL returns long data - one row per (x, series)
+                # pair - and the chart pivots it into one series per distinct
+                # value. Lets "each shift split by cargo type" come from a
+                # plain GROUP BY instead of conditional aggregation.
+                'series': {'type': 'string'},
+                'title':  {'type': 'string'},
             },
             'required': ['type', 'x', 'y', 'title'],
         },
@@ -422,16 +427,28 @@ def _sql_system(ddl, rows):
         '- The table is already filtered to the date range. Do not filter on dates '
         'again unless the question asks for a breakdown over time.\n'
         '- Alias every aggregate, e.g. SUM("Quantity") AS "Total Quantity".\n\n'
-        'Also pick a chart:\n'
-        '  kpi          one to four headline numbers, no breakdown\n'
-        '  bar / hbar   a measure by category; hbar when the names are long\n'
-        '  stacked_bar  a measure split by a second category\n'
-        '  line / area  a measure over time\n'
-        '  pie          shares of one whole, six slices at most\n'
-        '  scatter      one measure against another\n'
-        '  none         nothing worth drawing\n'
-        'chart.x is the label column your SELECT outputs, chart.y the numeric ones. '
-        'Write both as plain names with NO quotes: Equipment, not "Equipment".'
+        'Then pick the chart that matches the shape of your result.\n'
+        '  kpi          1-4 rows, no category worth plotting. A headline number.\n'
+        '  bar          a measure across categories, short names\n'
+        '  hbar         same, but names longer than about 12 characters\n'
+        '  stacked_bar  ONE category split by a SECOND (set series)\n'
+        '  line         a measure over dates\n'
+        '  area         a measure over dates where the total matters\n'
+        '  pie          shares of a single whole, at most 6 slices\n'
+        '  scatter      one measure against another measure\n'
+        '  none         a single value already stated in words\n\n'
+        'chart.x is the label column, chart.y the numeric column(s). Write them as '
+        'plain names with NO quotes: Equipment, not "Equipment".\n\n'
+        'chart.series splits one measure by a second category. Set it and SELECT '
+        'three columns - x, series, measure - one row per pair. Do NOT write a '
+        'column per value.\n'
+        '  "discharge per shift, split by cargo type" ->\n'
+        '    SELECT "Shift", "Cargo Type", SUM("Quantity") AS "Total Quantity"\n'
+        '    FROM data GROUP BY 1, 2 ORDER BY 1, 3 DESC\n'
+        '    chart: type stacked_bar, x Shift, series Cargo Type, y [Total Quantity]\n\n'
+        'When the question refines an earlier one ("split that by...", "as a pie", '
+        '"now by month"), start from the previous query and change only what was '
+        'asked. Keep its filters and its measure.'
     )
 
 
@@ -453,10 +470,12 @@ def _match_column(name, cols):
     return lowered.get(bare.lower())
 
 
-def validate_chart(chart, cols):
+def validate_chart(chart, cols, row_count=None):
     """A hallucinated column name must fail visibly, not render an empty chart."""
     if not isinstance(chart, dict) or chart.get('type') in (None, 'none'):
         return None, None
+    if row_count == 0:
+        return None, 'the query returned no rows, so there is nothing to plot'
     kind = chart.get('type')
     x = _match_column(chart.get('x'), cols)
     # A kpi tile is just the numbers; a label column is optional decoration.
@@ -470,18 +489,51 @@ def validate_chart(chart, cols):
             ys.append(m)
     if not ys:
         return None, 'chart has no numeric y column in the result'
-    return {'type': kind, 'x': x, 'y': ys,
+    # A series column splits one measure into several; it has to be a real
+    # column, and distinct from both axes or the pivot collapses.
+    series = _match_column(chart.get('series'), cols)
+    if series in (x,) or series in ys:
+        series = None
+    return {'type': kind, 'x': x, 'y': ys, 'series': series,
             'title': chart.get('title', '')}, None
 
 
-def generate_and_run(question, history_msgs, conn, ddl, rows, cfg):
+def previous_turn_note(last):
+    """Describe the previous query and chart for the SQL stage.
+
+    Without it, "split that by cargo type" arrives with no idea what "that"
+    was - the narration history carries prose, not the query behind it - so
+    the model starts from scratch and loses the filters that made the first
+    answer right.
+    """
+    if not isinstance(last, dict):
+        return None
+    sql = (last.get('sql') or '').strip()
+    if not sql:
+        return None
+    bits = ['The previous question was answered with:', sql]
+    chart = last.get('chart')
+    if isinstance(chart, dict) and chart.get('type'):
+        bits.append('shown as %s (x %s%s, y %s)' % (
+            chart.get('type'), chart.get('x'),
+            ', series ' + chart['series'] if chart.get('series') else '',
+            ', '.join(chart.get('y') or [])))
+    bits.append('If this question refines that one, build on it.')
+    return '\n'.join(bits)
+
+
+def generate_and_run(question, history_msgs, conn, ddl, rows, cfg, last=None):
     """LLM writes SQL; on a database error, hand the error back once and retry.
 
     The single self-correction pass is the cheapest accuracy available here —
     it turns most hallucinated column names into a working second attempt.
     """
     model = cfg.get('sql_model') or cfg['model']
-    msgs = [{'role': 'system', 'content': _sql_system(ddl, rows)}] + history_msgs + \
+    system = _sql_system(ddl, rows)
+    note = previous_turn_note(last)
+    if note:
+        system = system + '\n\n' + note
+    msgs = [{'role': 'system', 'content': system}] + history_msgs + \
            [{'role': 'user', 'content': question}]
 
     last_err = None
@@ -500,7 +552,7 @@ def generate_and_run(question, history_msgs, conn, ddl, rows, cfg):
                     '\nRewrite it using only columns from the schema.'},
             ]
             continue
-        chart, chart_error = validate_chart(out.get('chart'), cols)
+        chart, chart_error = validate_chart(out.get('chart'), cols, len(result))
         return {'sql': sql, 'columns': cols, 'rows': result, 'chart': chart,
                 'chart_error': chart_error, 'retried': attempt == 2}
     raise ValueError('SQL failed after one retry - ' + str(last_err))
@@ -664,7 +716,8 @@ def ai_chat_ask():
                 conn, ddl = sandbox.load(rows)
                 try:
                     t = time.time()
-                    result = generate_and_run(question, history, conn, ddl, rows, cfg)
+                    result = generate_and_run(question, history, conn, ddl, rows,
+                                              cfg, last=body.get('last'))
                     timing['sql'] = round(time.time() - t, 2)
                 finally:
                     conn.close()

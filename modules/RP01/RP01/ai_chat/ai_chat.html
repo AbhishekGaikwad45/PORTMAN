@@ -306,6 +306,7 @@
 const AIC_HUES = ['#205a9c', '#e18e35', '#7c3aed', '#c05621', '#3182ce', '#97266d'];
 
 let aicHistory = [];
+let aicLast = null;   // previous query + chart, so refinements build on it
 let aicCharts  = [];
 let aicSeq     = 0;
 let aicBusy    = false;
@@ -355,7 +356,7 @@ function aicSeed(btn) {
 function aicClear() {
     // ponytail: a reload drops history, destroys the charts and restores the
     // empty state in one line. Nothing on this page is worth preserving.
-    if (!aicBusy) location.reload();
+    if (!aicBusy) location.reload();   // also clears aicLast
 }
 
 function aicGrow(ta) {
@@ -499,6 +500,29 @@ function aicKpis(spec, columns, rows) {
     return tiles.join('');
 }
 
+// SQL returns long data - one row per (x, series) pair. Charts need it wide,
+// one dataset per series. Pivoting here rather than making the model write
+// conditional aggregation keeps its SQL a plain GROUP BY.
+function aicPivot(spec, columns, rows) {
+    const xi = columns.indexOf(spec.x);
+    const si = columns.indexOf(spec.series);
+    const vi = columns.indexOf(spec.y[0]);
+    const labels = [], names = [], cell = new Map();
+    rows.forEach(r => {
+        const x = String(r[xi]), n = String(r[si]);
+        if (!labels.includes(x)) labels.push(x);
+        if (!names.includes(n)) names.push(n);
+        cell.set(JSON.stringify([x, n]), Number(r[vi]) || 0);
+    });
+    return {
+        labels: labels,
+        series: names.map(n => ({
+            label: n,
+            data: labels.map(x => cell.get(JSON.stringify([x, n])) || 0)
+        }))
+    };
+}
+
 // Chart.js is built from the validated {type,x,y[],title} spec, never from
 // model-supplied config.
 function aicChart(canvas, spec, columns, rows) {
@@ -513,7 +537,11 @@ function aicChart(canvas, spec, columns, rows) {
     // different options.
     const kind = isBar ? 'bar' : (area ? 'line' : spec.type);
 
-    const labels = rows.map(r => String(r[xi] === null ? '' : r[xi]));
+    // With a series column the rows are long-format and get pivoted; without
+    // one, each y column is its own dataset.
+    const pivoted = spec.series ? aicPivot(spec, columns, rows) : null;
+    const labels = pivoted ? pivoted.labels
+                           : rows.map(r => String(r[xi] === null ? '' : r[xi]));
     const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
 
     // Long category names are the normal case here - operators, equipment,
@@ -522,16 +550,22 @@ function aicChart(canvas, spec, columns, rows) {
     // flat and complete.
     const horiz = spec.type === 'hbar' ||
                   (spec.type === 'bar' && (longest > 12 || labels.length > 8));
-    const single = spec.y.length === 1;
+    const seriesCount = pivoted ? pivoted.series.length : spec.y.length;
+    const single = seriesCount === 1;
 
     if (canvas.parentElement) {
         canvas.parentElement.style.height =
             (horiz ? Math.max(220, labels.length * 30 + 90) : 300) + 'px';
     }
 
-    const datasets = spec.y.map((col, i) => ({
-        label: col,
-        data: rows.map(r => Number(r[columns.indexOf(col)])),
+    const plots = pivoted ? pivoted.series
+                          : spec.y.map(col => ({
+                                label: col,
+                                data: rows.map(r => Number(r[columns.indexOf(col)]))
+                            }));
+    const datasets = plots.map((p, i) => ({
+        label: p.label,
+        data: p.data,
         backgroundColor: pie ? labels.map((_, j) => AIC_HUES[j % AIC_HUES.length])
                              : (area ? AIC_HUES[i % AIC_HUES.length] + '2e'
                                      : AIC_HUES[i % AIC_HUES.length]),
@@ -550,8 +584,12 @@ function aicChart(canvas, spec, columns, rows) {
     // against its own total, and a stack segment against the tallest stack.
     const sliceTotal = ctx =>
         ctx.dataset.data.reduce((a, b) => a + (Number(b) || 0), 0) || 1;
-    const stackMax = rows.reduce((m, r) => Math.max(m, spec.y.reduce(
-        (sum, col) => sum + (Number(r[columns.indexOf(col)]) || 0), 0)), 0) || 1;
+    const stackMax = (pivoted
+        ? pivoted.labels.map((_, i) =>
+              pivoted.series.reduce((sum, p) => sum + (p.data[i] || 0), 0))
+        : rows.map(r => spec.y.reduce(
+              (sum, col) => sum + (Number(r[columns.indexOf(col)]) || 0), 0))
+        ).reduce((m, v) => Math.max(m, v), 0) || 1;
 
     const cat = {
         ticks: {color: ink, font: {size: 10}, autoSkip: false,
@@ -754,6 +792,7 @@ async function aicAsk() {
             body: JSON.stringify({
                 question: question,
                 history: aicHistory,
+                last: aicLast,
                 period: document.getElementById('aic-period').value
             }),
             signal: abort.signal
@@ -788,6 +827,11 @@ async function aicAsk() {
     const wall = (Date.now() - started) / 1000;
     aicHistory.push({role: 'user', content: question});
     aicHistory.push({role: 'assistant', content: d.answer || ''});
+    // Only remember a query that actually produced something; carrying a
+    // failed one forward would have every refinement build on a dead end.
+    if (d.sql && (d.row_count || 0) > 0) {
+        aicLast = {sql: d.sql, chart: d.chart, columns: d.columns};
+    }
 
     const pid = id + '-sql', gid = id + '-rows';
     let tools = '';
