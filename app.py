@@ -110,6 +110,7 @@ from modules.MBC01 import bp as mbc01_bp, MODULE_INFO as mbc01_info
 from modules.PPL01 import bp as ppl01_bp, MODULE_INFO as ppl01_info
 from modules.LUEU01 import bp as eu01_bp, MODULE_INFO as eu01_info
 from modules.CRM01 import bp as crm01_bp, MODULE_INFO as crm01_info
+from modules.CARGO_STATS import bp as cargo_stats_bp, MODULE_INFO as cargo_stats_info
 
 # Import finance modules
 from modules.FCRM01 import bp as fcrm01_bp, MODULE_INFO as fcrm01_info
@@ -200,6 +201,7 @@ register_module(gstcfg_info['code'], gstcfg_info['name'], gstcfg_bp)
 register_module(fsap01_info['code'], fsap01_info['name'], fsap01_bp)
 register_module(flog01_info['code'], flog01_info['name'], flog01_bp)
 register_module(fdcn01_info['code'], fdcn01_info['name'], fdcn01_bp)
+register_module(cargo_stats_info['code'], cargo_stats_info['name'], cargo_stats_bp)
 
 def login_required(f):
     @wraps(f)

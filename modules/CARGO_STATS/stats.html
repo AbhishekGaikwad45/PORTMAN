@@ -1,0 +1,1816 @@
+{% extends "base.html" %}
+
+{% block title %}Cargo Stats - PORTMAN{% endblock %}
+
+{% block content %}
+
+<style>
+
+    /* ========================================================
+       PAGE
+       ======================================================== */
+
+    .cargo-stats-page {
+        padding: 18px;
+        background: #f5f7fa;
+        min-height: calc(100vh - 80px);
+    }
+
+
+    /* ========================================================
+       MODULE HEADER
+       ======================================================== */
+
+    .cargo-module-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 20px;
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        margin-bottom: 14px;
+    }
+
+    .cargo-module-header h2 {
+        margin: 0;
+        font-size: 21px;
+        font-weight: 600;
+        color: #172033;
+    }
+
+    .module-code {
+        background: #4285d4;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+
+    /* ========================================================
+       DESCRIPTION
+       ======================================================== */
+
+    .cargo-description {
+        margin-bottom: 16px;
+        color: #64748b;
+        font-size: 14px;
+    }
+
+
+    /* ========================================================
+       SECTION CARD
+       ======================================================== */
+
+    .cargo-section {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        margin-bottom: 18px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    }
+
+
+    /* ========================================================
+       SECTION HEADER
+       ======================================================== */
+
+    .cargo-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        background: #e5edf6;
+        border-bottom: 1px solid #cbd5e1;
+    }
+
+    .cargo-section-title {
+        font-size: 17px;
+        font-weight: 600;
+        color: #172033;
+    }
+
+    .cargo-section-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+
+    /* ========================================================
+       BUTTONS
+       ======================================================== */
+
+    .cargo-btn {
+        border: none;
+        border-radius: 5px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .cargo-btn-add {
+        background: #34a853;
+        color: white;
+    }
+
+    .cargo-btn-add:hover {
+        background: #2d9148;
+    }
+
+    .cargo-btn-save {
+        background: #2878c8;
+        color: white;
+    }
+
+    .cargo-btn-save:hover {
+        background: #2067ad;
+    }
+
+
+    /* ========================================================
+       SEARCH / TABLE CONTROLS
+       ======================================================== */
+
+    .cargo-table-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid #d6dee8;
+        background: #f8fafc;
+    }
+
+    .cargo-search {
+        width: 260px;
+        max-width: 100%;
+        padding: 8px 11px;
+        border: 1px solid #b9c6d5;
+        border-radius: 5px;
+        font-size: 13px;
+        outline: none;
+    }
+
+    .cargo-search:focus {
+        border-color: #4285d4;
+        box-shadow: 0 0 0 2px rgba(66, 133, 212, 0.12);
+    }
+
+    .cargo-page-info {
+        color: #64748b;
+        font-size: 12px;
+    }
+
+
+    /* ========================================================
+       TABLE WRAPPER
+       ======================================================== */
+
+    .cargo-table-wrapper {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+
+    /* ========================================================
+       TABLE
+       ======================================================== */
+
+    .cargo-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: auto;
+    }
+
+    .cargo-table th {
+        background: #dce8f4;
+        color: #24364b;
+        font-size: 13px;
+        font-weight: 600;
+        text-align: left;
+        padding: 10px 12px;
+        border-right: 1px solid #c5d2df;
+        border-bottom: 1px solid #b9c8d7;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    .cargo-table th:hover {
+        background: #d3e1ef;
+    }
+
+    .cargo-table td {
+        padding: 0;
+        border-right: 1px solid #d3dce6;
+        border-bottom: 1px solid #d3dce6;
+        height: 39px;
+        background: #ffffff;
+    }
+
+    .cargo-table tr:hover td {
+        background: #f8fbff;
+    }
+
+
+    /* ========================================================
+       INPUTS
+       ======================================================== */
+
+    .cargo-input {
+        width: 100%;
+        height: 39px;
+        box-sizing: border-box;
+        border: none;
+        outline: none;
+        padding: 8px 11px;
+        font-size: 13px;
+        color: #24364b;
+        background: transparent;
+    }
+
+    .cargo-input:focus {
+        background: #ffffff;
+        box-shadow: inset 0 0 0 2px #4285d4;
+    }
+
+    .cargo-date-input {
+        cursor: pointer;
+        width: 100% !important;
+        min-width: 135px !important;
+        height: 39px !important;
+        box-sizing: border-box !important;
+        padding: 7px 8px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Keep the complete date visible, including the calendar icon. */
+    .cargo-table th:first-child,
+    .cargo-table td:first-child {
+        width: 145px !important;
+        min-width: 145px !important;
+        max-width: 145px !important;
+    }
+
+    .cargo-table td:first-child {
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+
+    /* ========================================================
+       TOTAL
+       ======================================================== */
+
+    .cargo-total-cell {
+        background: #e8f6ed !important;
+    }
+
+    .cargo-total-input {
+        font-weight: 700;
+        color: #176b35;
+    }
+
+
+    /* ========================================================
+       DELETE
+       ======================================================== */
+
+    .cargo-delete-cell {
+        width: 45px;
+        text-align: center;
+    }
+
+    .cargo-delete-btn {
+        border: none;
+        background: transparent;
+        color: #dc2626;
+        font-size: 23px;
+        cursor: pointer;
+        line-height: 1;
+        padding: 5px;
+    }
+
+    .cargo-delete-btn:hover {
+        color: #b91c1c;
+    }
+
+
+    /* ========================================================
+       STATUS
+       ======================================================== */
+
+    .cargo-status {
+        padding: 9px 18px;
+        font-size: 13px;
+        border-top: 1px solid #e1e7ee;
+        min-height: 18px;
+    }
+
+    .cargo-status.success {
+        color: #17833b;
+    }
+
+    .cargo-status.error {
+        color: #c62828;
+    }
+
+    .cargo-status.normal {
+        color: #64748b;
+    }
+
+
+    /* ========================================================
+       PAGINATION
+       ======================================================== */
+
+    .cargo-pagination {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 5px;
+        padding: 9px 12px;
+        background: #f8fafc;
+        border-top: 1px solid #d6dee8;
+    }
+
+    .cargo-page-btn {
+        min-width: 31px;
+        height: 30px;
+        border: 1px solid #c4cfdb;
+        background: white;
+        color: #334155;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+
+    .cargo-page-btn:hover {
+        background: #eaf1f8;
+    }
+
+    .cargo-page-btn.active {
+        background: #2878c8;
+        color: white;
+        border-color: #2878c8;
+    }
+
+    .cargo-page-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+
+    /* ========================================================
+       EMPTY
+       ======================================================== */
+
+    .cargo-empty {
+        padding: 22px;
+        text-align: center;
+        color: #64748b;
+        font-size: 13px;
+    }
+
+
+    /* ========================================================
+       RESPONSIVE
+       ======================================================== */
+
+    @media (max-width: 900px) {
+
+        .cargo-table {
+            min-width: 900px;
+        }
+
+        .cargo-table-controls {
+            justify-content: flex-start;
+        }
+
+    }
+
+</style>
+
+
+<div class="cargo-stats-page">
+
+
+    <!-- ======================================================
+         MODULE HEADER
+         ====================================================== -->
+
+    <div class="cargo-module-header">
+
+        <h2>
+            Cargo Utilization
+        </h2>
+
+        <span class="module-code">
+            CU
+        </span>
+
+    </div>
+
+
+    <div class="cargo-description">
+
+        Daily consumption, production and stock tracking.
+        Use <strong>+ Add</strong> for a new entry and
+        <strong>Save</strong> to store the data.
+
+    </div>
+
+
+    <!-- ======================================================
+         CONSUMPTION
+         ====================================================== -->
+
+    <div
+        class="cargo-section"
+        id="section-consumption"
+    >
+
+        <div class="cargo-section-header">
+
+            <div class="cargo-section-title">
+                Consumption
+            </div>
+
+            <div class="cargo-section-actions">
+
+                <button
+                    class="cargo-btn cargo-btn-add"
+                    onclick="addRow('consumption')"
+                >
+                    + Add
+                </button>
+
+                <button
+                    class="cargo-btn cargo-btn-save"
+                    onclick="saveTable('consumption')"
+                >
+                    Save
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <div class="cargo-table-controls">
+
+            <input
+                type="text"
+                class="cargo-search"
+                id="search-consumption"
+                placeholder="Search..."
+                oninput="searchTable('consumption')"
+            >
+
+            <div
+                class="cargo-page-info"
+                id="page-info-consumption"
+            ></div>
+
+        </div>
+
+
+        <div class="cargo-table-wrapper">
+
+            <table
+                class="cargo-table"
+                id="table-consumption"
+            >
+
+                <thead></thead>
+
+                <tbody></tbody>
+
+            </table>
+
+        </div>
+
+
+        <div
+            class="cargo-pagination"
+            id="pagination-consumption"
+        ></div>
+
+
+        <div
+            class="cargo-status normal"
+            id="status-consumption"
+        >
+            Loading...
+        </div>
+
+    </div>
+
+
+    <!-- ======================================================
+         PRODUCTION
+         ====================================================== -->
+
+    <div
+        class="cargo-section"
+        id="section-production"
+    >
+
+        <div class="cargo-section-header">
+
+            <div class="cargo-section-title">
+                Production
+            </div>
+
+            <div class="cargo-section-actions">
+
+                <button
+                    class="cargo-btn cargo-btn-add"
+                    onclick="addRow('production')"
+                >
+                    + Add
+                </button>
+
+                <button
+                    class="cargo-btn cargo-btn-save"
+                    onclick="saveTable('production')"
+                >
+                    Save
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <div class="cargo-table-controls">
+
+            <input
+                type="text"
+                class="cargo-search"
+                id="search-production"
+                placeholder="Search..."
+                oninput="searchTable('production')"
+            >
+
+            <div
+                class="cargo-page-info"
+                id="page-info-production"
+            ></div>
+
+        </div>
+
+
+        <div class="cargo-table-wrapper">
+
+            <table
+                class="cargo-table"
+                id="table-production"
+            >
+
+                <thead></thead>
+
+                <tbody></tbody>
+
+            </table>
+
+        </div>
+
+
+        <div
+            class="cargo-pagination"
+            id="pagination-production"
+        ></div>
+
+
+        <div
+            class="cargo-status normal"
+            id="status-production"
+        >
+            Loading...
+        </div>
+
+    </div>
+
+
+    <!-- ======================================================
+         STOCK RMHS
+         ====================================================== -->
+
+    <div
+        class="cargo-section"
+        id="section-stock_rmhs"
+    >
+
+        <div class="cargo-section-header">
+
+            <div class="cargo-section-title">
+                Stock RMHS
+            </div>
+
+            <div class="cargo-section-actions">
+
+                <button
+                    class="cargo-btn cargo-btn-add"
+                    onclick="addRow('stock_rmhs')"
+                >
+                    + Add
+                </button>
+
+                <button
+                    class="cargo-btn cargo-btn-save"
+                    onclick="saveTable('stock_rmhs')"
+                >
+                    Save
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <div class="cargo-table-controls">
+
+            <input
+                type="text"
+                class="cargo-search"
+                id="search-stock_rmhs"
+                placeholder="Search..."
+                oninput="searchTable('stock_rmhs')"
+            >
+
+            <div
+                class="cargo-page-info"
+                id="page-info-stock_rmhs"
+            ></div>
+
+        </div>
+
+
+        <div class="cargo-table-wrapper">
+
+            <table
+                class="cargo-table"
+                id="table-stock_rmhs"
+            >
+
+                <thead></thead>
+
+                <tbody></tbody>
+
+            </table>
+
+        </div>
+
+
+        <div
+            class="cargo-pagination"
+            id="pagination-stock_rmhs"
+        ></div>
+
+
+        <div
+            class="cargo-status normal"
+            id="status-stock_rmhs"
+        >
+            Loading...
+        </div>
+
+    </div>
+
+
+    <!-- ======================================================
+         STOCK PNP
+         ====================================================== -->
+
+    <div
+        class="cargo-section"
+        id="section-stock_pnp"
+    >
+
+        <div class="cargo-section-header">
+
+            <div class="cargo-section-title">
+                Stock PNP
+            </div>
+
+            <div class="cargo-section-actions">
+
+                <button
+                    class="cargo-btn cargo-btn-add"
+                    onclick="addRow('stock_pnp')"
+                >
+                    + Add
+                </button>
+
+                <button
+                    class="cargo-btn cargo-btn-save"
+                    onclick="saveTable('stock_pnp')"
+                >
+                    Save
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <div class="cargo-table-controls">
+
+            <input
+                type="text"
+                class="cargo-search"
+                id="search-stock_pnp"
+                placeholder="Search..."
+                oninput="searchTable('stock_pnp')"
+            >
+
+            <div
+                class="cargo-page-info"
+                id="page-info-stock_pnp"
+            ></div>
+
+        </div>
+
+
+        <div class="cargo-table-wrapper">
+
+            <table
+                class="cargo-table"
+                id="table-stock_pnp"
+            >
+
+                <thead></thead>
+
+                <tbody></tbody>
+
+            </table>
+
+        </div>
+
+
+        <div
+            class="cargo-pagination"
+            id="pagination-stock_pnp"
+        ></div>
+
+
+        <div
+            class="cargo-status normal"
+            id="status-stock_pnp"
+        >
+            Loading...
+        </div>
+
+    </div>
+
+
+</div>
+
+
+{% endblock %}
+
+
+{% block scripts %}
+
+<!-- DataTables -->
+<link rel="stylesheet"
+      href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+
+<style>
+    /* DataTables layout */
+    .cargo-table-controls {
+        display: none !important;
+    }
+
+    .cargo-dt-wrapper {
+        padding: 0;
+    }
+
+    .cargo-section .dataTables_wrapper {
+        padding: 10px 14px 12px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_length,
+    .cargo-section .dataTables_wrapper .dataTables_filter {
+        margin-bottom: 10px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_length select,
+    .cargo-section .dataTables_wrapper .dataTables_filter input {
+        border: 1px solid #b9c6d5;
+        border-radius: 4px;
+        padding: 5px 8px;
+        background: #fff;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_filter input {
+        margin-left: 6px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_info {
+        padding-top: 12px;
+        color: #64748b;
+        font-size: 12px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_paginate {
+        padding-top: 8px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_paginate .paginate_button {
+        border-radius: 4px !important;
+        margin-left: 3px;
+    }
+
+    .cargo-section .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+        background: #2878c8 !important;
+        color: #fff !important;
+        border-color: #2878c8 !important;
+    }
+
+    .cargo-section .cargo-table {
+        width: 100% !important;
+        table-layout: auto !important;
+    }
+
+    .cargo-section .cargo-table th:first-child,
+    .cargo-section .cargo-table td:first-child {
+        width: 145px !important;
+        min-width: 145px !important;
+        max-width: 145px !important;
+    }
+
+    .cargo-section .cargo-table td:first-child {
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    .cargo-section .cargo-date-input {
+        width: 100% !important;
+        min-width: 135px !important;
+        max-width: none !important;
+        box-sizing: border-box !important;
+        white-space: nowrap !important;
+    }
+
+    .cargo-section .cargo-table thead th {
+        cursor: pointer;
+    }
+
+    .cargo-section .cargo-table td {
+        vertical-align: middle;
+    }
+
+    .cargo-section .cargo-table {
+        width: 100% !important;
+        table-layout: auto !important;
+    }
+
+    /* Keep every quantity column wide enough for multi-digit values. */
+    .cargo-section .cargo-table th,
+    .cargo-section .cargo-table td {
+        white-space: nowrap;
+    }
+
+    .cargo-section .cargo-table .cargo-input {
+        display: block;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        box-sizing: border-box;
+        border: none;
+        outline: none;
+        background: transparent;
+        min-height: 39px;
+        height: 39px;
+        padding: 8px 10px;
+        font-size: 13px;
+        color: #24364b;
+        overflow: visible;
+    }
+
+    .cargo-section .cargo-table input[type="number"],
+    .cargo-section .cargo-table input[data-field]:not(.cargo-date-input) {
+        min-width: 130px !important;
+        width: 100% !important;
+        padding: 8px 10px !important;
+        box-sizing: border-box !important;
+        white-space: nowrap !important;
+    }
+
+    .cargo-section .cargo-table input[type="number"]::-webkit-inner-spin-button,
+    .cargo-section .cargo-table input[type="number"]::-webkit-outer-spin-button {
+        margin: 0;
+    }
+
+    .cargo-section .cargo-table .date-column,
+    .cargo-section .cargo-table td:first-child {
+        width: 145px !important;
+        min-width: 145px !important;
+    }
+
+    .cargo-section .cargo-table td:first-child .cargo-date-input {
+        width: 100% !important;
+        min-width: 135px !important;
+        max-width: none !important;
+    }
+
+    .cargo-section .cargo-table .cargo-input:focus {
+        background: #fff;
+        box-shadow: inset 0 0 0 2px #4285d4;
+    }
+
+    .cargo-section .cargo-table .cargo-total-input {
+        font-weight: 700;
+        color: #176b35;
+        background: #e8f6ed;
+    }
+
+    .cargo-section .cargo-table .cargo-quantity-input {
+        min-width: 130px !important;
+        width: 100% !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+
+    .cargo-section .cargo-table .cargo-total-cell {
+        background: #e8f6ed !important;
+    }
+
+    .cargo-section .dataTables_empty {
+        padding: 18px !important;
+        color: #64748b;
+    }
+
+    @media (max-width: 900px) {
+        .cargo-section .dataTables_wrapper {
+            overflow-x: auto;
+        }
+    }
+</style>
+
+<script>
+"use strict";
+
+/* ============================================================
+   CARGO STATS - DATATABLES VERSION
+   ============================================================ */
+
+const TABLES = {
+    consumption: {
+        title: "Consumption",
+        fields: [
+            "date", "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods", "total"
+        ],
+        labels: [
+            "Date", "IBRM", "CBRM", "Fluxes",
+            "Clinker / Slag", "FG Goods", "Total"
+        ],
+        numericFields: [
+            "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods"
+        ],
+        totalField: "total"
+    },
+
+    production: {
+        title: "Production",
+        fields: [
+            "date", "bf_1", "bf_2", "pp_1", "pp_2",
+            "sp_1", "sp_2", "co1_pushings",
+            "co2_ab_pushings", "co2_cd_pushings", "total"
+        ],
+        labels: [
+            "Date", "BF-1", "BF-2", "PP-1", "PP-2",
+            "SP-1", "SP-2", "CO-1 (PUSHINGS)",
+            "CO-2 (A&B) (PUSHINGS)",
+            "CO-2 (C&D) (PUSHINGS)", "Total"
+        ],
+        numericFields: [
+            "bf_1", "bf_2", "pp_1", "pp_2",
+            "sp_1", "sp_2", "co1_pushings",
+            "co2_ab_pushings", "co2_cd_pushings"
+        ],
+        totalField: "total"
+    },
+
+    stock_rmhs: {
+        title: "Stock RMHS",
+        fields: [
+            "date", "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods", "total"
+        ],
+        labels: [
+            "Stock as on Date", "IBRM", "CBRM", "Fluxes",
+            "Clinker / Slag", "FG Goods", "Total"
+        ],
+        numericFields: [
+            "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods"
+        ],
+        totalField: "total"
+    },
+
+    stock_pnp: {
+        title: "Stock PNP",
+        fields: [
+            "date", "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods", "total"
+        ],
+        labels: [
+            "Stock as on Date", "IBRM", "CBRM", "Fluxes",
+            "Clinker / Slag", "FG Goods", "Total"
+        ],
+        numericFields: [
+            "ibrm", "cbrm", "fluxes",
+            "clinker_slag", "fg_goods"
+        ],
+        totalField: "total"
+    }
+};
+
+const dtTables = {};
+const tableData = {
+    consumption: [],
+    production: [],
+    stock_rmhs: [],
+    stock_pnp: []
+};
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function todayISO() {
+    const d = new Date();
+    return [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, "0"),
+        String(d.getDate()).padStart(2, "0")
+    ].join("-");
+}
+
+function numberValue(value) {
+    if (value === null || value === undefined || value === "") {
+        return 0;
+    }
+
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function formatNumber(value) {
+    if (value === null || value === undefined || value === "") {
+        return "";
+    }
+
+    const n = Number(value);
+
+    if (!Number.isFinite(n)) {
+        return "";
+    }
+
+    if (Number.isInteger(n)) {
+        return String(n);
+    }
+
+    return String(Number(n.toFixed(2)));
+}
+
+function calculateTotal(cfg, row) {
+    let total = 0;
+
+    cfg.numericFields.forEach(field => {
+        total += numberValue(row[field]);
+    });
+
+    row[cfg.totalField] = formatNumber(total);
+    return row[cfg.totalField];
+}
+
+function setStatus(section, message, success) {
+    const element = document.getElementById("status-" + section);
+
+    if (!element) {
+        return;
+    }
+
+    element.textContent = message;
+    element.className =
+        "cargo-status " + (success ? "success" : "error");
+}
+
+/* ============================================================
+   CREATE NEW ROW
+   ============================================================ */
+
+function createNewRow(cfg) {
+    const row = {
+        id: null,
+        date: todayISO()
+    };
+
+    cfg.numericFields.forEach(field => {
+        row[field] = "";
+    });
+
+    row[cfg.totalField] = "";
+
+    return row;
+}
+
+/* ============================================================
+   BUILD TABLE HEADER
+   ============================================================ */
+
+function buildHeader(section) {
+    const cfg = TABLES[section];
+    const table = document.getElementById("table-" + section);
+    const thead = table.querySelector("thead");
+
+    thead.innerHTML = "";
+
+    const tr = document.createElement("tr");
+
+    cfg.fields.forEach((field, index) => {
+        const th = document.createElement("th");
+        th.textContent = cfg.labels[index];
+        tr.appendChild(th);
+    });
+
+    const deleteTh = document.createElement("th");
+    deleteTh.textContent = "";
+    deleteTh.style.width = "45px";
+    tr.appendChild(deleteTh);
+
+    thead.appendChild(tr);
+}
+
+/* ============================================================
+   INPUT HTML
+   ============================================================ */
+
+function inputHtml(row, field, cfg) {
+    if (field === "date") {
+        return `
+            <input
+                type="date"
+                class="cargo-input cargo-date-input"
+                data-field="date"
+                value="${escapeHtml(row.date || "")}"
+            >
+        `;
+    }
+
+    if (field === cfg.totalField) {
+        return `
+            <input
+                type="text"
+                readonly
+                class="cargo-input cargo-total-input"
+                data-field="${field}"
+                value="${escapeHtml(row[field] ?? "")}"
+            >
+        `;
+    }
+
+    return `
+        <input
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            class="cargo-input cargo-quantity-input"
+            data-field="${field}"
+            value="${escapeHtml(row[field] ?? "")}"
+        >
+    `;
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+/* ============================================================
+   DATATABLE INITIALIZATION
+   ============================================================ */
+
+function getColumnWidth(cfg, field) {
+    if (field === "date") {
+        return "145px";
+    }
+
+    if (field === cfg.totalField) {
+        return "135px";
+    }
+
+    /* Long production headings need more room. */
+    if (
+        field === "co1_pushings" ||
+        field === "co2_ab_pushings" ||
+        field === "co2_cd_pushings"
+    ) {
+        return "180px";
+    }
+
+    return "135px";
+}
+
+function initializeDataTable(section) {
+    const cfg = TABLES[section];
+    const selector = "#table-" + section;
+
+    buildHeader(section);
+
+    if ($.fn.DataTable.isDataTable(selector)) {
+        $(selector).DataTable().destroy();
+    }
+
+    const columns = cfg.fields.map((field) => {
+        return {
+            data: field,
+            title: cfg.labels[cfg.fields.indexOf(field)],
+            width: getColumnWidth(cfg, field),
+            className:
+                field === cfg.totalField
+                    ? "cargo-total-cell"
+                    : "",
+
+            render: function(data, type, row) {
+                /*
+                 * IMPORTANT:
+                 * DataTables receives the raw value for sorting/searching.
+                 * Only the display view contains the editable input.
+                 */
+                if (type === "display") {
+                    return inputHtml(row, field, cfg);
+                }
+
+                if (type === "sort" || type === "type") {
+                    if (field === "date") {
+                        return row.date || "";
+                    }
+
+                    if (field === cfg.totalField ||
+                        cfg.numericFields.includes(field)) {
+                        return numberValue(row[field]);
+                    }
+
+                    return row[field] ?? "";
+                }
+
+                return row[field] ?? "";
+            }
+        };
+    });
+
+    columns.push({
+        data: null,
+        title: "",
+        orderable: false,
+        searchable: false,
+        width: "45px",
+        className: "cargo-delete-cell",
+        render: function(data, type, row) {
+            if (type !== "display") {
+                return "";
+            }
+
+            return `
+                <button
+                    type="button"
+                    class="cargo-delete-btn"
+                    data-action="delete"
+                    title="Delete"
+                >×</button>
+            `;
+        }
+    });
+
+    dtTables[section] = $(selector).DataTable({
+        data: tableData[section],
+
+        columns: columns,
+
+        /*
+         * Standard DataTables controls:
+         * - Show entries
+         * - Search
+         * - Sorting
+         * - Pagination
+         * - Info
+         */
+        dom:
+            '<"dt-top"lf>' +
+            'rt' +
+            '<"dt-bottom"ip>',
+
+        pageLength: 10,
+
+        lengthMenu: [
+            [10, 25, 50, 100, -1],
+            [10, 25, 50, 100, "All"]
+        ],
+
+        paging: true,
+        searching: true,
+        ordering: true,
+        info: true,
+
+        order: [
+            [0, "desc"]
+        ],
+
+        autoWidth: false,
+
+        /* Wide production tables scroll horizontally instead of squeezing inputs. */
+        scrollX: true,
+
+        language: {
+            search: "Search:",
+            lengthMenu: "Show _MENU_ entries",
+            info: "Showing _START_ to _END_ of _TOTAL_ entries",
+            infoEmpty: "Showing 0 to 0 of 0 entries",
+            emptyTable: "No data available",
+            zeroRecords: "No matching records found",
+            paginate: {
+                first: "First",
+                last: "Last",
+                next: "Next",
+                previous: "Previous"
+            }
+        },
+
+        columnDefs: [
+            {
+                targets: 0,
+                type: "date",
+                width: "145px",
+                className: "date-column"
+            },
+            {
+                targets: -1,
+                width: "45px",
+                orderable: false,
+                searchable: false
+            }
+        ]
+    });
+
+    /*
+     * ========================================================
+     * INPUT CHANGE HANDLER
+     * ========================================================
+     *
+     * We update the same row object.
+     * The database ID is NEVER removed.
+     */
+
+    $(selector).off("input.cargo change.cargo");
+
+    $(selector).on(
+        "input.cargo change.cargo",
+        "tbody input[data-field]",
+        function() {
+            const tr = $(this).closest("tr");
+            const rowApi = dtTables[section].row(tr);
+            const row = rowApi.data();
+
+            if (!row) {
+                return;
+            }
+
+            const field = this.dataset.field;
+
+            row[field] = this.value;
+
+            if (field !== cfg.totalField) {
+                calculateTotal(cfg, row);
+
+                const totalInput =
+                    tr.find(
+                        'input[data-field="' +
+                        cfg.totalField +
+                        '"]'
+                    );
+
+                totalInput.val(
+                    row[cfg.totalField] ?? ""
+                );
+            }
+
+            setStatus(
+                section,
+                "Unsaved changes",
+                false
+            );
+        }
+    );
+
+    /*
+     * Delete button.
+     */
+    $(selector).off("click.cargoDelete");
+
+    $(selector).on(
+        "click.cargoDelete",
+        "button[data-action='delete']",
+        function() {
+            const tr = $(this).closest("tr");
+            const row = dtTables[section].row(tr).data();
+
+            if (row) {
+                deleteRow(section, row);
+            }
+        }
+    );
+}
+
+/* ============================================================
+   LOAD TABLE
+   ============================================================ */
+
+async function loadTable(section) {
+    const cfg = TABLES[section];
+
+    try {
+        setStatus(section, "Loading...", false);
+
+        const response = await fetch(
+            "/module/CARGO_STATS/api/" + section,
+            {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.error || "Unable to load data"
+            );
+        }
+
+        tableData[section] = (Array.isArray(result) ? result : [])
+            .map(row => {
+                const cleanRow = {
+                    ...row,
+                    id: row.id
+                };
+
+                calculateTotal(cfg, cleanRow);
+
+                return cleanRow;
+            });
+
+        initializeDataTable(section);
+
+        setStatus(
+            section,
+            "Loaded successfully",
+            true
+        );
+    }
+    catch (error) {
+        console.error(
+            "CARGO STATS LOAD ERROR:",
+            section,
+            error
+        );
+
+        setStatus(
+            section,
+            "Load failed: " + error.message,
+            false
+        );
+    }
+}
+
+/* ============================================================
+   ADD ROW
+   ============================================================ */
+
+function addRow(section) {
+    const cfg = TABLES[section];
+
+    const row = createNewRow(cfg);
+
+    /*
+     * New row has NO ID.
+     * Backend will INSERT this row.
+     */
+    row.id = null;
+
+    tableData[section].unshift(row);
+
+    const dt = dtTables[section];
+
+    if (dt) {
+        dt.clear();
+        dt.rows.add(tableData[section]);
+        dt.order([0, "desc"]);
+        dt.page("first").draw(false);
+    }
+
+    setStatus(
+        section,
+        "New row added. Enter the values and click Save.",
+        false
+    );
+}
+
+/* ============================================================
+   SAVE TABLE
+   ============================================================ */
+
+async function saveTable(section) {
+    const cfg = TABLES[section];
+
+    try {
+        setStatus(section, "Saving...", false);
+
+        const dt = dtTables[section];
+
+        if (!dt) {
+            throw new Error("DataTable is not initialized");
+        }
+
+        /*
+         * Get ALL rows, not only the current page.
+         */
+        const rows = [];
+
+        dt.rows().every(function() {
+            rows.push(this.data());
+        });
+
+        for (const row of rows) {
+            if (!row.date) {
+                throw new Error(
+                    "Please enter a date for every row."
+                );
+            }
+
+            calculateTotal(cfg, row);
+
+            /*
+             * CRITICAL:
+             *
+             * Existing row:
+             *     id = existing DB ID
+             *
+             * New row:
+             *     id = null
+             *
+             * If the date is changed on an existing row,
+             * the SAME id is sent to backend.
+             *
+             * Backend must update by ID instead of creating
+             * another record.
+             */
+            const payload = {
+                id:
+                    row.id !== null &&
+                    row.id !== undefined
+                        ? row.id
+                        : null,
+
+                date: row.date,
+
+                data: {
+                    ...row
+                }
+            };
+
+            console.log(
+                "CARGO STATS SAVE:",
+                section,
+                payload
+            );
+
+            const response = await fetch(
+                "/module/CARGO_STATS/api/" + section,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        "Accept":
+                            "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    result.error ||
+                    "Save failed"
+                );
+            }
+
+            /*
+             * Keep backend ID.
+             */
+            row.id = result.id;
+
+            if (result.data) {
+                Object.assign(
+                    row,
+                    result.data
+                );
+            }
+        }
+
+        /*
+         * Reload from backend so the table is synchronized
+         * with the actual database.
+         */
+        await loadTable(section);
+
+        setStatus(
+            section,
+            "Saved successfully ✓",
+            true
+        );
+    }
+    catch (error) {
+        console.error(
+            "CARGO STATS SAVE ERROR:",
+            section,
+            error
+        );
+
+        setStatus(
+            section,
+            "Save failed: " + error.message,
+            false
+        );
+    }
+}
+
+/* ============================================================
+   DELETE ROW
+   ============================================================ */
+
+async function deleteRow(section, row) {
+    if (!confirm("Delete this entry?")) {
+        return;
+    }
+
+    /*
+     * New unsaved row.
+     */
+    if (
+        row.id === null ||
+        row.id === undefined
+    ) {
+        const index =
+            tableData[section].indexOf(row);
+
+        if (index !== -1) {
+            tableData[section].splice(
+                index,
+                1
+            );
+        }
+
+        refreshDataTable(section);
+
+        setStatus(
+            section,
+            "Row removed",
+            true
+        );
+
+        return;
+    }
+
+    /*
+     * Existing database row.
+     */
+    try {
+        const response = await fetch(
+            "/module/CARGO_STATS/api/" +
+            section +
+            "/id/" +
+            row.id,
+            {
+                method: "DELETE"
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.error ||
+                "Delete failed"
+            );
+        }
+
+        const index =
+            tableData[section].findIndex(
+                item =>
+                    Number(item.id) ===
+                    Number(row.id)
+            );
+
+        if (index !== -1) {
+            tableData[section].splice(
+                index,
+                1
+            );
+        }
+
+        refreshDataTable(section);
+
+        setStatus(
+            section,
+            "Deleted successfully ✓",
+            true
+        );
+    }
+    catch (error) {
+        console.error(
+            "CARGO STATS DELETE ERROR:",
+            error
+        );
+
+        setStatus(
+            section,
+            "Delete failed: " +
+            error.message,
+            false
+        );
+    }
+}
+
+/* ============================================================
+   REFRESH DATATABLE
+   ============================================================ */
+
+function refreshDataTable(section) {
+    const dt = dtTables[section];
+
+    if (!dt) {
+        return;
+    }
+
+    const currentPage =
+        dt.page();
+
+    dt.clear();
+    dt.rows.add(
+        tableData[section]
+    );
+    dt.draw(false);
+
+    const pages =
+        dt.page.info().pages;
+
+    if (pages > 0) {
+        dt.page(
+            Math.min(
+                currentPage,
+                pages - 1
+            )
+        ).draw(false);
+    }
+}
+
+/* ============================================================
+   INITIAL LOAD
+   ============================================================ */
+
+$(document).ready(function() {
+
+    loadTable("consumption");
+
+    loadTable("production");
+
+    loadTable("stock_rmhs");
+
+    loadTable("stock_pnp");
+
+});
+</script>
+
+{% endblock %} 
