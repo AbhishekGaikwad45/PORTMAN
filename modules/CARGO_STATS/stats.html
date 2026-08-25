@@ -621,6 +621,7 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
                 <button
                     class="cargo-btn cargo-btn-column"
                     onclick="addColumn('consumption')"
@@ -628,6 +629,7 @@
                 >
                     + Add Column
                 </button>
+                {% endif %}
 
                 <button
                     class="cargo-btn cargo-btn-save"
@@ -715,6 +717,7 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
                 <button
                     class="cargo-btn cargo-btn-column"
                     onclick="addColumn('production')"
@@ -722,6 +725,7 @@
                 >
                     + Add Column
                 </button>
+                {% endif %}
 
                 <button
                     class="cargo-btn cargo-btn-save"
@@ -809,6 +813,7 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
                 <button
                     class="cargo-btn cargo-btn-column"
                     onclick="addColumn('stock_rmhs')"
@@ -816,6 +821,7 @@
                 >
                     + Add Column
                 </button>
+                {% endif %}
 
                 <button
                     class="cargo-btn cargo-btn-save"
@@ -903,6 +909,7 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
                 <button
                     class="cargo-btn cargo-btn-column"
                     onclick="addColumn('stock_pnp')"
@@ -910,6 +917,7 @@
                 >
                     + Add Column
                 </button>
+                {% endif %}
 
                 <button
                     class="cargo-btn cargo-btn-save"
