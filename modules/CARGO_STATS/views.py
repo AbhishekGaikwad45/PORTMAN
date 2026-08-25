@@ -788,6 +788,332 @@ def api_upsert(section):
 
 
 # ============================================================
+# DELETE DYNAMIC COLUMN
+# ============================================================
+
+@bp.route(
+    "/api/<section>/column/<field>",
+    methods=["DELETE"]
+)
+def api_delete_column(section, field):
+
+    if not _require_login():
+        return jsonify({
+            "success": False,
+            "error": "Not logged in"
+        }), 401
+
+    conn = None
+
+    try:
+        section = _validate_section(section)
+
+        field = (field or "").strip()
+
+        if not field:
+            return jsonify({
+                "success": False,
+                "error": "Column field is required."
+            }), 400
+
+        conn = get_db()
+        cur = get_cursor(conn)
+
+        # --------------------------------------------------------
+        # Get every record in this section.
+        # --------------------------------------------------------
+
+        cur.execute(
+            f"""
+            SELECT id, data
+            FROM {TABLE_NAME}
+            WHERE section = %s
+            ORDER BY id;
+            """,
+            (section,)
+        )
+
+        rows = cur.fetchall()
+
+        affected_rows = 0
+
+        def json_dict(raw):
+            """
+            Convert PostgreSQL JSON / string / bytes into a dict.
+            """
+            if raw is None:
+                return {}
+
+            if isinstance(raw, dict):
+                return dict(raw)
+
+            if isinstance(raw, bytes):
+                try:
+                    raw = raw.decode("utf-8")
+                except Exception:
+                    return {}
+
+            if isinstance(raw, str):
+                try:
+                    value = json.loads(raw)
+                except Exception:
+                    return {}
+
+                return value if isinstance(value, dict) else {}
+
+            try:
+                value = dict(raw)
+                return value if isinstance(value, dict) else {}
+            except Exception:
+                return {}
+
+        # --------------------------------------------------------
+        # Remove the column from EVERY database row.
+        # --------------------------------------------------------
+
+        for row in rows:
+
+            row_id = row["id"]
+            data = json_dict(row["data"])
+
+            if not data:
+                continue
+
+            changed = False
+
+            # Exact key from the URL.
+            if field in data:
+                del data[field]
+                changed = True
+
+            # Also match normalized keys.
+            normalized_field = (
+                field.strip()
+                .lower()
+                .replace(" ", "_")
+                .replace("-", "_")
+            )
+
+            for key in list(data.keys()):
+
+                if str(key).startswith("__"):
+                    continue
+
+                normalized_key = (
+                    str(key)
+                    .strip()
+                    .lower()
+                    .replace(" ", "_")
+                    .replace("-", "_")
+                )
+
+                if normalized_key == normalized_field:
+                    del data[key]
+                    changed = True
+
+            # ----------------------------------------------------
+            # Remove metadata entry.
+            # ----------------------------------------------------
+
+            dynamic_columns = data.get(
+                "__dynamic_columns"
+            )
+
+            if isinstance(dynamic_columns, dict):
+
+                for metadata_key in list(
+                    dynamic_columns.keys()
+                ):
+
+                    normalized_metadata_key = (
+                        str(metadata_key)
+                        .strip()
+                        .lower()
+                        .replace(" ", "_")
+                        .replace("-", "_")
+                    )
+
+                    if (
+                        metadata_key == field
+                        or
+                        normalized_metadata_key
+                        == normalized_field
+                    ):
+                        del dynamic_columns[
+                            metadata_key
+                        ]
+                        changed = True
+
+                if dynamic_columns:
+
+                    data["__dynamic_columns"] = (
+                        dynamic_columns
+                    )
+
+                else:
+
+                    data.pop(
+                        "__dynamic_columns",
+                        None
+                    )
+
+            # ----------------------------------------------------
+            # IMPORTANT:
+            # Write the COMPLETE cleaned JSON back.
+            # This is a PostgreSQL JSON column, so we send a
+            # JSON string, NOT a jsonb expression or SQL record.
+            # ----------------------------------------------------
+
+            if changed:
+
+                cleaned_json = json.dumps(
+                    data,
+                    ensure_ascii=False
+                )
+
+                cur.execute(
+                    f"""
+                    UPDATE {TABLE_NAME}
+                    SET
+                        data = %s,
+                        updated_at = now()
+                    WHERE id = %s
+                      AND section = %s;
+                    """,
+                    (
+                        cleaned_json,
+                        row_id,
+                        section
+                    )
+                )
+
+                affected_rows += 1
+
+        conn.commit()
+
+        # --------------------------------------------------------
+        # HARD verification.
+        # --------------------------------------------------------
+
+        cur.execute(
+            f"""
+            SELECT id, data
+            FROM {TABLE_NAME}
+            WHERE section = %s
+            ORDER BY id;
+            """,
+            (section,)
+        )
+
+        remaining = []
+
+        for row in cur.fetchall():
+
+            data = json_dict(row["data"])
+
+            # Actual field still present.
+            if field in data:
+                remaining.append(row["id"])
+                continue
+
+            # Normalized field still present.
+            normalized_field = (
+                field.strip()
+                .lower()
+                .replace(" ", "_")
+                .replace("-", "_")
+            )
+
+            found = False
+
+            for key in data.keys():
+
+                if str(key).startswith("__"):
+                    continue
+
+                normalized_key = (
+                    str(key)
+                    .strip()
+                    .lower()
+                    .replace(" ", "_")
+                    .replace("-", "_")
+                )
+
+                if normalized_key == normalized_field:
+                    found = True
+                    break
+
+            if found:
+                remaining.append(row["id"])
+                continue
+
+            # Metadata still present.
+            dynamic_columns = data.get(
+                "__dynamic_columns"
+            )
+
+            if isinstance(dynamic_columns, dict):
+
+                for metadata_key in dynamic_columns.keys():
+
+                    normalized_metadata_key = (
+                        str(metadata_key)
+                        .strip()
+                        .lower()
+                        .replace(" ", "_")
+                        .replace("-", "_")
+                    )
+
+                    if (
+                        metadata_key == field
+                        or
+                        normalized_metadata_key
+                        == normalized_field
+                    ):
+                        remaining.append(row["id"])
+                        break
+
+        if remaining:
+
+            conn.rollback()
+
+            return jsonify({
+                "success": False,
+                "deleted": False,
+                "field": field,
+                "affected_rows": affected_rows,
+                "remaining_rows": remaining,
+                "error": (
+                    f'Value for column "{field}" still '
+                    f"exists in database rows: {remaining}"
+                )
+            }), 500
+
+        return jsonify({
+            "success": True,
+            "deleted": True,
+            "field": field,
+            "affected_rows": affected_rows
+        }), 200
+
+    except Exception as e:
+
+        if conn:
+            conn.rollback()
+
+        return jsonify({
+            "success": False,
+            "deleted": False,
+            "error": str(e)
+        }), 500
+
+    finally:
+
+        if conn:
+            conn.close()
+
+
+# ============================================================
 # DELETE
 # ============================================================
 
