@@ -17,8 +17,6 @@ def upgrade() -> None:
     # Same shape as the Revenue Register grid, minus Days/Bucket — those are
     # derived from invoice_date at read time and would go stale if stored.
     # ack_date stays VARCHAR: legacy registers mix real dates with free text.
-    # cargo_volume is a VARCHAR too — in the register sheet it is a YES/NO flag,
-    # not a quantity.
     op.execute("""
         CREATE TABLE IF NOT EXISTS rp02_revenue_backdated (
             id               SERIAL PRIMARY KEY,
@@ -26,7 +24,7 @@ def upgrade() -> None:
             group_type       VARCHAR(50),
             revenue_type_1   VARCHAR(100),
             revenue_type_2   VARCHAR(100),
-            cargo_volume     VARCHAR(20),
+            cargo_volume     NUMERIC,
             invoice_date     DATE NOT NULL,
             cust_code        VARCHAR(50),
             customer_name    VARCHAR(300) NOT NULL,
