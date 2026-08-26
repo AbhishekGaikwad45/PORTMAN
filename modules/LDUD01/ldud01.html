@@ -2454,9 +2454,40 @@ function validateDelayDate(cell) {
             return true;
         }
 
-        // Alongside Berth cannot be earlier than this row's own AMF at Port
-        function validateAlongsideBerthAfterAmf(cell) {
-            return validateAgainstRowField(cell, 'amf_at_port', 'AMF at Port');
+        // Alongside Berth validation
+        // RULE: Past dates are restricted from Cast Off MV.
+        // Alongside Berth cannot be earlier than Cast Off MV.
+        // AMF at Port is NOT used for this validation.
+        function validateAlongsideBerthAfterCastOffMv(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+
+            const enteredDate = parseValidDateTime(value);
+            if (!enteredDate) return true;
+
+            const rowData = cell.getRow().getData();
+            const castOffMv = rowData.cast_off_mv;
+
+            // Cast Off MV is required for this validation.
+            if (!castOffMv) {
+                alert('Please enter Cast Off MV before entering Alongside Berth.');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            const castOffMvDate = parseValidDateTime(castOffMv);
+            if (!castOffMvDate) return true;
+
+            // REJECT PAST DATE:
+            // Alongside Berth cannot be before Cast Off MV.
+            if (enteredDate < castOffMvDate) {
+                const colTitle = cell.getColumn().getDefinition().title;
+                alert(`${colTitle} cannot be earlier than Cast Off MV.`);
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+
+            return true;
         }
 
         // Discharge Start cannot be earlier than this row's own Alongside Berth
@@ -2655,7 +2686,7 @@ function validateDelayDate(cell) {
                 if (field === 'amf_at_port' && !validateAmfAtPortSequence(cell)) {
                     return;
                 }
-                if (field === 'along_side_berth' && !validateAlongsideBerthAfterAmf(cell)) {
+                if (field === 'along_side_berth' && !validateAlongsideBerthAfterCastOffMv(cell)) {
                     return;
                 }
                 if (field === 'commence_discharge_berth' && !validateDischargeStartAfterAlongsideBerth(cell)) {
@@ -3436,6 +3467,7 @@ if (type === 'delays') {
 }
 
         // ── Validation: barge_lines — date fields must be in chronological order ──
+        // Alongside Berth is specifically validated against Cast Off MV.
         if (type === 'barge_lines') {
             const isExport = currentOperationTypes[ldudId] === 'Export';
             let pairs;
@@ -3467,7 +3499,7 @@ if (type === 'delays') {
                     ['cast_off_mv',              'Cast Off MV',                  'anchored_gull_island_empty','Anch Gull Island (Loaded)'],
                     ['anchored_gull_island_empty','Anch Gull Island (Loaded)',   'aweigh_gull_island_empty',  'Aweigh Gull Island (Loaded)'],
                     ['aweigh_gull_island_empty', 'Aweigh Gull Island (Loaded)', 'amf_at_port',               'AMF at Port'],
-                    ['amf_at_port',              'AMF at Port',                  'along_side_berth',          'Alongside Berth'],
+                    ['cast_off_mv',              'Cast Off MV',                  'along_side_berth',          'Alongside Berth'],
                     ['along_side_berth',         'Alongside Berth',              'commence_discharge_berth',  'Discharge Start'],
                     ['commence_discharge_berth', 'Discharge Start',              'completed_discharge_berth', 'Discharge End'],
                     ['completed_discharge_berth','Discharge End',                'cast_off_berth',            'Cast Off Berth'],
