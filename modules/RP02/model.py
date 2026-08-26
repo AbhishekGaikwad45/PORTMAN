@@ -139,43 +139,45 @@ def parse_rows(headers, raw_rows):
     return rows, errors
 
 
-def parse_upload(file_storage):
-    """Parse a werkzeug FileStorage (.csv/.xlsx) → (rows, errors).
-    The header row is the first row containing both 'Customer Name' and
-    'Bill No' (normalized), so leading title rows are tolerated.
+def read_matrix(file_storage):
+    """Read a werkzeug FileStorage (.csv/.xlsx) → (matrix, errors).
     The format is detected from the CONTENT, not the extension — a CSV
     saved with any extension still parses, and unreadable files come back
     as a friendly format error instead of a 500."""
     import io, csv as _csv
     raw = file_storage.read()
-
-    def from_matrix(matrix):
-        header_idx = None
-        for i, row in enumerate(matrix):
-            normed = {_norm_header(c) for c in row}
-            if 'customer name' in normed and 'bill no' in normed:
-                header_idx = i
-                break
-        if header_idx is None:
-            return [], [{'row': 0, 'message': "Could not find a header row containing 'Customer Name' and 'Bill No'"}]
-        headers = [str(c).strip() if c is not None else '' for c in matrix[header_idx]]
-        return parse_rows(headers, matrix[header_idx + 1:])
-
     if raw[:2] == b'PK':  # zip container → real .xlsx
         try:
             import openpyxl
             wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
             ws = wb.active
-            matrix = [list(r) for r in ws.iter_rows(values_only=True)]
+            return [list(r) for r in ws.iter_rows(values_only=True)], []
         except Exception:
             return [], [{'row': 0, 'message': 'Could not read the Excel file — re-save it as .xlsx or CSV and try again'}]
-        return from_matrix(matrix)
     if raw[:4] == b'\xd0\xcf\x11\xe0':  # OLE2 container → legacy .xls
         return [], [{'row': 0, 'message': "Old Excel '.xls' format is not supported — save the file as .xlsx or CSV"}]
     # Anything else is treated as CSV text regardless of extension.
     text = raw.decode('utf-8-sig', errors='replace')
-    matrix = list(_csv.reader(io.StringIO(text)))
-    return from_matrix(matrix)
+    return list(_csv.reader(io.StringIO(text))), []
+
+
+def parse_upload(file_storage):
+    """Parse a bill master upload → (rows, errors). The header row is the
+    first row containing both 'Customer Name' and 'Bill No' (normalized), so
+    leading title rows are tolerated."""
+    matrix, errors = read_matrix(file_storage)
+    if errors:
+        return [], errors
+    header_idx = None
+    for i, row in enumerate(matrix):
+        normed = {_norm_header(c) for c in row}
+        if 'customer name' in normed and 'bill no' in normed:
+            header_idx = i
+            break
+    if header_idx is None:
+        return [], [{'row': 0, 'message': "Could not find a header row containing 'Customer Name' and 'Bill No'"}]
+    headers = [str(c).strip() if c is not None else '' for c in matrix[header_idx]]
+    return parse_rows(headers, matrix[header_idx + 1:])
 
 
 def build_template_csv():

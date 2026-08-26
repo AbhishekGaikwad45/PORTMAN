@@ -5,6 +5,7 @@ from flask import render_template, request, jsonify, session, redirect, url_for,
 from database import get_user_permissions
 from . import bp
 from . import model
+from . import revenue
 
 from datetime import datetime, date
 
@@ -464,17 +465,7 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
             else (r.get('hsn_sac') or '')
         )
 
-        tds_percent = {
-            '4101076010': 2.0,
-            '4101076030': 2.0,
-            '4201090080': 2.0,
-            '4101076100': 2.0,
-            '4101071000': 0.1,
-            '4201090210': 10.0,
-            '4101076020': 2.0
-        }
-
-        tds_rate = tds_percent.get(gl_code, 0)
+        tds_rate = revenue.TDS_PERCENT.get(gl_code, 0)
         tds_amount = round((basic * tds_rate) / 100, 2)
         net_receivable = round(inv_val - tds_amount, 2)
 
@@ -490,25 +481,7 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
         else:
             days = ""
         
-        # Bucket based on Days
-        if days == "":
-            bucket = ""
-        elif 0 <= days <= 30:
-            bucket = "0-30 days"
-        elif 31 <= days <= 60:
-            bucket = "31-60 days"
-        elif 61 <= days <= 90:
-            bucket = "61-90 days"
-        elif 91 <= days <= 180:
-            bucket = "91-180 days"
-        elif 181 <= days <= 365:
-            bucket = "181-365 days"
-        elif 366 <= days <= 730:
-            bucket = "1-2 years"
-        elif 731 <= days <= 1095:
-            bucket = "2-3 years"
-        else:
-            bucket = "> 3 years"
+        bucket = revenue.age_bucket(days)
 
         out.append({
             'invoice_no': r.get('invoice_number') or '',
@@ -562,6 +535,99 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
             'net_receivable': net_receivable,
             'days': days,
             'bucket': bucket,
+            'source': 'Live',
         })
 
+    # Rows invoiced before go-live live in the backdated upload, not in
+    # invoice_header — the register is the two put together.
+    out.extend(revenue.get_register_rows(month, year))
+    out.sort(key=lambda r: (r.get('date') or ''), reverse=True)
     return jsonify({'data': out})
+
+# ── Revenue Register — backdated upload ─────────────────────────────────────
+
+@bp.route('/module/RP02/revenue-backdated/')
+@login_required
+def revenue_backdated_index():
+    return render_template('revenue_backdated.html', username=session.get('username'),
+                           status=revenue.get_status(), can_upload=_can_upload(),
+                           fields=revenue.FIELDS, numeric=sorted(revenue.NUMERIC))
+
+
+@bp.route('/api/module/RP02/revenue-backdated/template')
+@login_required
+def revenue_backdated_template():
+    return Response(
+        revenue.build_template_csv(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename="RP02_revenue_register_template.csv"'},
+    )
+
+
+@bp.route('/api/module/RP02/revenue-backdated/preview', methods=['POST'])
+@upload_required
+def revenue_backdated_preview():
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'No file provided'}), 400
+    rows, errors = revenue.parse_upload(f)
+    months = sorted({r['invoice_date'].strftime('%Y-%m') for r in rows})
+    return jsonify({'total_rows': len(rows), 'format_errors': errors, 'months': months,
+                    'sample': [{k: str(v) if v is not None else '' for k, v in r.items()}
+                               for r in rows[:5]]})
+
+
+@bp.route('/api/module/RP02/revenue-backdated/apply', methods=['POST'])
+@upload_required
+def revenue_backdated_apply():
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'No file provided'}), 400
+    rows, errors = revenue.parse_upload(f)
+    if errors:
+        return jsonify({'error': 'Fix format errors before applying',
+                        'format_errors': errors}), 400
+    inserted, months = revenue.replace_months(rows, session.get('user_id'))
+    return jsonify({'inserted': inserted, 'months': months})
+
+
+@bp.route('/api/module/RP02/revenue-backdated/rows')
+@login_required
+def revenue_backdated_rows():
+    import json as _json
+    try:
+        page = int(request.args.get('page', 1))
+        size = int(request.args.get('size', 50))
+    except (TypeError, ValueError):
+        page, size = 1, 50
+    try:
+        filters = _json.loads(request.args.get('colfilters') or '[]')
+        if not isinstance(filters, list):
+            filters = []
+    except (ValueError, TypeError):
+        filters = []
+    rows, total = revenue.get_rows(page, size, filters)
+    return jsonify({'data': rows, 'last_page': max(1, (total + size - 1) // size),
+                    'total': total})
+
+
+@bp.route('/api/module/RP02/revenue-backdated/row/update', methods=['POST'])
+@upload_required
+def revenue_backdated_row_update():
+    data = request.json or {}
+    if not data.get('id'):
+        return jsonify({'error': 'Missing id'}), 400
+    res = revenue.update_row(data['id'], data)
+    if res.get('error'):
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@bp.route('/api/module/RP02/revenue-backdated/row/delete', methods=['POST'])
+@upload_required
+def revenue_backdated_row_delete():
+    data = request.json or {}
+    if not data.get('id'):
+        return jsonify({'error': 'Missing id'}), 400
+    revenue.delete_row(data['id'])
+    return jsonify({'success': True})

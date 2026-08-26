@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Backdated Revenue - RP02{% endblock %}
+{% block content %}
+<div class="module-header">
+    <h2>Revenue Register — Backdated Upload</h2>
+    <span class="module-code">RP02</span>
+</div>
+
+<div style="padding:14px;max-width:1200px;">
+    <div style="background:#fffbeb;border:1px solid #f6e05e;color:#744210;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:14px;">
+        ⚠ For invoices raised <b>before the system went live</b> only. Uploading
+        <b>replaces all rows for the month(s) present in the file</b> (other months are untouched).
+        Rows invoiced in PORTMAN come from the invoices themselves — don't upload those here.
+    </div>
+
+    <div style="margin-bottom:14px;font-size:13px;">
+        Current dataset:
+        <b id="rb-count">{{ status.count }}</b> rows
+        {% if status.months %}<span style="color:#718096;">— {{ status.months | join(', ') }}</span>{% endif %}
+        {% if status.uploaded_at %}<span style="color:#718096;">— last upload {{ status.uploaded_at }}</span>{% endif %}
+    </div>
+
+    {% if can_upload %}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
+        <a class="btn" href="/api/module/RP02/revenue-backdated/template"
+           style="background:#3182ce;color:white;padding:8px 16px;border-radius:4px;text-decoration:none;font-size:13px;">⬇ Download Template (CSV)</a>
+        <input type="file" id="rb-file" accept=".csv,.xlsx" style="font-size:13px;">
+        <button class="btn" onclick="rbPreview()" style="background:#805ad5;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;">Preview</button>
+        <button class="btn" id="rb-apply" onclick="rbApply()" disabled style="background:#48bb78;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;opacity:0.5;">Apply (Replace Month)</button>
+    </div>
+    {% else %}
+    <div style="color:#718096;font-size:12px;margin-bottom:16px;">You have read-only access — uploading requires add/edit permission on RP02.</div>
+    {% endif %}
+
+    <div id="rb-result" style="font-size:13px;"></div>
+
+    <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:16px;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <b style="font-size:14px;">Stored Backdated Rows</b>
+            <span style="color:#718096;font-size:12px;">— type in any column header box to search the whole dataset{% if can_upload %}; edit a cell to save it{% endif %}.</span>
+            <button class="btn" onclick="rbGrid && rbGrid.clearHeaderFilter()" style="margin-left:auto;background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">Clear filters</button>
+            <button class="btn" onclick="rbReloadGrid()" style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">↻ Refresh</button>
+        </div>
+        <div id="rb-grid"></div>
+        <div id="rb-grid-status" style="font-size:11px;color:#718096;margin-top:6px;"></div>
+    </div>
+</div>
+
+<script>
+try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
+
+const rbCanUpload = {{ 'true' if can_upload else 'false' }};
+const rbFields = {{ fields | tojson }};      // [[field, header], ...] — server is the source of truth
+const rbNumeric = {{ numeric | tojson }};
+let rbValid = false, rbMonths = [];
+
+function rbEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function rbFile() {
+    const f = document.getElementById('rb-file').files[0];
+    if (!f) { alert('Choose a file first.'); return null; }
+    return f;
+}
+
+async function rbPreview() {
+    const f = rbFile(); if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    document.getElementById('rb-result').innerHTML = 'Checking…';
+    const res = await fetch('/api/module/RP02/revenue-backdated/preview', {method:'POST', body:fd});
+    const d = await res.json();
+    if (d.error) { document.getElementById('rb-result').innerHTML = `<span style="color:#c53030">${rbEsc(d.error)}</span>`; return; }
+    rbMonths = d.months || [];
+
+    let html = `<div style="margin-bottom:8px;">Parsed <b>${d.total_rows}</b> data row(s)`
+        + (rbMonths.length ? ` for <b>${rbMonths.map(rbEsc).join(', ')}</b>` : '') + `.</div>`;
+    if (d.format_errors.length) {
+        rbValid = false;
+        html += `<div style="background:#fed7d7;color:#c53030;padding:8px 12px;border-radius:4px;margin-bottom:10px;">
+            <b>${d.format_errors.length} format error(s)</b> — fix these in the file before applying:<ul style="margin:6px 0 0;">`
+            + d.format_errors.slice(0,50).map(e=>`<li>Row ${e.row}: ${rbEsc(e.message)}</li>`).join('') + `</ul></div>`;
+    } else {
+        rbValid = d.total_rows > 0;
+        html += rbValid
+            ? `<div style="background:#c6f6d5;color:#276749;padding:8px 12px;border-radius:4px;margin-bottom:10px;">No format errors — ready to apply.</div>`
+            : `<div style="background:#fed7d7;color:#c53030;padding:8px 12px;border-radius:4px;margin-bottom:10px;">No data rows found in the file.</div>`;
+    }
+
+    if (d.sample && d.sample.length) {
+        html += `<div style="color:#718096;font-size:12px;margin:10px 0 4px;">First ${d.sample.length} row(s) as they will be stored:</div>`
+            + `<div style="overflow-x:auto;"><table style="font-size:11px;border-collapse:collapse;">
+                 <tr style="background:#edf2f7;">` + rbFields.map(([,t]) =>
+                 `<th style="border:1px solid #cbd5e0;padding:3px 8px;white-space:nowrap;">${rbEsc(t)}</th>`).join('') + `</tr>`
+            + d.sample.map(r => `<tr>` + rbFields.map(([f]) =>
+                 `<td style="border:1px solid #cbd5e0;padding:3px 8px;white-space:nowrap;">${rbEsc(r[f])}</td>`).join('') + `</tr>`).join('')
+            + `</table></div>`;
+    }
+
+    document.getElementById('rb-result').innerHTML = html;
+    const applyBtn = document.getElementById('rb-apply');
+    applyBtn.disabled = !rbValid;
+    applyBtn.style.opacity = rbValid ? '1' : '0.5';
+}
+
+async function rbApply() {
+    if (!rbValid) return;
+    const f = rbFile(); if (!f) return;
+    if (!confirm(`This will REPLACE all stored backdated rows for ${rbMonths.join(', ') || '(unknown)'} with this file. Continue?`)) return;
+    const fd = new FormData(); fd.append('file', f);
+    const res = await fetch('/api/module/RP02/revenue-backdated/apply', {method:'POST', body:fd});
+    const d = await res.json();
+    if (d.error) { alert(d.error + (d.format_errors ? '\n' + d.format_errors.slice(0,10).map(e=>`Row ${e.row}: ${e.message}`).join('\n') : '')); return; }
+    document.getElementById('rb-result').innerHTML =
+        `<div style="background:#c6f6d5;color:#276749;padding:10px 14px;border-radius:4px;">
+            ✓ Replaced ${(d.months||[]).join(', ')} — ${d.inserted} row(s) inserted.</div>`;
+    rbReloadGrid();
+}
+
+// ── Stored-data editable grid ────────────────────────────────────────────────
+let rbGrid = null;
+
+async function rbSaveCell(cell) {
+    const row = cell.getRow().getData();
+    try {
+        const res = await fetch('/api/module/RP02/revenue-backdated/row/update', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(row)
+        });
+        const d = await res.json();
+        if (d.error) { alert('Save failed: ' + d.error); cell.restoreOldValue(); }
+    } catch (e) { alert('Save failed (network).'); cell.restoreOldValue(); }
+}
+
+function rbDeleteRow(cell) {
+    const row = cell.getRow();
+    if (!confirm('Delete this row?')) return;
+    fetch('/api/module/RP02/revenue-backdated/row/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: row.getData().id})
+    }).then(r => r.json()).then(d => {
+        if (d.error) { alert(d.error); return; }
+        row.delete();
+        const cnt = document.getElementById('rb-count');
+        cnt.textContent = Math.max(0, (parseInt(cnt.textContent, 10) || 1) - 1);
+    });
+}
+
+function rbInitGrid() {
+    const cols = rbFields.map(([f, t]) => {
+        const num = rbNumeric.includes(f);
+        return {
+            title: t, field: f,
+            width: Math.max(90, Math.min(180, t.length * 9 + 30)),
+            hozAlign: num ? 'right' : 'left',
+            frozen: f === 'invoice_no',
+            editor: rbCanUpload ? (num ? 'number' : 'input') : false,
+        };
+    });
+    if (rbCanUpload) {
+        cols.push({title: '', field: '_del', width: 50, hozAlign: 'center', headerSort: false, headerFilter: false,
+            formatter: () => '<button style="background:#fc8181;color:white;border:none;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer;">X</button>',
+            cellClick: (e, cell) => rbDeleteRow(cell)});
+    }
+    rbGrid = new Tabulator('#rb-grid', {
+        layout: 'fitDataFill',
+        height: '460px',
+        placeholder: 'No backdated revenue data uploaded yet.',
+        pagination: true,
+        paginationMode: 'remote',
+        paginationSize: 50,
+        paginationSizeSelector: [50, 100, 200],
+        filterMode: 'remote',
+        columnDefaults: {headerSort: false, headerFilter: 'input'},
+        ajaxURL: '/api/module/RP02/revenue-backdated/rows',
+        ajaxParams: function () {
+            return {colfilters: JSON.stringify(rbGrid ? rbGrid.getHeaderFilters() : [])};
+        },
+        ajaxResponse: (url, params, response) => {
+            document.getElementById('rb-grid-status').textContent = `${response.total} row(s) match`;
+            return response;
+        },
+        columns: cols,
+    });
+    if (rbCanUpload) rbGrid.on('cellEdited', rbSaveCell);
+    if (localStorage.getItem('theme') === 'dark')
+        document.getElementById('rb-grid').classList.add('tabulator-dark');
+}
+
+function rbReloadGrid() {
+    if (rbGrid) rbGrid.replaceData(); else rbInitGrid();
+}
+
+document.addEventListener('DOMContentLoaded', rbInitGrid);
+</script>
+{% endblock %}
