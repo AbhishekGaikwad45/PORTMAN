@@ -47,7 +47,6 @@ try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
 
 const rbCanUpload = {{ 'true' if can_upload else 'false' }};
 const rbFields = {{ fields | tojson }};      // [[field, header], ...] — server is the source of truth
-const rbNumeric = {{ numeric | tojson }};
 let rbValid = false, rbMonths = [];
 
 function rbEsc(s) {
@@ -144,16 +143,13 @@ function rbDeleteRow(cell) {
 }
 
 function rbInitGrid() {
-    const cols = rbFields.map(([f, t]) => {
-        const num = rbNumeric.includes(f);
-        return {
-            title: t, field: f,
-            width: Math.max(90, Math.min(180, t.length * 9 + 30)),
-            hozAlign: num ? 'right' : 'left',
-            frozen: f === 'invoice_no',
-            editor: rbCanUpload ? (num ? 'number' : 'input') : false,
-        };
-    });
+    // Every column is stored as text, so every cell is a plain text editor.
+    const cols = rbFields.map(([f, t]) => ({
+        title: t, field: f,
+        width: Math.max(90, Math.min(180, t.length * 9 + 30)),
+        frozen: f === 'invoice_no',
+        editor: rbCanUpload ? 'input' : false,
+    }));
     if (rbCanUpload) {
         cols.push({title: '', field: '_del', width: 50, hozAlign: 'center', headerSort: false, headerFilter: false,
             formatter: () => '<button style="background:#fc8181;color:white;border:none;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer;">X</button>',

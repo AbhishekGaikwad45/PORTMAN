@@ -551,7 +551,7 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
 def revenue_backdated_index():
     return render_template('revenue_backdated.html', username=session.get('username'),
                            status=revenue.get_status(), can_upload=_can_upload(),
-                           fields=revenue.FIELDS, numeric=sorted(revenue.NUMERIC))
+                           fields=revenue.FIELDS)
 
 
 @bp.route('/api/module/RP02/revenue-backdated/template')
@@ -573,7 +573,7 @@ def revenue_backdated_preview():
     if not f:
         return jsonify({'error': 'No file provided'}), 400
     rows, errors = revenue.parse_upload(f)
-    months = sorted({r['invoice_date'].strftime('%Y-%m') for r in rows})
+    months = sorted({revenue.month_key(r['invoice_date']) for r in rows})
     return jsonify({'total_rows': len(rows), 'format_errors': errors, 'months': months,
                     'sample': [{k: str(v) if v is not None else '' for k, v in r.items()}
                                for r in rows[:5]]})

@@ -6,7 +6,7 @@ anything invoiced before go-live has no rows there. Finance uploads those here
 tagging the uploaded rows 'Backdated'. Mirrors the bill master upload pattern.
 """
 from database import get_db, get_cursor
-from .model import _blank, _norm_header, parse_number, read_matrix
+from .model import _blank, _norm_header, read_matrix
 
 TABLE = 'rp02_revenue_backdated'
 
@@ -52,9 +52,13 @@ FIELDS = [
 COLUMNS = [f for f, _ in FIELDS]
 DERIVED_HEADERS = ['Days', 'Bucket']          # emitted in the template, ignored on upload
 TEMPLATE_HEADERS = ['Sr'] + [h for _, h in FIELDS] + DERIVED_HEADERS
-# Cargo Volume is absent on purpose: the register sheet carries YES/NO there.
-NUMERIC = {'qty', 'rate', 'tax_rate', 'basic_value', 'sgst', 'cgst', 'igst',
-           'invoice_value', 'tds_tcs', 'net_receivable'}
+
+# Every column is stored as text, verbatim. A backdated register is a
+# spreadsheet: Cargo Volume holds YES/NO, amounts carry commas and stray notes,
+# cells are blank. Nothing here is arithmetic, so nothing is coerced and no
+# file is ever rejected over a cell's shape. The one exception is the date,
+# normalised to YYYY-MM-DD where it parses, because the month key and the
+# ageing columns read it.
 
 
 def _norm(h):
@@ -110,7 +114,8 @@ _DATE_FORMATS = ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%d.%m.%Y', '%Y/%m/%d',
 
 
 def parse_date(v):
-    """Date cell → datetime.date. Blank → None. Unparseable → ValueError."""
+    """Date cell → datetime.date, or None if blank/unparseable. Never raises —
+    an odd date costs a row its ageing columns, not the whole upload."""
     from datetime import datetime as _dt
     if _blank(v):
         return None
@@ -123,7 +128,26 @@ def parse_date(v):
                 return _dt.strptime(cand, fmt).date()
             except ValueError:
                 pass
-    raise ValueError("invalid date '%s'" % v)
+    return None
+
+
+def _text(v):
+    """Any cell → the text to store. Blank → None. Excel hands back floats and
+    datetimes for cells that read as '1000' and '05-04-2025' in the sheet, so
+    those two get spelled back the way the sheet shows them."""
+    if _blank(v):
+        return None
+    if hasattr(v, 'year'):                    # date / datetime
+        return v.strftime('%Y-%m-%d')
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v).strip()
+
+
+def _date_text(v):
+    """Date cell → 'YYYY-MM-DD' where it parses, else the cell's own text."""
+    d = parse_date(v)
+    return d.strftime('%Y-%m-%d') if d else _text(v)
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
@@ -139,19 +163,12 @@ def _index(headers):
     return idx
 
 
-def _fill_derived(rec):
-    """Fill TDS/TCS and net receivable when the file leaves them blank."""
-    if rec.get('tds_tcs') is None and rec.get('basic_value') is not None:
-        pct = TDS_PERCENT.get((rec.get('gl_code') or '').strip(), 0)
-        rec['tds_tcs'] = round(rec['basic_value'] * pct / 100, 2)
-    if rec.get('net_receivable') is None and rec.get('invoice_value') is not None:
-        rec['net_receivable'] = round(rec['invoice_value'] - (rec.get('tds_tcs') or 0), 2)
-
-
 def parse_rows(headers, raw_rows):
     """Map raw spreadsheet rows to field dicts → (rows, errors). Fully blank
-    rows are skipped. Required: Invoice No., Date, Customer Name. Row numbers
-    are 1-based spreadsheet rows (header row included)."""
+    rows are skipped. Every cell is stored as text, so the only thing that can
+    fail a row is a missing Invoice No. — it is the row's identity and what the
+    register is read by. Row numbers are 1-based spreadsheet rows (header row
+    included)."""
     idx = _index(headers)
     rows, errors = [], []
 
@@ -162,32 +179,13 @@ def parse_rows(headers, raw_rows):
     for n, r in enumerate(raw_rows, start=2):   # +1 header, +1 to 1-base
         if all(_blank(c) for c in r):
             continue
-        rec, row_errs = {}, []
-        for key in COLUMNS:
-            v = cell(r, key)
-            try:
-                if key in NUMERIC:
-                    rec[key] = parse_number(v)
-                elif key == 'invoice_date':
-                    rec[key] = parse_date(v)
-                else:
-                    rec[key] = (str(v).strip() if not _blank(v) else None)
-            except ValueError as e:
-                rec[key] = None
-                row_errs.append('%s: %s' % (dict(FIELDS).get(key, key), e))
-
-        if not rec.get('invoice_no'):
-            row_errs.append('Invoice No. is required')
-        if rec.get('invoice_date') is None and _blank(cell(r, 'invoice_date')):
-            row_errs.append('Date is required')
-        if not rec.get('customer_name'):
-            row_errs.append('Customer Name is required')
-
-        if row_errs:
-            errors.append({'row': n, 'message': '; '.join(row_errs)})
-        else:
-            _fill_derived(rec)
+        rec = {key: (_date_text(cell(r, key)) if key == 'invoice_date'
+                     else _text(cell(r, key)))
+               for key in COLUMNS}
+        if rec.get('invoice_no'):
             rows.append(rec)
+        else:
+            errors.append({'row': n, 'message': 'Invoice No. is required'})
     return rows, errors
 
 
@@ -234,16 +232,23 @@ def build_template_csv():
 
 
 # ── Storage ──────────────────────────────────────────────────────────────────
+def month_key(date_text):
+    """The 'YYYY-MM' an upload replaces. Dates that did not parse keep their own
+    first 7 characters, so re-uploading the same file still targets the same
+    rows."""
+    return (date_text or '')[:7]
+
+
 def replace_months(rows, uploaded_by):
     """Replace stored rows for every month present in the file, in one
     transaction. Other months are untouched. Returns (inserted, months)."""
-    months = sorted({r['invoice_date'].strftime('%Y-%m') for r in rows})
+    months = sorted({month_key(r['invoice_date']) for r in rows})
     conn = get_db()
     cur = get_cursor(conn)
     try:
         if months:
-            cur.execute("DELETE FROM %s WHERE to_char(invoice_date, 'YYYY-MM') = ANY(%%s)"
-                        % TABLE, [months])
+            cur.execute('DELETE FROM %s WHERE left(COALESCE(invoice_date, %%s), 7) = ANY(%%s)'
+                        % TABLE, ['', months])
         cols = COLUMNS + ['uploaded_by']
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
             TABLE, ', '.join(cols), ', '.join(['%s'] * len(cols)))
@@ -265,7 +270,7 @@ def get_status():
     try:
         cur.execute('SELECT COUNT(*) AS c, MAX(uploaded_at) AS at FROM %s' % TABLE)
         r = cur.fetchone()
-        cur.execute("SELECT DISTINCT to_char(invoice_date, 'YYYY-MM') AS m "
+        cur.execute("SELECT DISTINCT left(COALESCE(invoice_date, ''), 7) AS m "
                     'FROM %s ORDER BY m' % TABLE)
         months = [x['m'] for x in cur.fetchall()]
         at = r['at']
@@ -276,13 +281,8 @@ def get_status():
 
 
 def _row_out(d):
-    """DB row → JSON-safe dict (numerics as float, dates as text)."""
+    """DB row → JSON-safe dict. Everything is already text bar the timestamp."""
     out = dict(d)
-    for k in NUMERIC:
-        if out.get(k) is not None:
-            out[k] = float(out[k])
-    if out.get('invoice_date') is not None:
-        out['invoice_date'] = str(out['invoice_date'])[:10]
     if out.get('uploaded_at') is not None:
         out['uploaded_at'] = str(out['uploaded_at'])
     return out
@@ -314,24 +314,12 @@ def get_rows(page=1, size=50, filters=None):
 
 
 def update_row(row_id, data):
-    """Validate + update one stored row. {'success': True} or {'error': msg}.
-    Mirrors the upload validators."""
-    clean = {}
-    for k in COLUMNS:
-        v = data.get(k)
-        try:
-            if k in NUMERIC:
-                clean[k] = parse_number(v)
-            elif k == 'invoice_date':
-                clean[k] = parse_date(v)
-            else:
-                clean[k] = (str(v).strip() if v not in (None, '') else None)
-        except ValueError as e:
-            return {'error': '%s: %s' % (dict(FIELDS).get(k, k), e)}
-    for req, label in (('invoice_no', 'Invoice No.'), ('invoice_date', 'Date'),
-                       ('customer_name', 'Customer Name')):
-        if not clean.get(req):
-            return {'error': '%s is required' % label}
+    """Update one stored row. {'success': True} or {'error': msg}. Same rule as
+    the upload: text in, text out, Invoice No. is the one thing required."""
+    clean = {k: (_date_text(data.get(k)) if k == 'invoice_date' else _text(data.get(k)))
+             for k in COLUMNS}
+    if not clean.get('invoice_no'):
+        return {'error': 'Invoice No. is required'}
 
     conn = get_db()
     cur = get_cursor(conn)
@@ -363,11 +351,11 @@ def get_register_rows(month=None, year=None):
     from datetime import date as _date
     where, params = [], []
     if month:
-        where.append('EXTRACT(MONTH FROM invoice_date) = %s')
-        params.append(int(month))
+        where.append('substring(invoice_date, 6, 2) = %s')
+        params.append('%02d' % int(month))
     if year:
-        where.append('EXTRACT(YEAR FROM invoice_date) = %s')
-        params.append(int(year))
+        where.append('left(invoice_date, 4) = %s')
+        params.append(str(int(year)))
     conn = get_db()
     cur = get_cursor(conn)
     try:
@@ -385,7 +373,8 @@ def get_register_rows(month=None, year=None):
         rec['grouping'] = rec.pop('grouping_label')
         rec['date'] = rec.pop('invoice_date')
         rec['irn_date'] = rec['ack_date']
-        days = (today - r['invoice_date']).days
+        parsed = parse_date(rec['date'])
+        days = (today - parsed).days if parsed else ''
         rec['days'] = days
         rec['bucket'] = age_bucket(days)
         rec['source'] = 'Backdated'
