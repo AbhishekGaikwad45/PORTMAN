@@ -197,3 +197,20 @@ def test_xlsx_cells_are_spelled_the_way_the_sheet_shows_them():
     assert rows[0]['invoice_date'] == '2025-04-05'
     assert rows[0]['gl_code'] == '4101076010'    # not '4101076010.0'
     assert rows[0]['basic_value'] == '1000'      # not '1000.0'
+
+
+# ── derived columns reach the grid ───────────────────────────────────────────
+def test_row_out_fills_days_and_bucket_from_the_stored_date():
+    from datetime import date as _d, timedelta
+    forty_days_ago = (_d.today() - timedelta(days=40)).strftime('%Y-%m-%d')
+    out = revenue._row_out({'invoice_no': 'INV1', 'invoice_date': forty_days_ago,
+                            'uploaded_at': None})
+    assert out['days'] == 40
+    assert out['bucket'] == '31-60 days'
+
+
+def test_row_out_leaves_ageing_blank_when_the_date_is_unusable():
+    for bad in ('Under Discharge', None, ''):
+        out = revenue._row_out({'invoice_no': 'INV1', 'invoice_date': bad,
+                                'uploaded_at': None})
+        assert (out['days'], out['bucket']) == ('', '')

@@ -12,10 +12,8 @@ TABLE = 'rp02_revenue_backdated'
 
 # (stored field, header) — one source of truth for the stored columns, the CSV
 # template and the header map. Order matches the Revenue Register grid.
-# Days/Bucket are NOT here on purpose: they are recomputed from the date every
-# time the register is read, so storing them would go stale overnight. The
-# template still carries the two columns (the sheet finance keeps has them) and
-# the parser ignores whatever is in them.
+# Days/Bucket are NOT here on purpose: storing them would go stale overnight.
+# See DERIVED_FIELDS below.
 FIELDS = [
     ('invoice_no',     'Invoice No.'),
     ('group_type',     'Group/Non group'),
@@ -50,7 +48,11 @@ FIELDS = [
 ]
 
 COLUMNS = [f for f, _ in FIELDS]
-DERIVED_HEADERS = ['Days', 'Bucket']          # emitted in the template, ignored on upload
+# Recomputed from the date on every read, never stored. The template still
+# carries the two columns (the sheet finance keeps has them) and the parser
+# ignores whatever is in them.
+DERIVED_FIELDS = [('days', 'Days'), ('bucket', 'Bucket')]
+DERIVED_HEADERS = [h for _, h in DERIVED_FIELDS]
 TEMPLATE_HEADERS = ['Sr'] + [h for _, h in FIELDS] + DERIVED_HEADERS
 
 # Every column is stored as text, verbatim. A backdated register is a
@@ -281,11 +283,23 @@ def get_status():
 
 
 def _row_out(d):
-    """DB row → JSON-safe dict. Everything is already text bar the timestamp."""
+    """DB row → JSON-safe dict, with the two derived columns filled in.
+    Everything stored is already text bar the timestamp."""
     out = dict(d)
     if out.get('uploaded_at') is not None:
         out['uploaded_at'] = str(out['uploaded_at'])
+    out['days'], out['bucket'] = derive_ageing(out.get('invoice_date'))
     return out
+
+
+def derive_ageing(date_text):
+    """(days, bucket) for a stored date. Unparseable or blank → ('', '')."""
+    from datetime import date as _date
+    d = parse_date(date_text)
+    if not d:
+        return '', ''
+    days = (_date.today() - d).days
+    return days, age_bucket(days)
 
 
 def get_rows(page=1, size=50, filters=None):
@@ -348,7 +362,6 @@ def delete_row(row_id):
 
 def get_register_rows(month=None, year=None):
     """Stored backdated rows shaped like the live Revenue Register rows."""
-    from datetime import date as _date
     where, params = [], []
     if month:
         where.append('substring(invoice_date, 6, 2) = %s')
@@ -365,7 +378,6 @@ def get_register_rows(month=None, year=None):
     finally:
         conn.close()
 
-    today = _date.today()
     out = []
     for r in rows:
         d = _row_out(r)
@@ -373,10 +385,7 @@ def get_register_rows(month=None, year=None):
         rec['grouping'] = rec.pop('grouping_label')
         rec['date'] = rec.pop('invoice_date')
         rec['irn_date'] = rec['ack_date']
-        parsed = parse_date(rec['date'])
-        days = (today - parsed).days if parsed else ''
-        rec['days'] = days
-        rec['bucket'] = age_bucket(days)
+        rec['days'], rec['bucket'] = d['days'], d['bucket']
         rec['source'] = 'Backdated'
         out.append(rec)
     return out

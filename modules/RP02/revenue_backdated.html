@@ -42,11 +42,18 @@
     </div>
 </div>
 
+<style>
+    /* Days / Bucket are computed on read, not stored — greyed to say so. */
+    .rb-derived { color: #718096; font-style: italic; }
+</style>
+
 <script>
 try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
 
 const rbCanUpload = {{ 'true' if can_upload else 'false' }};
 const rbFields = {{ fields | tojson }};      // [[field, header], ...] — server is the source of truth
+const rbDerived = {{ derived | tojson }};    // Days / Bucket — computed from the date, never stored
+const rbAllFields = rbFields.concat(rbDerived);
 let rbValid = false, rbMonths = [];
 
 function rbEsc(s) {
@@ -86,9 +93,9 @@ async function rbPreview() {
     if (d.sample && d.sample.length) {
         html += `<div style="color:#718096;font-size:12px;margin:10px 0 4px;">First ${d.sample.length} row(s) as they will be stored:</div>`
             + `<div style="overflow-x:auto;"><table style="font-size:11px;border-collapse:collapse;">
-                 <tr style="background:#edf2f7;">` + rbFields.map(([,t]) =>
+                 <tr style="background:#edf2f7;">` + rbAllFields.map(([,t]) =>
                  `<th style="border:1px solid #cbd5e0;padding:3px 8px;white-space:nowrap;">${rbEsc(t)}</th>`).join('') + `</tr>`
-            + d.sample.map(r => `<tr>` + rbFields.map(([f]) =>
+            + d.sample.map(r => `<tr>` + rbAllFields.map(([f]) =>
                  `<td style="border:1px solid #cbd5e0;padding:3px 8px;white-space:nowrap;">${rbEsc(r[f])}</td>`).join('') + `</tr>`).join('')
             + `</table></div>`;
     }
@@ -149,7 +156,11 @@ function rbInitGrid() {
         width: Math.max(90, Math.min(180, t.length * 9 + 30)),
         frozen: f === 'invoice_no',
         editor: rbCanUpload ? 'input' : false,
-    }));
+    })).concat(rbDerived.map(([f, t]) => ({
+        title: t, field: f, width: 90,
+        headerFilter: false,          // computed, so there is nothing to search on
+        cssClass: 'rb-derived',
+    })));
     if (rbCanUpload) {
         cols.push({title: '', field: '_del', width: 50, hozAlign: 'center', headerSort: false, headerFilter: false,
             formatter: () => '<button style="background:#fc8181;color:white;border:none;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer;">X</button>',
