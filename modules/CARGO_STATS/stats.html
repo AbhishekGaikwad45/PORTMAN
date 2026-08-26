@@ -121,6 +121,178 @@
         background: #2d9148;
     }
 
+    .cargo-btn-column {
+        background: #7c3aed;
+        color: white;
+    }
+
+    .cargo-btn-column:hover {
+        background: #6d28d9;
+    }
+
+    .cargo-column-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: rgba(15, 23, 42, 0.45);
+        align-items: center;
+        justify-content: center;
+    }
+
+    .cargo-column-modal.show {
+        display: flex;
+    }
+
+    .cargo-column-modal-card {
+        width: 380px;
+        max-width: calc(100vw - 32px);
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 15px 45px rgba(15,23,42,.25);
+        padding: 20px;
+    }
+
+    .cargo-column-modal-title {
+        margin: 0 0 14px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #172033;
+    }
+
+    .cargo-column-modal-label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .cargo-column-name-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 10px;
+        border: 1px solid #b9c6d5;
+        border-radius: 5px;
+        font-size: 13px;
+        outline: none;
+    }
+
+    .cargo-column-name-input:focus {
+        border-color: #4285d4;
+        box-shadow: 0 0 0 2px rgba(66,133,212,.12);
+    }
+
+    .cargo-column-modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+    }
+
+    /* ========================================================
+       DYNAMIC COLUMN HEADER
+       ======================================================== */
+
+    .cargo-dynamic-column-header {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        vertical-align: middle;
+    }
+
+    .cargo-dynamic-column-label {
+        display: inline-block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
+        max-width: 180px;
+    }
+
+    .cargo-remove-column-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #dc2626;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        flex: 0 0 18px;
+    }
+
+    .cargo-remove-column-btn:hover {
+        background: #fee2e2;
+        color: #b91c1c;
+    }
+
+    .cargo-remove-column-btn:focus {
+        outline: 2px solid #93c5fd;
+        outline-offset: 1px;
+    }
+
+    .cargo-section .cargo-table .cargo-dynamic-input {
+        background: #fbfdff;
+        box-shadow: inset 0 0 0 1px #e2e8f0;
+    }
+
+    .cargo-section .cargo-table .cargo-dynamic-input::placeholder {
+        color: #94a3b8;
+        opacity: 1;
+    }
+
+    .cargo-section .cargo-table .cargo-dynamic-input:focus {
+        background: #fff;
+        box-shadow: inset 0 0 0 2px #4285d4;
+    }
+
+    /* Keep every newly-added column cell exactly aligned with its header. */
+    .cargo-section .cargo-table th,
+    .cargo-section .cargo-table td {
+        box-sizing: border-box !important;
+    }
+
+    .cargo-section .cargo-table td {
+        padding: 0 !important;
+        height: 39px !important;
+        min-height: 39px !important;
+        vertical-align: middle !important;
+    }
+
+    .cargo-section .cargo-table th {
+        box-sizing: border-box !important;
+        height: 48px;
+    }
+
+    .cargo-section .cargo-table .cargo-dynamic-input {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        height: 39px !important;
+        min-height: 39px !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+        padding: 8px 10px !important;
+        border: 0 !important;
+    }
+
+    .cargo-btn-cancel {
+        background: #e2e8f0;
+        color: #334155;
+    }
+
+    .cargo-btn-cancel:hover {
+        background: #cbd5e1;
+    }
+
     .cargo-btn-save {
         background: #2878c8;
         color: white;
@@ -173,6 +345,7 @@
     .cargo-table-wrapper {
         width: 100%;
         overflow-x: auto;
+        overflow-y: hidden;
     }
 
 
@@ -448,6 +621,16 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
+                <button
+                    class="cargo-btn cargo-btn-column"
+                    onclick="addColumn('consumption')"
+                    title="Add a new column to this section"
+                >
+                    + Add Column
+                </button>
+                {% endif %}
+
                 <button
                     class="cargo-btn cargo-btn-save"
                     onclick="saveTable('consumption')"
@@ -533,6 +716,16 @@
                 >
                     + Add
                 </button>
+
+                {% if session.is_admin %}
+                <button
+                    class="cargo-btn cargo-btn-column"
+                    onclick="addColumn('production')"
+                    title="Add a new column to this section"
+                >
+                    + Add Column
+                </button>
+                {% endif %}
 
                 <button
                     class="cargo-btn cargo-btn-save"
@@ -620,6 +813,16 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
+                <button
+                    class="cargo-btn cargo-btn-column"
+                    onclick="addColumn('stock_rmhs')"
+                    title="Add a new column to this section"
+                >
+                    + Add Column
+                </button>
+                {% endif %}
+
                 <button
                     class="cargo-btn cargo-btn-save"
                     onclick="saveTable('stock_rmhs')"
@@ -706,6 +909,16 @@
                     + Add
                 </button>
 
+                {% if session.is_admin %}
+                <button
+                    class="cargo-btn cargo-btn-column"
+                    onclick="addColumn('stock_pnp')"
+                    title="Add a new column to this section"
+                >
+                    + Add Column
+                </button>
+                {% endif %}
+
                 <button
                     class="cargo-btn cargo-btn-save"
                     onclick="saveTable('stock_pnp')"
@@ -770,6 +983,26 @@
 
 </div>
 
+
+<!-- Dynamic column modal -->
+<div id="cargo-column-modal" class="cargo-column-modal" aria-hidden="true">
+    <div class="cargo-column-modal-card" role="dialog" aria-modal="true" aria-labelledby="cargo-column-modal-title">
+        <h3 id="cargo-column-modal-title" class="cargo-column-modal-title">Add Column</h3>
+        <label class="cargo-column-modal-label" for="cargo-column-name">Column Name</label>
+        <input
+            id="cargo-column-name"
+            class="cargo-column-name-input"
+            type="text"
+            autocomplete="off"
+            maxlength="80"
+            placeholder="e.g. Dolomite"
+        >
+        <div class="cargo-column-modal-actions">
+            <button type="button" class="cargo-btn cargo-btn-cancel" onclick="closeColumnModal()">Cancel</button>
+            <button type="button" class="cargo-btn cargo-btn-add" onclick="confirmAddColumn()">Add Column</button>
+        </div>
+    </div>
+</div>
 
 {% endblock %}
 
@@ -836,8 +1069,10 @@
     }
 
     .cargo-section .cargo-table {
-        width: 100% !important;
-        table-layout: auto !important;
+        width: max-content !important;
+        min-width: 100% !important;
+        table-layout: fixed !important;
+        border-collapse: collapse !important;
     }
 
     .cargo-section .cargo-table th:first-child,
@@ -869,8 +1104,10 @@
     }
 
     .cargo-section .cargo-table {
-        width: 100% !important;
-        table-layout: auto !important;
+        width: max-content !important;
+        min-width: 100% !important;
+        table-layout: fixed !important;
+        border-collapse: collapse !important;
     }
 
     /* Keep every quantity column wide enough for multi-digit values. */
@@ -927,6 +1164,42 @@
         box-shadow: inset 0 0 0 2px #4285d4;
     }
 
+    /* --------------------------------------------------------
+       CRITICAL: keep header, cell and input widths identical.
+       DataTables adds default cell padding, so remove it from
+       the body cells where the editable input must fill the cell.
+       -------------------------------------------------------- */
+    .cargo-section .dataTables_wrapper table.dataTable tbody td {
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        vertical-align: middle !important;
+    }
+
+    .cargo-section .dataTables_wrapper table.dataTable thead th {
+        box-sizing: border-box !important;
+    }
+
+    .cargo-section .dataTables_wrapper table.dataTable tbody td > .cargo-input {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        height: 39px !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+
+    .cargo-section .dataTables_wrapper table.dataTable tbody td.cargo-total-cell {
+        padding: 0 !important;
+    }
+
+    .cargo-section .dataTables_wrapper table.dataTable tbody td.cargo-delete-cell {
+        padding: 0 !important;
+        width: 45px !important;
+        min-width: 45px !important;
+        max-width: 45px !important;
+    }
+
     .cargo-section .cargo-table .cargo-total-input {
         font-weight: 700;
         color: #176b35;
@@ -979,7 +1252,8 @@ const TABLES = {
             "ibrm", "cbrm", "fluxes",
             "clinker_slag", "fg_goods"
         ],
-        totalField: "total"
+        totalField: "total",
+        dynamicFields: []
     },
 
     production: {
@@ -1000,7 +1274,8 @@ const TABLES = {
             "sp_1", "sp_2", "co1_pushings",
             "co2_ab_pushings", "co2_cd_pushings"
         ],
-        totalField: "total"
+        totalField: "total",
+        dynamicFields: []
     },
 
     stock_rmhs: {
@@ -1017,7 +1292,8 @@ const TABLES = {
             "ibrm", "cbrm", "fluxes",
             "clinker_slag", "fg_goods"
         ],
-        totalField: "total"
+        totalField: "total",
+        dynamicFields: []
     },
 
     stock_pnp: {
@@ -1034,9 +1310,20 @@ const TABLES = {
             "ibrm", "cbrm", "fluxes",
             "clinker_slag", "fg_goods"
         ],
-        totalField: "total"
+        totalField: "total",
+        dynamicFields: []
     }
 };
+
+// Keep the original fixed numeric fields separate from dynamic fields.
+Object.keys(TABLES).forEach(section => {
+    const cfg = TABLES[section];
+    cfg.baseFields = [...cfg.fields];
+    cfg.baseLabels = [...cfg.labels];
+    cfg.baseNumericFields = [...cfg.numericFields];
+    cfg.dynamicFields = [];
+    cfg.dynamicLabels = {};
+});
 
 const dtTables = {};
 const tableData = {
@@ -1045,6 +1332,15 @@ const tableData = {
     stock_rmhs: [],
     stock_pnp: []
 };
+
+// Keep immutable copies of the original/static columns. Dynamic
+// columns can then be added and removed without losing labels.
+Object.values(TABLES).forEach(cfg => {
+    cfg.baseFields = [...cfg.fields];
+    cfg.baseLabels = [...cfg.labels];
+    cfg.dynamicFields = cfg.dynamicFields || [];
+    cfg.dynamicLabels = cfg.dynamicLabels || {};
+});
 
 /* ============================================================
    HELPERS
@@ -1085,6 +1381,398 @@ function formatNumber(value) {
 
     return String(Number(n.toFixed(2)));
 }
+
+function normalizeFieldKey(label) {
+    return String(label || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .replace(/_+/g, "_");
+}
+
+function displayLabelFromKey(key) {
+    return String(key || "")
+        .split("_")
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+}
+
+function getDynamicLabel(cfg, field) {
+    return (cfg.dynamicLabels || {})[field] || displayLabelFromKey(field);
+}
+
+function isSystemField(section, field) {
+    const cfg = TABLES[section];
+    return [
+        "id", "date", "section", "updated_at", "_dynamicLabels",
+        "__dynamic_columns",
+        ...cfg.fields,
+        ...(cfg.dynamicFields || [])
+    ].includes(field);
+}
+
+let activeColumnSection = null;
+
+function openColumnModal(section) {
+    activeColumnSection = section;
+    const modal = document.getElementById("cargo-column-modal");
+    const input = document.getElementById("cargo-column-name");
+    if (!modal || !input) return;
+    input.value = "";
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(() => input.focus(), 0);
+}
+
+function closeColumnModal() {
+    activeColumnSection = null;
+    const modal = document.getElementById("cargo-column-modal");
+    const input = document.getElementById("cargo-column-name");
+    if (input) input.value = "";
+    if (modal) {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+    }
+}
+
+function addColumn(section) {
+    openColumnModal(section);
+}
+
+function confirmAddColumn() {
+    const section = activeColumnSection;
+    const input = document.getElementById("cargo-column-name");
+    if (!section || !input) return;
+
+    const label = input.value.trim();
+    if (!label) {
+        alert("Please enter a column name.");
+        input.focus();
+        return;
+    }
+
+    const field = normalizeFieldKey(label);
+    if (!field) {
+        alert("Please enter a valid column name.");
+        input.focus();
+        return;
+    }
+
+    const cfg = TABLES[section];
+    if (isSystemField(section, field) || (cfg.dynamicFields || []).includes(field)) {
+        alert("This column already exists. Please choose another name.");
+        input.focus();
+        return;
+    }
+
+    cfg.dynamicFields = cfg.dynamicFields || [];
+    cfg.dynamicLabels = cfg.dynamicLabels || {};
+    cfg.dynamicFields.push(field);
+    cfg.dynamicLabels[field] = label;
+    cfg.numericFields = cfg.numericFields || [];
+    cfg.numericFields.push(field);
+
+    const totalIndex = cfg.fields.indexOf(cfg.totalField);
+    if (totalIndex === -1) {
+        cfg.fields.push(field);
+        cfg.labels.push(label);
+    } else {
+        cfg.fields.splice(totalIndex, 0, field);
+        cfg.labels.splice(totalIndex, 0, label);
+    }
+
+    tableData[section].forEach(row => {
+        if (row[field] === undefined || row[field] === null) {
+            row[field] = "";
+        }
+        row._dynamicLabels = { ...(row._dynamicLabels || {}), [field]: label };
+        calculateTotal(cfg, row);
+    });
+
+    initializeDataTable(section);
+    setStatus(section, `Column "${label}" added. Enter values and click Save.`, false);
+    closeColumnModal();
+}
+
+function discoverDynamicColumns(section, rows) {
+    const cfg = TABLES[section];
+
+    // IMPORTANT: rebuild dynamic columns from the database every time.
+    // Otherwise a column deleted from PostgreSQL remains in cfg.dynamicFields
+    // in the browser and is drawn again after loadTable().
+    cfg.dynamicFields = [];
+    cfg.dynamicLabels = {};
+    cfg.numericFields = [...(cfg.baseNumericFields || [])];
+
+    const baseFields = new Set([
+        "id", "date", "section", "updated_at", "_dynamicLabels",
+        "__dynamic_columns",
+        ...(cfg.baseFields || [])
+    ]);
+
+    rows.forEach(row => {
+        const labels = row._dynamicLabels || {};
+
+        Object.keys(labels).forEach(key => {
+            if (!key || !String(key).trim()) return;
+            if (baseFields.has(key)) return;
+
+            if (!cfg.dynamicFields.includes(key)) {
+                cfg.dynamicFields.push(key);
+            }
+
+            cfg.dynamicLabels[key] = labels[key] ||
+                cfg.dynamicLabels[key] ||
+                displayLabelFromKey(key);
+        });
+
+        Object.keys(row || {}).forEach(key => {
+            if (!key || !String(key).trim()) return;
+            if (baseFields.has(key) || key.startsWith("_")) return;
+
+            if (!cfg.dynamicFields.includes(key)) {
+                cfg.dynamicFields.push(key);
+                cfg.dynamicLabels[key] = labels[key] ||
+                    displayLabelFromKey(key);
+            }
+        });
+    });
+
+    cfg.dynamicFields.forEach(field => {
+        if (!cfg.numericFields.includes(field)) {
+            cfg.numericFields.push(field);
+        }
+    });
+
+    const baseFieldsList = [...(cfg.baseFields || [])];
+    const totalIndex = baseFieldsList.indexOf(cfg.totalField);
+
+    cfg.fields = totalIndex === -1
+        ? [...baseFieldsList, ...cfg.dynamicFields]
+        : [
+            ...baseFieldsList.slice(0, totalIndex),
+            ...cfg.dynamicFields,
+            ...baseFieldsList.slice(totalIndex)
+        ];
+
+    cfg.labels = cfg.fields.map(field => {
+        if (cfg.dynamicFields.includes(field)) {
+            return getDynamicLabel(cfg, field);
+        }
+
+        const index = baseFieldsList.indexOf(field);
+        return index >= 0
+            ? cfg.baseLabels[index]
+            : displayLabelFromKey(field);
+    });
+}
+
+function columnTitleHtml(section, field, label) {
+    const cfg = TABLES[section];
+    if (!(cfg.dynamicFields || []).includes(field)) {
+        return escapeHtml(label);
+    }
+
+    return `
+        <span class="cargo-dynamic-column-header">
+            <span class="cargo-dynamic-column-label">${escapeHtml(label)}</span>
+            <button
+                type="button"
+                class="cargo-remove-column-btn"
+                data-action="remove-column"
+                data-field="${escapeHtml(field)}"
+                title="Remove ${escapeHtml(label)} column"
+                aria-label="Remove ${escapeHtml(label)} column"
+            >×</button>
+        </span>
+    `;
+}
+
+async function removeColumn(section, field) {
+    const cfg = TABLES[section];
+
+    if (!(cfg.dynamicFields || []).includes(field)) {
+        return;
+    }
+
+    const label = getDynamicLabel(cfg, field);
+
+    if (!confirm(
+        `Remove column "${label}"?
+
+` +
+        `The column AND all its stored values will be removed.`
+    )) {
+        return;
+    }
+
+    try {
+        setStatus(
+            section,
+            `Removing "${label}"...`,
+            false
+        );
+
+        /*
+         * ========================================================
+         * STEP 1 — REMOVE FROM UI IMMEDIATELY
+         *
+         * Do this BEFORE waiting for the server.
+         * This makes the value disappear at the same time as
+         * the column instead of only disappearing after refresh.
+         * ========================================================
+         */
+
+        // Remove the field/value from every currently loaded row.
+        tableData[section].forEach(row => {
+
+            if (Object.prototype.hasOwnProperty.call(row, field)) {
+                delete row[field];
+            }
+
+            if (row._dynamicLabels &&
+                Object.prototype.hasOwnProperty.call(
+                    row._dynamicLabels,
+                    field
+                )) {
+                delete row._dynamicLabels[field];
+            }
+        });
+
+        // Remove the dynamic column from the current configuration.
+        cfg.dynamicFields = (cfg.dynamicFields || [])
+            .filter(f => f !== field);
+
+        if (cfg.dynamicLabels) {
+            delete cfg.dynamicLabels[field];
+        }
+
+        // Rebuild fields without the deleted column.
+        cfg.fields = [
+            ...(cfg.baseFields || []),
+            ...(cfg.dynamicFields || [])
+        ];
+
+        cfg.labels = [
+            ...(cfg.baseLabels || []),
+            ...(cfg.dynamicFields || []).map(
+                f => getDynamicLabel(cfg, f)
+            )
+        ];
+
+        cfg.numericFields = [
+            ...(cfg.baseNumericFields || []),
+            ...(cfg.dynamicFields || [])
+        ];
+
+        /*
+         * Rebuild the DataTable NOW.
+         * This removes the column and all its visible values
+         * immediately, without requiring a browser refresh.
+         */
+        if ($.fn.DataTable.isDataTable(
+            `#table-${section}`
+        )) {
+            $(`#table-${section}`)
+                .DataTable()
+                .clear()
+                .destroy();
+        }
+
+        buildHeader(section);
+
+        initializeDataTable(
+            section,
+            tableData[section]
+        );
+
+        /*
+         * ========================================================
+         * STEP 2 — DELETE FROM DATABASE
+         * ========================================================
+         */
+
+        const url =
+            `/module/CARGO_STATS/api/${section}/column/` +
+            encodeURIComponent(field);
+
+        const response = await fetch(url, {
+            method: "DELETE",
+            headers: {
+                "Accept": "application/json"
+            },
+            credentials: "same-origin"
+        });
+
+        const contentType =
+            response.headers.get("content-type") || "";
+
+        let result;
+
+        if (contentType.includes("application/json")) {
+            result = await response.json();
+        } else {
+            const text = await response.text();
+
+            throw new Error(
+                `Server returned ${response.status}: ` +
+                text.substring(0, 300)
+            );
+        }
+
+        if (!response.ok || !result || !result.success) {
+            throw new Error(
+                result && result.error
+                    ? result.error
+                    : "Unable to remove column from database."
+            );
+        }
+
+        /*
+         * ========================================================
+         * STEP 3 — DATABASE CONFIRMED
+         * ========================================================
+         */
+
+        setStatus(
+            section,
+            `Column "${label}" and its values removed ✓`,
+            true
+        );
+
+    } catch (error) {
+
+        console.error(
+            "CARGO STATS COLUMN DELETE ERROR:",
+            section,
+            field,
+            error
+        );
+
+        /*
+         * If the database deletion failed, reload the section.
+         * This restores the column/value from the actual database
+         * instead of leaving the UI inconsistent.
+         */
+        try {
+            await loadTable(section);
+        } catch (reloadError) {
+            console.error(
+                "Failed to restore table:",
+                reloadError
+            );
+        }
+
+        setStatus(
+            section,
+            "Column remove failed: " + error.message,
+            false
+        );
+    }
+}
+
 
 function calculateTotal(cfg, row) {
     let total = 0;
@@ -1133,9 +1821,30 @@ function createNewRow(cfg) {
    ============================================================ */
 
 function buildHeader(section) {
+    /*
+     * Build headers for the actual data columns only.
+     *
+     * The final row-delete column is added by DataTables through
+     * columns.push(...), so we intentionally DO NOT add a header
+     * for that column here.
+     *
+     * This prevents:
+     *   1. missing headers
+     *   2. duplicate blank headers
+     *   3. an extra blank column before the row-delete button
+     */
     const cfg = TABLES[section];
     const table = document.getElementById("table-" + section);
+
+    if (!table) {
+        return;
+    }
+
     const thead = table.querySelector("thead");
+
+    if (!thead) {
+        return;
+    }
 
     thead.innerHTML = "";
 
@@ -1143,14 +1852,17 @@ function buildHeader(section) {
 
     cfg.fields.forEach((field, index) => {
         const th = document.createElement("th");
-        th.textContent = cfg.labels[index];
+
+        th.textContent = cfg.labels[index] || field;
+
+        /*
+         * Keep the header and body column width identical.
+         */
+        th.style.width = getColumnWidth(cfg, field);
+        th.style.minWidth = getColumnWidth(cfg, field);
+
         tr.appendChild(th);
     });
-
-    const deleteTh = document.createElement("th");
-    deleteTh.textContent = "";
-    deleteTh.style.width = "45px";
-    tr.appendChild(deleteTh);
 
     thead.appendChild(tr);
 }
@@ -1183,14 +1895,17 @@ function inputHtml(row, field, cfg) {
         `;
     }
 
+    const isDynamic = (cfg.dynamicFields || []).includes(field);
     return `
         <input
             type="text"
             inputmode="decimal"
             autocomplete="off"
-            class="cargo-input cargo-quantity-input"
+            class="cargo-input cargo-quantity-input${isDynamic ? " cargo-dynamic-input" : ""}"
             data-field="${field}"
             value="${escapeHtml(row[field] ?? "")}"
+            placeholder="${isDynamic ? "Enter value" : ""}"
+            aria-label="${escapeHtml(getDynamicLabel(cfg, field))}"
         >
     `;
 }
@@ -1208,6 +1923,10 @@ function escapeHtml(value) {
    ============================================================ */
 
 function getColumnWidth(cfg, field) {
+    if ((cfg.dynamicFields || []).includes(field)) {
+        return "150px";
+    }
+
     if (field === "date") {
         return "145px";
     }
@@ -1241,7 +1960,11 @@ function initializeDataTable(section) {
     const columns = cfg.fields.map((field) => {
         return {
             data: field,
-            title: cfg.labels[cfg.fields.indexOf(field)],
+            title: columnTitleHtml(
+                section,
+                field,
+                cfg.labels[cfg.fields.indexOf(field)]
+            ),
             width: getColumnWidth(cfg, field),
             className:
                 field === cfg.totalField
@@ -1299,6 +2022,21 @@ function initializeDataTable(section) {
         }
     });
 
+    /*
+     * IMPORTANT: do not use DataTables scrollX here. scrollX creates
+     * separate header/body tables and can make a newly-added column look
+     * vertically or horizontally misaligned. The wrapper itself handles
+     * horizontal scrolling while keeping one table grid.
+     */
+    const tableWidth = cfg.fields.reduce((sum, field) => {
+        const width = parseInt(getColumnWidth(cfg, field), 10) || 135;
+        return sum + width;
+    }, 45);
+    $(selector).css({
+        width: tableWidth + "px",
+        minWidth: tableWidth + "px"
+    });
+
     dtTables[section] = $(selector).DataTable({
         data: tableData[section],
 
@@ -1335,8 +2073,8 @@ function initializeDataTable(section) {
 
         autoWidth: false,
 
-        /* Wide production tables scroll horizontally instead of squeezing inputs. */
-        scrollX: true,
+        /* The parent .cargo-table-wrapper provides horizontal scrolling. */
+        scrollX: false,
 
         language: {
             search: "Search:",
@@ -1367,6 +2105,25 @@ function initializeDataTable(section) {
                 searchable: false
             }
         ]
+    });
+
+    /* Recalculate widths after DataTables has built the rows. */
+    dtTables[section].columns.adjust().draw(false);
+
+    // Re-apply exact widths after DataTables has calculated the table.
+    dtTables[section].columns().every(function(index) {
+        const field = cfg.fields[index];
+        const width = getColumnWidth(cfg, field);
+        $(this.header()).css({
+            width: width,
+            minWidth: width,
+            maxWidth: width
+        });
+        $(this.nodes()).css({
+            width: width,
+            minWidth: width,
+            maxWidth: width
+        });
     });
 
     /*
@@ -1420,7 +2177,24 @@ function initializeDataTable(section) {
     );
 
     /*
-     * Delete button.
+     * Remove dynamic column button in the header.
+     */
+    $(selector).off("click.cargoColumnDelete");
+    $(selector).on(
+        "click.cargoColumnDelete",
+        "thead button[data-action='remove-column']",
+        function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const field = this.dataset.field;
+            if (field) {
+                removeColumn(section, field);
+            }
+        }
+    );
+
+    /*
+     * Delete row button.
      */
     $(selector).off("click.cargoDelete");
 
@@ -1466,7 +2240,10 @@ async function loadTable(section) {
             );
         }
 
-        tableData[section] = (Array.isArray(result) ? result : [])
+        const rawRows = Array.isArray(result) ? result : [];
+        discoverDynamicColumns(section, rawRows);
+
+        tableData[section] = rawRows
             .map(row => {
                 const cleanRow = {
                     ...row,
@@ -1583,6 +2360,22 @@ async function saveTable(section) {
              * Backend must update by ID instead of creating
              * another record.
              */
+            const dataForSave = {
+                ...row
+            };
+
+            delete dataForSave.id;
+            delete dataForSave.date;
+            delete dataForSave.section;
+            delete dataForSave.updated_at;
+            delete dataForSave._dynamicLabels;
+
+            const dynamicColumnLabels = {};
+            (cfg.dynamicFields || []).forEach(field => {
+                dynamicColumnLabels[field] = getDynamicLabel(cfg, field);
+            });
+            dataForSave.__dynamic_columns = dynamicColumnLabels;
+
             const payload = {
                 id:
                     row.id !== null &&
@@ -1591,10 +2384,7 @@ async function saveTable(section) {
                         : null,
 
                 date: row.date,
-
-                data: {
-                    ...row
-                }
+                data: dataForSave
             };
 
             console.log(
@@ -1801,6 +2591,28 @@ function refreshDataTable(section) {
    ============================================================ */
 
 $(document).ready(function() {
+
+    const modal = document.getElementById("cargo-column-modal");
+    const columnInput = document.getElementById("cargo-column-name");
+
+    if (modal) {
+        modal.addEventListener("click", function(event) {
+            if (event.target === modal) {
+                closeColumnModal();
+            }
+        });
+    }
+
+    if (columnInput) {
+        columnInput.addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                confirmAddColumn();
+            } else if (event.key === "Escape") {
+                closeColumnModal();
+            }
+        });
+    }
 
     loadTable("consumption");
 

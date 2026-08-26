@@ -1664,7 +1664,31 @@ def get_24_hours_report():
 
             print("\n--- FETCHING TIDE DATA ---")
 
-            tide_data = _fetch_tide_data(window_start, window_end)
+            # Selected date = TODAY
+            tide_today = datetime.strptime(
+                selected_date,
+                '%Y-%m-%d'
+            ).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+            # Tomorrow
+            tide_tomorrow = tide_today + timedelta(days=1)
+
+            # End = day after tomorrow 00:00
+            tide_end = tide_today + timedelta(days=2)
+
+            print("TIDE START:", tide_today)
+            print("TIDE END  :", tide_end)
+
+            # Fetch only TODAY + TOMORROW
+            tide_data = _fetch_tide_data(
+                tide_today,
+                tide_end
+            )
 
             print("TIDE DATA:", tide_data)
 

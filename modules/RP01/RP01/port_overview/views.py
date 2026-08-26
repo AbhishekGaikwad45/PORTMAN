@@ -904,30 +904,91 @@ def _days_left_in_fy(d):
 
 def _daily_target_by_days_left(d, scope='month'):
     """
-    Daily target for date d = (period target so far unachieved) / (days left
-    in the period, including d). scope is 'month' or 'fy'.
+    Required Daily = Shortfall Qty / Number of Days Remaining.
+
+    MONTH:
+        Shortfall = Monthly Target - Monthly Achieved
+        Required Daily = Shortfall / Remaining Days in Month
+
+    FY:
+        Shortfall = FY Target - FY Achieved
+        Required Daily = Shortfall / Remaining Days in FY
+
+    FY achieved uses the same logic as the FY cards:
+        April  = rp01_historical_lueu
+        May onward = lueu_lines
     """
+
     fy_start_year = d.year if d.month >= 4 else d.year - 1
     fy = fy_label(fy_start_year)
 
+    # =========================================================
+    # MONTH
+    # =========================================================
     if scope == 'month':
-        total_target = _month_target(fy, d.month)
-        period_start = d.replace(day=1)
-        days_left = _days_left_in_month(d)
-    else:  # 'fy'
-        total_target = _fy_target_totals(fy)[1]
-        period_start = date(fy_start_year, 4, 1)
-        days_left = _days_left_in_fy(d)
 
-    achieved_before_d = 0
-    if d > period_start:
-        achieved_before_d = _achieved_between(
+        # Monthly target
+        total_target = _month_target(fy, d.month)
+
+        # First day of current month
+        period_start = d.replace(day=1)
+
+        # Number of days remaining INCLUDING today
+        days_left = _days_left_in_month(d)
+
+        # Monthly achieved quantity
+        achieved_qty = _achieved_between(
             period_start.strftime('%Y-%m-%d'),
-            (d - timedelta(days=1)).strftime('%Y-%m-%d')
+            d.strftime('%Y-%m-%d')
         )
 
-    remaining_target = total_target - achieved_before_d
-    return round(remaining_target / days_left, 2) if days_left else 0
+    # =========================================================
+    # FINANCIAL YEAR
+    # =========================================================
+    else:
+
+        # Effective FY target
+        total_target = _fy_target_totals(fy)[1]
+
+        # FY starts on 1st April
+        period_start = date(fy_start_year, 4, 1)
+
+        # Number of days remaining INCLUDING today
+        days_left = _days_left_in_fy(d)
+
+        # -----------------------------------------------------
+        # IMPORTANT:
+        # Use the same FY calculation used by the FY card.
+        #
+        # April      -> rp01_historical_lueu
+        # May onward -> lueu_lines
+        # -----------------------------------------------------
+        fy_by_type = _current_fy_by_type(
+            d.strftime('%Y-%m-%d')
+        )
+
+        achieved_qty = sum(
+            float(qty or 0)
+            for qty in fy_by_type.values()
+        )
+
+    # =========================================================
+    # SHORTFALL
+    # =========================================================
+    shortfall_qty = max(
+        float(total_target or 0) - float(achieved_qty or 0),
+        0
+    )
+
+    # =========================================================
+    # REQUIRED DAILY
+    # =========================================================
+    if days_left > 0:
+        required_daily = shortfall_qty / days_left
+    else:
+        required_daily = 0
+
+    return round(required_daily, 2)
 
 @bp.route('/module/RP01/port-overview/targets')
 @login_required
