@@ -21,11 +21,31 @@ def login_required(f):
     return decorated
 
 
-def _can_upload():
+def get_perms():
     if session.get('is_admin'):
-        return True
-    perms = get_user_permissions(session['user_id'], 'RP02')
-    return bool(perms['can_add'] or perms['can_edit'])
+        return {
+            'can_read': 1,
+            'can_add': 1,
+            'can_edit': 1,
+            'can_delete': 1
+        }
+    return get_user_permissions(session.get('user_id'), 'RP02')
+
+
+def _can_upload():
+    perms = get_perms()
+    return bool(perms.get('can_add') or perms.get('can_edit'))
+
+
+def read_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if not get_perms().get('can_read'):
+            return jsonify({'error': 'No permission to read RP02'}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 
 def upload_required(f):
@@ -42,31 +62,43 @@ def upload_required(f):
 @bp.route('/module/RP02/')
 @login_required
 def index():
+    perms = get_perms()
+    if not perms.get('can_read'):
+        return render_template('no_access.html'), 403
     return render_template('rp02.html', username=session.get('username'),
-                           can_upload=_can_upload())
+                           permissions=perms, can_upload=_can_upload())
 
 
 @bp.route('/module/RP02/bill-master/')
 @login_required
 def bill_master_index():
+    perms = get_perms()
+    if not perms.get('can_read'):
+        return render_template('no_access.html'), 403
     return render_template('bill_master.html', username=session.get('username'),
-                           status=model.get_status(), can_upload=_can_upload())
+                           status=model.get_status(), permissions=perms,
+                           can_upload=_can_upload())
 
 
 @bp.route('/module/RP02/bill-master-report/')
 @login_required
 def bill_master_report_index():
-    return render_template('bill_master_report.html', username=session.get('username'))
+    perms = get_perms()
+    if not perms.get('can_read'):
+        return render_template('no_access.html'), 403
+    return render_template('bill_master_report.html',
+                           username=session.get('username'),
+                           permissions=perms)
 
 
 @bp.route('/api/module/RP02/bill-master-report/data')
-@login_required
+@read_required
 def bill_master_report_data():
     return jsonify({'data': model.get_bill_master_report()})
 
 
 @bp.route('/api/module/RP02/bill-master/template')
-@login_required
+@read_required
 def bill_master_template():
     return Response(
         model.build_template_csv(),
@@ -128,7 +160,7 @@ def bill_master_apply():
 
 
 @bp.route('/api/module/RP02/bill-master/rows')
-@login_required
+@read_required
 def bill_master_rows():
     import json as _json
     try:
@@ -159,8 +191,10 @@ def bill_master_row_update():
 
 
 @bp.route('/api/module/RP02/bill-master/row/delete', methods=['POST'])
-@upload_required
+@login_required
 def bill_master_row_delete():
+    if not get_perms().get('can_delete'):
+        return jsonify({'error': 'No permission to delete'}), 403
     data = request.json or {}
     if not data.get('id'):
         return jsonify({'error': 'Missing id'}), 400
@@ -171,13 +205,13 @@ def bill_master_row_delete():
 # ── Billing Pipeline dashboard ───────────────────────────────────────────────
 
 @bp.route('/module/RP02/billing-dashboard/')
-@login_required
+@read_required
 def billing_dashboard_index():
     return render_template('billing_dashboard.html', username=session.get('username'))
 
 
 @bp.route('/api/module/RP02/billing-dashboard/data')
-@login_required
+@read_required
 def billing_dashboard_data():
     return jsonify(model.get_billing_dashboard())
 
@@ -202,7 +236,7 @@ _EXPORT_COLUMNS = [
 
 
 @bp.route('/api/module/RP02/billing-dashboard/export')
-@login_required
+@read_required
 def billing_dashboard_export():
     """Excel dump of the pending lines, plus a summary sheet of the same numbers
     the dashboard shows. Deliberately carries no rates or amounts.
@@ -330,6 +364,7 @@ def billing_dashboard_export():
 
 
 @bp.route('/module/RP02/revenue/')
+@read_required
 def revenue_report():
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -342,6 +377,7 @@ def revenue_report():
 
 
 @bp.route('/api/module/RP02/revenue/data')
+@read_required
 def revenue_report_data():
     if 'user_id' not in session:
         return jsonify({'error': 'Not logged in'}), 401
@@ -547,7 +583,7 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
 # ── Revenue Register — backdated upload ─────────────────────────────────────
 
 @bp.route('/module/RP02/revenue-backdated/')
-@login_required
+@read_required
 def revenue_backdated_index():
     return render_template('revenue_backdated.html', username=session.get('username'),
                            status=revenue.get_status(), can_upload=_can_upload(),
@@ -555,7 +591,7 @@ def revenue_backdated_index():
 
 
 @bp.route('/api/module/RP02/revenue-backdated/template')
-@login_required
+@read_required
 def revenue_backdated_template():
     return Response(
         revenue.build_template_csv(),
@@ -597,7 +633,7 @@ def revenue_backdated_apply():
 
 
 @bp.route('/api/module/RP02/revenue-backdated/rows')
-@login_required
+@read_required
 def revenue_backdated_rows():
     import json as _json
     try:
@@ -629,8 +665,10 @@ def revenue_backdated_row_update():
 
 
 @bp.route('/api/module/RP02/revenue-backdated/row/delete', methods=['POST'])
-@upload_required
+@login_required
 def revenue_backdated_row_delete():
+    if not get_perms().get('can_delete'):
+        return jsonify({'error': 'No permission to delete'}), 403
     data = request.json or {}
     if not data.get('id'):
         return jsonify({'error': 'Missing id'}), 400
