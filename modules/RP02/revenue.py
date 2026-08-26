@@ -12,7 +12,10 @@ TABLE = 'rp02_revenue_backdated'
 
 # (stored field, header) — one source of truth for the stored columns, the CSV
 # template and the header map. Order matches the Revenue Register grid.
-# Days/Bucket are absent on purpose: derived from the date at read time.
+# Days/Bucket are NOT here on purpose: they are recomputed from the date every
+# time the register is read, so storing them would go stale overnight. The
+# template still carries the two columns (the sheet finance keeps has them) and
+# the parser ignores whatever is in them.
 FIELDS = [
     ('invoice_no',     'Invoice No.'),
     ('group_type',     'Group/Non group'),
@@ -47,9 +50,11 @@ FIELDS = [
 ]
 
 COLUMNS = [f for f, _ in FIELDS]
-TEMPLATE_HEADERS = ['Sr'] + [h for _, h in FIELDS]
-NUMERIC = {'cargo_volume', 'qty', 'rate', 'tax_rate', 'basic_value', 'sgst',
-           'cgst', 'igst', 'invoice_value', 'tds_tcs', 'net_receivable'}
+DERIVED_HEADERS = ['Days', 'Bucket']          # emitted in the template, ignored on upload
+TEMPLATE_HEADERS = ['Sr'] + [h for _, h in FIELDS] + DERIVED_HEADERS
+# Cargo Volume is absent on purpose: the register sheet carries YES/NO there.
+NUMERIC = {'qty', 'rate', 'tax_rate', 'basic_value', 'sgst', 'cgst', 'igst',
+           'invoice_value', 'tds_tcs', 'net_receivable'}
 
 
 def _norm(h):
@@ -203,21 +208,22 @@ def parse_upload(file_storage):
 
 
 TEMPLATE_EXAMPLE_ROWS = [
-    ['1', 'DPPL/25-26/001', 'Non Group', 'Cargo Handling', 'Wharfage', '19500',
+    ['1', 'DPPL/25-26/001', 'Non Group', 'Cargo Handling', 'Wharfage', 'YES',
      '05-04-2025', '10000123', 'JSW Steel Ltd', '4101076010', 'Cargo Handling Charges',
      '19500', '120.00', 'CGST+SGST', '18', '2340000.00', '210600.00', '210600.00',
      '0.00', '2761200.00', '27AAACJ4323N1ZS', '9100000123', '', '996751',
-     '', '', '', '', 'Booked', '46800.00', '2714400.00'],
-    ['2', 'DPPL/25-26/002', 'Group', 'Marine', 'Berth Hire', '',
+     '', '', '', '', 'Booked', '46800.00', '2714400.00', '', ''],
+    ['2', 'DPPL/25-26/002', 'Group', 'Marine', 'Berth Hire', 'NO',
      '12-04-2025', '10000456', 'JSW Cement Ltd', '4101071000', 'Berth Hire Charges',
      '1', '85000.00', 'IGST', '18', '85000.00', '0.00', '0.00', '15300.00',
      '100300.00', '29AAACJ0616P1ZL', '9100000456', '', '996729',
-     '', '', '', '', 'Pending', '85.00', '100215.00'],
+     '', '', '', '', 'Pending', '85.00', '100215.00', '', ''],
 ]
 
 
 def build_template_csv():
-    """The backdated revenue register upload template as CSV text."""
+    """The backdated revenue register upload template as CSV text. Days and
+    Bucket are there to match the register sheet; leave them blank."""
     import io, csv as _csv
     buf = io.StringIO()
     w = _csv.writer(buf)

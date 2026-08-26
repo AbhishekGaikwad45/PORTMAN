@@ -39,11 +39,21 @@ def test_template_maps_every_column():
     assert r['basic_value'] == 2340000.0
     assert r['net_receivable'] == 2714400.0
     assert r['booking_status'] == 'Booked'
+    assert r['cargo_volume'] == 'YES'      # a flag in the sheet, not a quantity
 
 
 def test_headers_cover_every_stored_column():
-    assert revenue.TEMPLATE_HEADERS[1:] == [h for _, h in revenue.FIELDS]
+    assert revenue.TEMPLATE_HEADERS[1:-2] == [h for _, h in revenue.FIELDS]
+    assert revenue.TEMPLATE_HEADERS[-2:] == ['Days', 'Bucket']
     assert set(revenue.HEADER_MAP.values()) >= set(revenue.COLUMNS)
+
+
+def test_days_and_bucket_columns_are_ignored_on_upload():
+    csv = ('Invoice No.,Date,Customer Name,Basic Value (Rs.),Days,Bucket\n'
+           'INV1,05-04-2025,ACME,100,999,> 3 years\n')
+    rows, errors = _parse(csv)
+    assert errors == []
+    assert 'days' not in rows[0] and 'bucket' not in rows[0]
 
 
 # ── header handling ──────────────────────────────────────────────────────────
