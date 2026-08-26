@@ -560,7 +560,9 @@ def revenue_backdated_template():
     return Response(
         revenue.build_template_csv(),
         mimetype='text/csv',
-        headers={'Content-Disposition': 'attachment; filename="RP02_revenue_register_template.csv"'},
+        headers={'Content-Disposition': 'attachment; filename="RP02_revenue_register_template.csv"',
+                 # the columns change as the register sheet does — never serve a cached copy
+                 'Cache-Control': 'no-store'},
     )
 
 
