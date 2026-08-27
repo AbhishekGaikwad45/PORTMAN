@@ -713,31 +713,61 @@ def _get_fy_months(reference_date=None):
 
 # ── Dynamic Load Ports fetcher ────────────────────────────────────────────
 
-def _fetch_load_ports():
+def _normalize_port_name(port_name):
+    """Normalize load port aliases (e.g. merge 'JSW JAIGAD' and 'JSW JAIGAD PORT')."""
+    if not port_name:
+        return ""
+    p = str(port_name).strip()
+    if 'JAIGAD' in p.upper():
+        return 'JSW JAIGAD PORT'
+    return p
+
+
+def _fetch_load_ports(source_type=None):
     """
-    Dynamically fetches distinct load ports from vcn_header and mbc_header.
-    Falls back to a default list if database returns no records.
+    Dynamically fetches distinct load ports from vcn_header and/or mbc_header.
+    If source_type == 'MBC', fetches only from mbc_header.
+    If source_type == 'VCN', fetches only from vcn_header.
     """
     conn = get_db()
     cur  = get_cursor(conn)
 
-    sql = """
-        SELECT DISTINCT TRIM(load_port) AS port
-        FROM (
-            SELECT load_port FROM vcn_header WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
-            UNION
-            SELECT load_port FROM mbc_header WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
-        ) combined_ports
-        ORDER BY port
-    """
+    if source_type == 'MBC':
+        sql = """
+            SELECT DISTINCT TRIM(load_port) AS port
+            FROM mbc_header
+            WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
+            ORDER BY port
+        """
+    elif source_type == 'VCN':
+        sql = """
+            SELECT DISTINCT TRIM(load_port) AS port
+            FROM vcn_header
+            WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
+            ORDER BY port
+        """
+    else:
+        sql = """
+            SELECT DISTINCT TRIM(load_port) AS port
+            FROM (
+                SELECT load_port FROM vcn_header WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
+                UNION
+                SELECT load_port FROM mbc_header WHERE load_port IS NOT NULL AND TRIM(load_port) != ''
+            ) combined_ports
+            ORDER BY port
+        """
     ports = []
+    seen = set()
     try:
         cur.execute(sql)
         rows = cur.fetchall()
         for r in rows:
             p = r.get('port') if isinstance(r, dict) else r[0]
             if p and p.strip():
-                ports.append(p.strip())
+                norm = _normalize_port_name(p)
+                if norm and norm.upper() not in seen:
+                    seen.add(norm.upper())
+                    ports.append(norm)
     except Exception:
         pass
     finally:
@@ -806,8 +836,17 @@ def _fetch_vessel_call_ledger():
                SUM(quantity)   AS disc_qty,
                MIN(entry_date) AS min_date,
                MAX(entry_date) AS max_date
-        FROM lueu_lines
-        WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
+        FROM (
+            SELECT source_id, quantity, entry_date::text AS entry_date
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND source_type = 'VCN'
+
+            UNION ALL
+
+            SELECT v.id AS source_id, h.quantity, h.entry_date::text AS entry_date
+            FROM rp01_historical_lueu h
+            JOIN vcn_header v ON (UPPER(TRIM(h.source_display)) = UPPER(TRIM(v.vessel_name)) OR UPPER(TRIM(h.source_display)) LIKE CONCAT('%%', UPPER(TRIM(v.vessel_name)), '%%'))
+        ) vcn_disc_combined
         GROUP BY source_id
     ) disc ON disc.source_id = v.id
 
@@ -855,8 +894,17 @@ def _fetch_vessel_call_ledger():
                SUM(quantity)   AS disc_qty,
                MIN(entry_date) AS min_date,
                MAX(entry_date) AS max_date
-        FROM lueu_lines
-        WHERE is_deleted IS NOT TRUE AND source_type = 'MBC'
+        FROM (
+            SELECT source_id, quantity, entry_date::text AS entry_date
+            FROM lueu_lines
+            WHERE is_deleted IS NOT TRUE AND source_type = 'MBC'
+
+            UNION ALL
+
+            SELECT m.id AS source_id, h.quantity, h.entry_date::text AS entry_date
+            FROM rp01_historical_lueu h
+            JOIN mbc_header m ON UPPER(TRIM(h.source_display)) = UPPER(TRIM(m.mbc_name))
+        ) mbc_disc_combined
         GROUP BY source_id
     ) disc ON disc.source_id = m.id
 
@@ -895,7 +943,7 @@ def _fetch_vessel_call_ledger():
 
 def _fetch_direct_barge_count_by_month():
     """
-    lueu_lines rows with no VCN/MBC parent (source_type IS NULL/blank) —
+    lueu_lines and rp01_historical_lueu rows with no VCN/MBC parent —
     treated as direct barge activity, bucketed by entry_date month.
     Returns {(year, month): count}.
     """
@@ -903,10 +951,16 @@ def _fetch_direct_barge_count_by_month():
     cur  = get_cursor(conn)
 
     cur.execute("""
-        SELECT entry_date
+        SELECT entry_date::text AS entry_date
         FROM lueu_lines
         WHERE is_deleted IS NOT TRUE
-          AND (source_type IS NULL OR source_type NOT IN ('VCN', 'MBC'))
+          AND (source_type IS NULL OR TRIM(source_type) = '' OR source_type NOT IN ('VCN', 'MBC'))
+
+        UNION ALL
+
+        SELECT entry_date::text AS entry_date
+        FROM rp01_historical_lueu
+        WHERE (source_display IS NULL OR TRIM(source_display) = '' OR (mv_mbc IS NOT NULL AND UPPER(TRIM(mv_mbc)) NOT IN ('MV', 'VCN', 'MBC')))
     """)
     rows = cur.fetchall()
     conn.close()
@@ -930,11 +984,11 @@ def _fetch_direct_barge_count_by_month():
 def _fetch_mbc_handling_status(reference_date=None, ports=None):
     """
     Recreates the 'MBC' sheet: monthly count of calls per load port
-    (left block, VCN + MBC combined) and monthly count of MBC calls per
+    (left block, MBC calls only) and monthly count of MBC calls per
     company category + direct barge activity (right block).
     """
     if not ports:
-        ports = _fetch_load_ports()
+        ports = _fetch_load_ports(source_type='MBC')
 
     calls  = _fetch_vessel_call_ledger()
     months = _get_fy_months(reference_date)
@@ -945,17 +999,20 @@ def _fetch_mbc_handling_status(reference_date=None, ports=None):
 
     for m_start, m_end, label in months:
 
-        month_calls = [
+        mbc_month_calls = [
             c for c in calls
-            if c['bucket_date'] and m_start <= c['bucket_date'] <= m_end
+            if c['source_type'] == 'MBC'
+            and c['bucket_date'] and m_start <= c['bucket_date'] <= m_end
         ]
 
-        port_counts = {}
-        for port in ports:
-            port_counts[port] = sum(
-                1 for c in month_calls
-                if c.get('load_port') and port.upper() in c['load_port'].upper()
-            )
+        port_counts = {port: 0 for port in ports}
+        for c in mbc_month_calls:
+            lp = _normalize_port_name(c.get('load_port'))
+            if lp:
+                for port in ports:
+                    if port.upper() == lp.upper():
+                        port_counts[port] += 1
+                        break
         port_total = sum(port_counts.values())
 
         port_rows.append({
@@ -965,7 +1022,6 @@ def _fetch_mbc_handling_status(reference_date=None, ports=None):
             'total': port_total,
         })
 
-        mbc_month_calls = [c for c in month_calls if c['source_type'] == 'MBC']
         shipping_ct = sum(1 for c in mbc_month_calls if c['company'] == 'JSW SHIPPING')
         infra_ct    = sum(1 for c in mbc_month_calls if c['company'] == 'JSW INFRA')
         other_ct    = sum(1 for c in mbc_month_calls if c['company'] == 'OTHERS')
@@ -1012,17 +1068,20 @@ def _fetch_ytd_cargo_pivot(reference_date=None):
         - Monthly grand total row (Yellow, merged across month's cargo sub-columns).
     """
     months = _get_fy_months(reference_date)
-    month_bounds = [(m_start, m_end, label) for m_start, m_end, label in months]
+    today = date.today()
+    month_bounds = [(m_start, m_end, label) for m_start, m_end, label in months if m_start <= today]
+    if not month_bounds:
+        month_bounds = [(m_start, m_end, label) for m_start, m_end, label in months[:1]]
 
     from_date = month_bounds[0][0].strftime('%Y-%m-%d')
-    to_date   = min(month_bounds[-1][1], date.today()).strftime('%Y-%m-%d')
+    to_date   = min(month_bounds[-1][1], today).strftime('%Y-%m-%d')
 
     conn = get_db()
     cur  = get_cursor(conn)
 
     sql = """
         SELECT
-            l.entry_date,
+            l.entry_date::text AS entry_date,
             l.quantity,
             l.source_type,
 
@@ -1041,9 +1100,9 @@ def _fetch_ytd_cargo_pivot(reference_date=None):
                     THEN 'Jsw Infrastructre'
                 WHEN l.source_type = 'MBC' THEN
                     CASE
-                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) = 'JAIGAD' THEN 'Jaigad-Other MBC'
-                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) = 'SALAV'  THEN 'Salav -Other'
-                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) = 'GOA'    THEN 'Goa-Other'
+                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) LIKE '%%JAIGAD%%' THEN 'Jaigad-Other MBC'
+                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) LIKE '%%SALAV%%'  THEN 'Salav -Other'
+                        WHEN UPPER(TRIM(COALESCE(m.load_port, ''))) LIKE '%%GOA%%'    THEN 'Goa-Other'
                         WHEN NULLIF(TRIM(COALESCE(m.load_port, '')), '') IS NOT NULL
                             THEN CONCAT(TRIM(m.load_port), '-Other')
                         ELSE 'Other MBC'
@@ -1070,9 +1129,34 @@ def _fetch_ytd_cargo_pivot(reference_date=None):
           AND l.quantity > 0
           AND l.entry_date >= %s
           AND l.entry_date <= %s
+
+        UNION ALL
+
+        SELECT
+            h.entry_date::text AS entry_date,
+            h.quantity,
+            'HISTORICAL' AS source_type,
+            COALESCE(vcargo.cargo_type, h.cargo_name, 'Unknown') AS cargo_type,
+            CASE
+                WHEN UPPER(TRIM(COALESCE(h.mv_mbc, ''))) IN ('MV', 'VCN') THEN 'Mother Vessels Cargo'
+                WHEN UPPER(TRIM(COALESCE(h.mv_mbc, ''))) = 'MBC' AND UPPER(COALESCE(mm.mbc_owner_name, '')) LIKE '%%SHIPPING%%' THEN 'Shipping'
+                WHEN UPPER(TRIM(COALESCE(h.mv_mbc, ''))) = 'MBC' AND UPPER(COALESCE(mm.mbc_owner_name, '')) LIKE '%%INFRA%%' THEN 'Jsw Infrastructre'
+                WHEN UPPER(TRIM(COALESCE(h.mv_mbc, ''))) = 'MBC' THEN 'Jaigad-Other MBC'
+                ELSE 'Double Handling'
+            END AS row_category
+        FROM rp01_historical_lueu h
+        LEFT JOIN LATERAL (
+            SELECT cargo_type FROM vessel_cargo
+            WHERE UPPER(TRIM(cargo_name)) = UPPER(TRIM(h.cargo_name))
+            LIMIT 1
+        ) vcargo ON true
+        LEFT JOIN mbc_master mm
+            ON UPPER(TRIM(h.source_display)) = UPPER(TRIM(mm.mbc_name))
+        WHERE h.quantity IS NOT NULL AND h.quantity > 0
+          AND h.entry_date::text >= %s AND h.entry_date::text <= %s
     """
 
-    cur.execute(sql, [from_date, to_date])
+    cur.execute(sql, [from_date, to_date, from_date, to_date])
     rows = cur.fetchall()
     conn.close()
 
@@ -1929,33 +2013,54 @@ def _write_yearly_ledger_sheet(ws, calls):
         ws['A1'] = "No data available"
         return
 
+    mbc_calls = [c for c in calls if c.get('source_type') == 'MBC']
+    vcn_calls = [c for c in calls if c.get('source_type') == 'VCN']
+
     headers = [
         'Sr No', 'Vessel / MBC', 'Type', 'Load Port', 'Company',
         'Cargo Type', 'Cargo Name', 'BL Qty', 'Discharged Qty',
-        'Outstanding Qty', 'First Activity', 'Last Activity',
-        'Vessel Run Type', 'Discharge Commenced', 'Discharge Completed',
+        'Discharge Commenced', 'Discharge Completed',
     ]
 
-    widths = [8, 30, 8, 14, 14, 16, 20, 12, 14, 14, 14, 14, 16, 18, 18]
+    widths = [8, 32, 8, 16, 16, 16, 22, 14, 14, 18, 18]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
+    def _sort_key(c):
+        d = c.get('bucket_date')
+        return d or date.min
+
+    sorted_mbc = sorted(mbc_calls, key=_sort_key, reverse=True)
+    sorted_vcn = sorted(vcn_calls, key=_sort_key, reverse=True)
+
+    row = 1
+
+    # ── Table 1: MBC (Coastal) Calls Table First ────────────────────────────
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+    title_cell = ws.cell(row, 1, 'MBC (Coastal) Calls')
+    title_cell.font = _font(bold=True, size=12)
+    title_cell.fill = _fill(XL_GREY)
+    title_cell.alignment = _ctr
+    title_cell.border = _bdr
+    row += 1
+
     for idx, h in enumerate(headers, start=1):
-        cell = ws.cell(1, idx, h)
+        cell = ws.cell(row, idx, h)
         cell.font = _font(bold=True)
         cell.fill = _fill(XL_GREY)
         cell.alignment = _ctr
         cell.border = _bdr
+    row += 1
 
-    # sort: most recent activity first, VCN before MBC
-    def _sort_key(c):
-        d = c.get('bucket_date')
-        return (d or date.min, 0 if c['source_type'] == 'VCN' else 1)
+    mbc_bl_total = 0.0
+    mbc_disc_total = 0.0
 
-    sorted_calls = sorted(calls, key=_sort_key, reverse=True)
+    for i, c in enumerate(sorted_mbc, start=1):
+        bl = _safe_float(c.get('bl_qty'))
+        disc = _safe_float(c.get('discharged_qty'))
+        mbc_bl_total += bl
+        mbc_disc_total += disc
 
-    row = 2
-    for i, c in enumerate(sorted_calls, start=1):
         vals = [
             i,
             c.get('header_name') or '-',
@@ -1964,12 +2069,8 @@ def _write_yearly_ledger_sheet(ws, calls):
             c.get('company') or '-',
             c.get('cargo_type') or '-',
             c.get('cargo_name') or '-',
-            _safe_float(c.get('bl_qty')),
-            _safe_float(c.get('discharged_qty')),
-            c.get('outstanding_qty', 0),
-            c.get('first_activity_date') or '-',
-            c.get('last_activity_date') or '-',
-            c.get('vessel_run_type') or '-',
+            bl,
+            disc,
             c.get('discharge_commenced') or '-',
             c.get('discharge_completed') or '-',
         ]
@@ -1977,11 +2078,95 @@ def _write_yearly_ledger_sheet(ws, calls):
             cell = ws.cell(row, idx, v)
             cell.alignment = _ctr
             cell.border = _bdr
-            if idx in (8, 9, 10):
+            if idx in (8, 9):
                 cell.number_format = '#,##0.00'
         row += 1
 
-    ws.freeze_panes = 'A2'
+    # Total row for MBC table
+    ws.cell(row, 2, 'Total MBC Calls').font = _font(bold=True)
+    ws.cell(row, 2).border = _bdr
+    for idx in range(1, len(headers) + 1):
+        ws.cell(row, idx).border = _bdr
+        ws.cell(row, idx).fill = _fill(XL_YELLOW)
+
+    cell_bl = ws.cell(row, 8, mbc_bl_total)
+    cell_bl.font = _font(bold=True)
+    cell_bl.number_format = '#,##0.00'
+    cell_bl.alignment = _ctr
+
+    cell_disc = ws.cell(row, 9, mbc_disc_total)
+    cell_disc.font = _font(bold=True)
+    cell_disc.number_format = '#,##0.00'
+    cell_disc.alignment = _ctr
+
+    # ── Line space between tables ───────────────────────────────────────────
+    row += 3
+
+    # ── Table 2: Mother Vessel (VCN) Calls Table Second ──────────────────────
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+    title_cell = ws.cell(row, 1, 'Mother Vessel (VCN) Calls')
+    title_cell.font = _font(bold=True, size=12)
+    title_cell.fill = _fill(XL_GREY)
+    title_cell.alignment = _ctr
+    title_cell.border = _bdr
+    row += 1
+
+    for idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row, idx, h)
+        cell.font = _font(bold=True)
+        cell.fill = _fill(XL_GREY)
+        cell.alignment = _ctr
+        cell.border = _bdr
+    row += 1
+
+    vcn_bl_total = 0.0
+    vcn_disc_total = 0.0
+
+    for i, c in enumerate(sorted_vcn, start=1):
+        bl = _safe_float(c.get('bl_qty'))
+        disc = _safe_float(c.get('discharged_qty'))
+        vcn_bl_total += bl
+        vcn_disc_total += disc
+
+        vals = [
+            i,
+            c.get('header_name') or '-',
+            c.get('source_type'),
+            c.get('load_port') or '-',
+            c.get('company') or '-',
+            c.get('cargo_type') or '-',
+            c.get('cargo_name') or '-',
+            bl,
+            disc,
+            c.get('discharge_commenced') or '-',
+            c.get('discharge_completed') or '-',
+        ]
+        for idx, v in enumerate(vals, start=1):
+            cell = ws.cell(row, idx, v)
+            cell.alignment = _ctr
+            cell.border = _bdr
+            if idx in (8, 9):
+                cell.number_format = '#,##0.00'
+        row += 1
+
+    # Total row for VCN table
+    ws.cell(row, 2, 'Total Vessel Calls').font = _font(bold=True)
+    ws.cell(row, 2).border = _bdr
+    for idx in range(1, len(headers) + 1):
+        ws.cell(row, idx).border = _bdr
+        ws.cell(row, idx).fill = _fill(XL_YELLOW)
+
+    cell_bl = ws.cell(row, 8, vcn_bl_total)
+    cell_bl.font = _font(bold=True)
+    cell_bl.number_format = '#,##0.00'
+    cell_bl.alignment = _ctr
+
+    cell_disc = ws.cell(row, 9, vcn_disc_total)
+    cell_disc.font = _font(bold=True)
+    cell_disc.number_format = '#,##0.00'
+    cell_disc.alignment = _ctr
+
+    ws.freeze_panes = 'A3'
 
 
 # ── Excel builder ───────────────────────────────────────────────────────────
