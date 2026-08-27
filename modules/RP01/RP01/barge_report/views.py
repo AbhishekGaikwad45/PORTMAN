@@ -196,7 +196,10 @@ def barge_report_data():
             LEFT JOIN vcn_header v ON v.id = h.vcn_id
             LEFT JOIN ldud_barge_lines bl ON bl.ldud_id = h.id
             WHERE h.id = ANY(%s)
-            ORDER BY h.id, bl.trip_number, bl.barge_name, bl.id
+            ORDER BY h.id,
+                     CASE WHEN bl.trip_start IS NULL OR bl.trip_start = '' THEN 1 ELSE 0 END,
+                     bl.trip_start ASC,
+                     bl.id ASC
         """, (ldud_ids,))
         rows = cur.fetchall()
         result = []
@@ -240,6 +243,29 @@ def barge_report_data():
                 'anchored_gull_island_empty':     _fmt(r['anchored_gull_island_empty']),
                 'aweigh_gull_island_empty':       _fmt(r['aweigh_gull_island_empty']),
             })
+
+        # Python sort to ensure robust date-wise order
+        def _sort_key(item):
+            dt = _ensure_datetime(item.get('along_side_vessel'))
+            return (
+                item.get('ldud_id') or 0,
+                0 if dt is not None else 1,
+                dt or datetime.max,
+                item.get('line_id') or 0
+            )
+
+        result.sort(key=_sort_key)
+
+        # Compute sequential trip_number per barge per vessel
+        barge_trip_counts = {}
+        for item in result:
+            if item.get('line_id') is not None and item.get('barge_name'):
+                barge = item['barge_name'].strip().upper()
+                ldud = item['ldud_id']
+                key = (ldud, barge)
+                barge_trip_counts[key] = barge_trip_counts.get(key, 0) + 1
+                item['trip_number'] = barge_trip_counts[key]
+
         return jsonify(result)
     except Exception:
         return jsonify({'error': traceback.format_exc()}), 500
@@ -361,10 +387,12 @@ def barge_report_download():
     try:
         cur.execute("""
             SELECT
+                h.id                          AS ldud_id,
                 h.doc_num, h.vessel_name, h.operation_type,
                 h.nor_tendered, h.discharge_commenced, h.discharge_completed,
                 h.doc_status, h.initial_draft_survey_quantity,
                 v.vessel_agent_name, v.importer_exporter_name,
+                bl.id                         AS line_id,
                 bl.trip_number, bl.hold_name, bl.barge_name,
                 bl.contractor_name, bl.cargo_name, bl.bpt_bfl, bl.discharge_quantity,
                 bl.crane_loaded_from, bl.port_crane, bl.trip_start,
@@ -378,11 +406,34 @@ def barge_report_download():
             LEFT JOIN vcn_header v ON v.id = h.vcn_id
             LEFT JOIN ldud_barge_lines bl ON bl.ldud_id = h.id
             WHERE h.id = ANY(%s)
-            ORDER BY h.id, bl.trip_number, bl.barge_name, bl.id
+            ORDER BY h.id,
+                     CASE WHEN bl.trip_start IS NULL OR bl.trip_start = '' THEN 1 ELSE 0 END,
+                     bl.trip_start ASC,
+                     bl.id ASC
         """, (ldud_ids,))
         xl_rows = [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+    def _sort_key(r):
+        dt = _ensure_datetime(r.get('along_side_vessel') or r.get('trip_start'))
+        return (
+            r.get('ldud_id') or 0,
+            0 if dt is not None else 1,
+            dt or datetime.max,
+            r.get('line_id') or 0
+        )
+
+    xl_rows.sort(key=_sort_key)
+
+    barge_trip_counts = {}
+    for r in xl_rows:
+        if r.get('line_id') is not None and r.get('barge_name'):
+            barge = str(r['barge_name']).strip().upper()
+            ldud = r.get('ldud_id')
+            key = (ldud, barge)
+            barge_trip_counts[key] = barge_trip_counts.get(key, 0) + 1
+            r['trip_number'] = barge_trip_counts[key]
 
     # ── Compute TAT for every row — same source columns as the UI's
     # formatDuration(trip_start, cast_off_berth) ──────────────────────────
@@ -416,37 +467,14 @@ def barge_report_download():
     ws.title = 'Barge Lines'
     ws.freeze_panes = 'A2'
 
-    ws.row_dimensions[1].height = 24
-    for col_idx, (label, _) in enumerate(_BARGE_COLUMNS, 1):
-        c = ws.cell(1, col_idx, label)
-        c.font = hdr_font
-        c.fill = hdr_fill
-        c.border = bdr
-        c.alignment = ctr
-        ws.column_dimensions[get_column_letter(col_idx)].width = max(14, len(label) + 2)
-
-    for row_idx, row in enumerate(xl_rows, 2):
-        for col_idx, (_, key) in enumerate(_BARGE_COLUMNS, 1):
-            val = row.get(key)
-
-            if val is None:
-                val = ""
-            elif key in DATE_COLUMNS:
-                val = _fmt_datetime(val)   # Sheet 1 stays display-text, by design
-            c = ws.cell(row_idx, col_idx, val)
-            c.font = cell_font
-            c.border = bdr
-            c.alignment = rgt if key == 'discharge_quantity' else lft
-
-    # ── SHEET 2: TAT Calculation (same rows, real formulas) ────────────
     # (label, source_key, kind)
     #   kind = 'text' | 'date' | 'number' | ('dur', end_col_letter, start_col_letter)
-    TAT_SHEET_COLUMNS = [
+    BARGE_SHEET_COLUMNS = [
         ('Doc No',                   'doc_num',                  'text'),
         ('Vessel Name',              'vessel_name',              'text'),
         ('Operation',                'operation_type',           'text'),
-        ('NOR Tendered',             'nor_tendered',              'date'),
         ('Agent',                    'vessel_agent_name',        'text'),
+        ('Trip #',                   'trip_number',              'number'),
         ('Barge',                    'barge_name',                'text'),
         ('Cargo',                    'cargo_name',                'text'),
         ('MBPT/PLA',                 'bpt_bfl',                   'text'),
@@ -475,15 +503,13 @@ def barge_report_download():
     ]
 
     # columns that are duration/"hrs" columns (get the gold/yellow treatment)
-    DUR_LABELS = {label for label, _, kind in TAT_SHEET_COLUMNS if isinstance(kind, tuple)}
+    DUR_LABELS = {label for label, _, kind in BARGE_SHEET_COLUMNS if isinstance(kind, tuple)}
     TAT_LABEL = 'TAT (hrs)'   # the final total gets its own colour
 
-    ws2 = wb.create_sheet('TAT Calculation')
-    ws2.freeze_panes = 'A2'
-    ws2.row_dimensions[1].height = 24
+    ws.row_dimensions[1].height = 24
 
-    for col_idx, (label, _, _) in enumerate(TAT_SHEET_COLUMNS, 1):
-        c = ws2.cell(1, col_idx, label)
+    for col_idx, (label, _, _) in enumerate(BARGE_SHEET_COLUMNS, 1):
+        c = ws.cell(1, col_idx, label)
         c.font = hdr_font
         c.border = bdr
         c.alignment = ctr
@@ -493,11 +519,11 @@ def barge_report_download():
             c.fill = HRS_HDR_FILL
         else:
             c.fill = hdr_fill
-        ws2.column_dimensions[get_column_letter(col_idx)].width = max(14, len(label) + 2)
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(14, len(label) + 2)
 
     for row_idx, row in enumerate(xl_rows, 2):
-        for col_idx, (label, key, kind) in enumerate(TAT_SHEET_COLUMNS, 1):
-            c = ws2.cell(row_idx, col_idx)
+        for col_idx, (label, key, kind) in enumerate(BARGE_SHEET_COLUMNS, 1):
+            c = ws.cell(row_idx, col_idx)
             c.font = cell_font
             c.border = bdr
             c.alignment = lft
