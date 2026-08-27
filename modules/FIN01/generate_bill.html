@@ -613,7 +613,9 @@ function recalcTotals() {
 
     // GST (simplified — 18% on subtotal; real impl would use per-line GST rates)
     const gst = subtotal * 0.18;
-    const total = subtotal + gst;
+    // TCS is collected from the customer, so it is part of the bill total —
+    // must match bill_totals() server-side or the preview lies about the total.
+    const total = subtotal + gst + tcsTotal;
 
     document.getElementById('totalSelectedCount').textContent = selectedCount + ' item' + (selectedCount !== 1 ? 's' : '');
     document.getElementById('totalSubtotal').textContent = '₹' + subtotal.toFixed(2);

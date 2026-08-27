@@ -145,6 +145,8 @@
                     data-cgst="{{ row.cgst_amount }}"
                     data-sgst="{{ row.sgst_amount }}"
                     data-igst="{{ row.igst_amount }}"
+                    data-tds="{{ row.tds_amount or 0 }}"
+                    data-tcs="{{ row.tcs_amount or 0 }}"
                     data-total="{{ row.total_amount }}"
                     data-gstin="{{ row.customer_gstin or '' }}"
                     data-gst-state="{{ row.customer_gst_state_code or '' }}"
@@ -259,6 +261,14 @@
             <tr>
                 <td>IGST</td>
                 <td><span id="igst">0.00</span></td>
+            </tr>
+            <tr id="tdsRow" style="display:none;">
+                <td>TDS Deducted</td>
+                <td>(-) <span id="tds">0.00</span></td>
+            </tr>
+            <tr id="tcsRow" style="display:none;">
+                <td>TCS Collected</td>
+                <td>(+) <span id="tcs">0.00</span></td>
             </tr>
             <tr>
                 <td>Round Off</td>
@@ -516,21 +526,29 @@ async function validateSelection() {
 
 function calculateTotals() {
     const selected = document.querySelectorAll('.bill-select:checked');
-    let subtotal=0, cgst=0, sgst=0, igst=0;
+    let subtotal=0, cgst=0, sgst=0, igst=0, tds=0, tcs=0;
     selected.forEach(cb => {
         const r = cb.closest('tr');
         subtotal += parseFloat(r.dataset.subtotal) || 0;
         cgst     += parseFloat(r.dataset.cgst)     || 0;
         sgst     += parseFloat(r.dataset.sgst)     || 0;
         igst     += parseFloat(r.dataset.igst)     || 0;
+        tds      += parseFloat(r.dataset.tds)      || 0;
+        tcs      += parseFloat(r.dataset.tcs)      || 0;
     });
     const roundOff = parseFloat(document.getElementById('roundOff').value) || 0;
-    const total = subtotal + cgst + sgst + igst + roundOff;
+    // TCS is collected from the customer and belongs in the total; TDS is the
+    // customer's own deduction at payment — shown, never subtracted here.
+    const total = subtotal + cgst + sgst + igst + tcs + roundOff;
     document.getElementById('billCount').textContent   = selected.length;
     document.getElementById('subtotal').textContent    = subtotal.toFixed(2);
     document.getElementById('cgst').textContent        = cgst.toFixed(2);
     document.getElementById('sgst').textContent        = sgst.toFixed(2);
     document.getElementById('igst').textContent        = igst.toFixed(2);
+    document.getElementById('tds').textContent         = tds.toFixed(2);
+    document.getElementById('tcs').textContent         = tcs.toFixed(2);
+    document.getElementById('tdsRow').style.display    = tds > 0 ? '' : 'none';
+    document.getElementById('tcsRow').style.display    = tcs > 0 ? '' : 'none';
     document.getElementById('totalAmount').textContent = total.toFixed(2);
 
     const invDate = document.getElementById('invoiceDate').value;
@@ -641,6 +659,8 @@ async function confirmGenerateInvoice() {
         cgst_amount: parseFloat(document.getElementById('cgst').textContent),
         sgst_amount: parseFloat(document.getElementById('sgst').textContent),
         igst_amount: parseFloat(document.getElementById('igst').textContent),
+        tds_amount: parseFloat(document.getElementById('tds').textContent) || 0,
+        tcs_amount: parseFloat(document.getElementById('tcs').textContent) || 0,
         round_off: parseFloat(document.getElementById('roundOff').value) || 0,
         total_amount: total,
         amount_in_words: amountInWords(total),
