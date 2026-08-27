@@ -160,35 +160,49 @@ def get_cargo_report():
         ) mbc
             ON mbc.source_id = h.id
 
-        LEFT JOIN (
+        /*
+        ============================================================
+        MBC -> INVOICE LINK
+        ============================================================
+        IMPORTANT:
+        Do NOT match invoices using invoice_header.commodity text.
+
+        The exact relationship is:
+
+            mbc_customer_details.material_po
+                    |
+                    +--> mbc_customer_details.bill_id
+                              |
+                              +--> invoice_lines.bill_id
+                                        |
+                                        +--> invoice_lines.invoice_id
+                                                  |
+                                                  +--> invoice_header.id
+
+        This prevents one MBC's consolidated invoice from being
+        incorrectly displayed for every Material PO belonging to
+        the same MBC.
+        ============================================================
+        */
+        LEFT JOIN LATERAL (
             SELECT
-                h2.id AS mbc_id,
                 STRING_AGG(
                     DISTINCT ih.invoice_number,
-                    ', '
+                    ', ' ORDER BY ih.invoice_number
                 ) AS invoice_numbers,
 
                 STRING_AGG(
                     DISTINCT ih.invoice_status,
-                    ', '
+                    ', ' ORDER BY ih.invoice_status
                 ) AS invoice_statuses
 
-            FROM mbc_header h2
+            FROM invoice_lines il
+            JOIN invoice_header ih
+                ON ih.id = il.invoice_id
 
-            LEFT JOIN invoice_header ih
-                ON ih.commodity IS NOT NULL
-               AND h2.doc_num IS NOT NULL
-               AND h2.mbc_name IS NOT NULL
-               AND ih.commodity ILIKE
-                   '%%' ||
-                   h2.doc_num ||
-                   ' / ' ||
-                   h2.mbc_name ||
-                   '%%'
-
-            GROUP BY h2.id
-        ) inv
-            ON inv.mbc_id = h.id
+            WHERE cd.bill_id IS NOT NULL
+              AND il.bill_id = cd.bill_id
+        ) inv ON TRUE
 
 
         /*
@@ -607,6 +621,9 @@ def get_cargo_report():
                 'flag':
                     row['flag'] or '-',
 
+                # Invoice number is now resolved from the exact
+                # Material PO -> bill_id -> invoice_lines -> invoice_header
+                # relationship for MBC records.
                 'invoice_number':
                     row['invoice_number'] or 'NA',
 
@@ -862,46 +879,35 @@ def download_cargo_handling_report():
             ON mbc.source_id = h.id
 
 
-        LEFT JOIN (
+        /*
+        ============================================================
+        MBC -> INVOICE LINK
+        ============================================================
+        Use the actual billing relationship through
+        mbc_customer_details.bill_id.
+
+        DO NOT use invoice_header.commodity text matching here.
+        ============================================================
+        */
+        LEFT JOIN LATERAL (
             SELECT
-
-                h2.id AS mbc_id,
-
                 STRING_AGG(
                     DISTINCT ih.invoice_number,
-                    ', '
+                    ', ' ORDER BY ih.invoice_number
                 ) AS invoice_numbers,
 
                 STRING_AGG(
                     DISTINCT ih.invoice_status,
-                    ', '
+                    ', ' ORDER BY ih.invoice_status
                 ) AS invoice_statuses
 
+            FROM invoice_lines il
+            JOIN invoice_header ih
+                ON ih.id = il.invoice_id
 
-            FROM mbc_header h2
-
-
-            LEFT JOIN invoice_header ih
-
-                ON ih.commodity IS NOT NULL
-
-               AND h2.doc_num IS NOT NULL
-
-               AND h2.mbc_name IS NOT NULL
-
-               AND ih.commodity ILIKE
-                   '%%' ||
-                   h2.doc_num ||
-                   ' / ' ||
-                   h2.mbc_name ||
-                   '%%'
-
-
-            GROUP BY h2.id
-
-        ) inv
-
-            ON inv.mbc_id = h.id
+            WHERE cd.bill_id IS NOT NULL
+              AND il.bill_id = cd.bill_id
+        ) inv ON TRUE
 
 
         WHERE dp.unloading_commenced IS NOT NULL
