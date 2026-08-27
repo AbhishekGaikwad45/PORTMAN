@@ -65,6 +65,7 @@
             <th>Customer</th>
             <th>Subtotal</th>
             <th>GST</th>
+            <th>TCS</th>
             <th>Total</th>
             <th>Currency</th>
             <th>Status</th>
@@ -81,6 +82,7 @@
             <td>{{ row.customer_name }}</td>
             <td style="text-align: right;">{{ "%.2f"|format(row.subtotal) }}</td>
             <td style="text-align: right;">{{ "%.2f"|format(row.cgst_amount + row.sgst_amount + row.igst_amount) }}</td>
+            <td style="text-align: right;">{{ "%.2f"|format(row.tcs_amount or 0) }}</td>
             <td style="text-align: right;">{{ "%.2f"|format(row.total_amount) }}</td>
             <td>{{ row.currency_code }}</td>
             <td>

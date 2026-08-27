@@ -30,6 +30,7 @@
     .bill-lines-panel.open { display: block; }
     .bill-lines-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
     .bill-lines-table th { background: var(--border-color); color: var(--text-secondary); padding: 4px 8px; text-align: left; }
+    .bill-lines-table th.num { text-align: right; }
     .bill-lines-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-color); }
     .bill-lines-table tr:last-child td { border-bottom: none; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -129,6 +130,7 @@
                     <th>Customer</th>
                     <th style="text-align:right;">Subtotal</th>
                     <th style="text-align:right;">GST</th>
+                    <th style="text-align:right;">TCS</th>
                     <th style="text-align:right;">Total</th>
                     <th>CCY</th>
                 </tr>
@@ -160,11 +162,12 @@
                     <td>{{ row.customer_name }}</td>
                     <td class="num">{{ "%.2f"|format(row.subtotal) }}</td>
                     <td class="num">{{ "%.2f"|format(row.cgst_amount + row.sgst_amount + row.igst_amount) }}</td>
+                    <td class="num">{{ "%.2f"|format(row.tcs_amount or 0) }}</td>
                     <td class="num"><strong>{{ "%.2f"|format(row.total_amount) }}</strong></td>
                     <td>{{ row.currency_code }}</td>
                 </tr>
                 <tr id="lines-row-{{ row.id }}">
-                    <td colspan="11" style="padding:0;">
+                    <td colspan="12" style="padding:0;">
                         <div class="bill-lines-panel" id="lines-panel-{{ row.id }}">
                             <div id="lines-content-{{ row.id }}"><em style="font-size:10px;color:var(--text-secondary);">Loading…</em></div>
                         </div>
@@ -395,7 +398,8 @@ async function toggleBillLines(billId, btn) {
         let html = `<table class="bill-lines-table"><thead><tr>
             <th>#</th><th>Service</th><th>Description</th><th>Qty</th><th>UOM</th>
             <th class="num">Rate</th><th class="num">Amount</th><th class="num">CGST</th>
-            <th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th><th>SAC</th>
+            <th class="num">SGST</th><th class="num">IGST</th><th class="num">TDS</th>
+            <th class="num">TCS</th><th class="num">Total</th><th>SAC</th>
         </tr></thead><tbody>`;
         lines.forEach((ln, i) => {
             html += `<tr>
@@ -406,6 +410,8 @@ async function toggleBillLines(billId, btn) {
                 <td class="num">${Number(ln.cgst_amount||0).toFixed(2)}</td>
                 <td class="num">${Number(ln.sgst_amount||0).toFixed(2)}</td>
                 <td class="num">${Number(ln.igst_amount||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.tds_amount||0).toFixed(2)}</td>
+                <td class="num">${Number(ln.tcs_amount||0).toFixed(2)}</td>
                 <td class="num"><strong>${Number(ln.line_total||0).toFixed(2)}</strong></td>
                 <td>${ln.sac_code||''}</td>
             </tr>`;
