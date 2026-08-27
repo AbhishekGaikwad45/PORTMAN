@@ -388,8 +388,8 @@ def revenue_report_data():
     conn = get_db()
     cur = get_cursor(conn)
 
-    where = []
-    params = []
+    where = ["ih.id >= %s"]
+    params = [158]
 
     if month:
         where.append("EXTRACT(MONTH FROM ih.invoice_date::date) = %s")
@@ -469,7 +469,7 @@ LEFT JOIN LATERAL (
 
 {where_sql}
 
-ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
+ORDER BY ih.invoice_number ASC
 """, params)
 
     rows = [dict(r) for r in cur.fetchall()]
