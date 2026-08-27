@@ -8,7 +8,21 @@
     <label for="fy-select">Financial Year:</label>
     <select id="fy-select"></select>
     <span id="save-status" class="save-status"></span>
+    <button id="suggest-btn" class="btn-suggest">Suggest targets</button>
     <button id="save-btn" class="btn-save">Save</button>
+  </div>
+
+  <div id="sg-panel" class="sg-panel" hidden>
+    <div class="sg-head">
+      <strong>Suggested FY targets</strong>
+      <span class="sg-sub" id="sg-sub"></span>
+      <button class="sg-x" id="sg-close" aria-label="Close">×</button>
+    </div>
+    <div id="sg-list" class="sg-list"></div>
+    <div class="sg-foot">
+      <span class="sg-note" id="sg-note"></span>
+      <button id="sg-apply" class="btn-save" disabled>Apply to grid</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -54,6 +68,49 @@
   .btn-save:disabled { background:#94a3b8; cursor:default; }
   .save-status { font-size:13px; color:#0f766e; margin-left:6px; min-width:110px; }
   .save-status.error { color:#dc2626; }
+
+  .btn-suggest {
+    margin-left:auto; background:#fff; color:#0f766e; border:1px solid #0f766e;
+    border-radius:4px; padding:8px 16px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .btn-suggest:hover { background:#f0fdfa; }
+  .btn-suggest:disabled { color:#94a3b8; border-color:#cbd5e1; cursor:default; }
+  .targets-toolbar .btn-save { margin-left:0; }
+
+  .sg-panel {
+    background:#fff; border:1px solid #99f6e4; border-left:4px solid #0f766e;
+    border-radius:6px; padding:0 0 14px; margin-bottom:20px;
+    box-shadow:0 6px 20px rgba(15,118,110,.10);
+  }
+  .sg-head {
+    display:flex; align-items:center; gap:10px; padding:12px 16px;
+    border-bottom:1px solid #e2e8f0;
+  }
+  .sg-head strong { font-size:15px; }
+  .sg-sub { font-size:12px; color:#64748b; }
+  .sg-x {
+    margin-left:auto; border:0; background:transparent; font-size:20px;
+    line-height:1; color:#64748b; cursor:pointer; padding:0 4px;
+  }
+  .sg-list {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    gap:10px; padding:14px 16px 4px;
+  }
+  .sg-opt {
+    border:1px solid #e2e8f0; border-radius:6px; padding:11px 13px; cursor:pointer;
+    display:block;
+  }
+  .sg-opt:hover { border-color:#5eead4; background:#f8fffe; }
+  .sg-opt.on { border-color:#0f766e; background:#f0fdfa; box-shadow:0 0 0 1px #0f766e inset; }
+  .sg-opt input { margin-right:7px; }
+  .sg-opt .sg-t { font-size:20px; font-weight:700; color:#0f172a; margin:5px 0 3px; }
+  .sg-opt .sg-l { font-size:13px; font-weight:600; color:#0f766e; }
+  .sg-opt .sg-n { font-size:11.5px; color:#64748b; line-height:1.45; }
+  .sg-foot {
+    display:flex; align-items:center; gap:12px; padding:10px 16px 0;
+  }
+  .sg-note { font-size:11.5px; color:#64748b; line-height:1.5; flex:1; }
+  .sg-warn { color:#b45309; }
 
   .panel {
     background:#fff; border:1px solid #e2e8f0; border-radius:6px;
@@ -323,12 +380,104 @@
     }
   }
 
+  // ---------- suggestions ----------
+  // Fills the category grid from a seasonality-aware proposal. Never saves —
+  // the user reviews the filled grid and hits Save, same as a manual edit.
+  let sg = null, sgPick = null;
+
+  function sgClose() { document.getElementById('sg-panel').hidden = true; }
+
+  async function sgOpen() {
+    const btn = document.getElementById('suggest-btn');
+    const panel = document.getElementById('sg-panel');
+    const list = document.getElementById('sg-list');
+    panel.hidden = false;
+    list.innerHTML = '<div class="sg-note">Working out a realistic target…</div>';
+    document.getElementById('sg-apply').disabled = true;
+    document.getElementById('sg-note').textContent = '';
+    btn.disabled = true;
+    try {
+      const res = await fetch(API + '/suggest?fy=' + encodeURIComponent(state.financial_year));
+      sg = await res.json();
+    } catch (e) {
+      sg = { available: false, reason: 'Could not reach the server.' };
+    } finally {
+      btn.disabled = false;
+    }
+
+    if (!sg.available) {
+      list.innerHTML = `<div class="sg-note">${sg.reason || 'No suggestion available.'}</div>`;
+      return;
+    }
+
+    document.getElementById('sg-sub').textContent = 'FY ' + sg.financial_year;
+    sgPick = sg.anchors.some(a => a.key === sg.default) ? sg.default : sg.anchors[0].key;
+    list.innerHTML = sg.anchors.map(a => `
+      <label class="sg-opt${a.key === sgPick ? ' on' : ''}" data-k="${a.key}">
+        <input type="radio" name="sg" value="${a.key}" ${a.key === sgPick ? 'checked' : ''}>
+        <span class="sg-l">${a.label}</span>
+        <div class="sg-t">${fmtINR(a.total)} MT</div>
+        <div class="sg-n">${a.note}</div>
+      </label>`).join('');
+
+    list.querySelectorAll('.sg-opt').forEach(el => {
+      el.addEventListener('click', () => {
+        sgPick = el.dataset.k;
+        list.querySelectorAll('.sg-opt').forEach(o => o.classList.toggle('on', o === el));
+        el.querySelector('input').checked = true;
+      });
+    });
+
+    const mix = Object.entries(sg.mix || {})
+      .filter(([, v]) => v > 0)
+      .map(([c, v]) => `${c} ${(v * 100).toFixed(1)}%`).join(' · ');
+    document.getElementById('sg-note').innerHTML =
+      `Split across months by this port's monsoon seasonality — July carries
+       ${(sg.month_share['7'] * 100).toFixed(1)}% of the year, March
+       ${(sg.month_share['3'] * 100).toFixed(1)}%.` +
+      (mix ? ` Cargo mix from FY ${sg.mix_fy}: ${mix}.` : ' No cargo mix available.') +
+      (sg.mix_is_partial
+        ? ` <span class="sg-warn">That FY is still in progress, so the mix may shift.</span>` : '') +
+      ` Nothing is saved until you press Save.`;
+    document.getElementById('sg-apply').disabled = false;
+  }
+
+  function sgApply() {
+    if (!sg || !sg.available || !sgPick) return;
+    const picked = sg.anchors.find(a => a.key === sgPick);
+    if (!picked) return;
+    const byMonth = {};
+    picked.months.forEach(m => { byMonth[m.month_num] = m; });
+
+    state.targets.forEach(row => {
+      const m = byMonth[row.month_num];
+      if (!m) return;
+      state.categories.forEach(cat => {
+        const c = row.categories[cat] || (row.categories[cat] = { base: 0, outlook: null });
+        c.base = m.categories[cat] || 0;   // outlook left alone — it's a separate call
+      });
+    });
+
+    computeMonthsFromCategories();
+    renderMonthGrid();
+    renderCategoryList();
+    markDirty();
+    sgClose();
+    document.getElementById('save-status').textContent =
+      'Suggestion applied — review, then Save';
+  }
+
+  document.getElementById('suggest-btn').addEventListener('click', sgOpen);
+  document.getElementById('sg-close').addEventListener('click', sgClose);
+  document.getElementById('sg-apply').addEventListener('click', sgApply);
+
   document.getElementById('save-btn').addEventListener('click', save);
   document.getElementById('fy-select').addEventListener('change', (e) => {
     if (dirty && !confirm('You have unsaved changes. Switch financial year anyway?')) {
       e.target.value = state.financial_year;
       return;
     }
+    sgClose();          // a suggestion is per-FY — don't leave a stale one open
     loadFor(e.target.value);
   });
 

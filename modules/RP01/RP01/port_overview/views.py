@@ -767,6 +767,42 @@ def port_overview_data():
         'as_of':       now.strftime('%Y-%m-%d %H:%M:%S'),
     })
 
+@bp.route('/api/module/RP01/port-overview/forecast')
+@login_required
+def port_overview_forecast():
+    """Throughput forecast + P(hit target) for the FY or the current month.
+
+    The target is resolved here (Outlook-aware, same as the cargo cards) and
+    passed down, so forecast.py stays independent of the targets table.
+    """
+    # Imported lazily, and guarded: forecast.py is the only thing in this
+    # codebase that needs numpy, and there is no requirements.txt pinning it.
+    # A host without it should show a clear message in the modal, not 500 —
+    # and the rest of the dashboard must stay up regardless.
+    try:
+        from . import forecast as fc
+    except ImportError as e:
+        return jsonify({'available': False,
+                        'reason': f'Forecast needs numpy on this server ({e}).'})
+
+    scope = (request.args.get('scope') or 'fy').lower()
+    if scope not in ('fy', 'month'):
+        scope = 'fy'
+
+    today = _operational_date()
+    fy = fy_label(today.year if today.month >= 4 else today.year - 1)
+    target = (_fy_target_totals(fy)[1] if scope == 'fy'
+              else _month_target(fy, today.month))
+
+    # Fixed seed: at 5,000 sims the Monte Carlo error on a probability is ~0.7pp,
+    # so an unseeded run makes the headline wobble a point between refreshes on
+    # identical data. Same inputs must give the same number.
+    out = fc.forecast(scope, target, today, seed=0)
+    out['accuracy'] = fc.accuracy()
+    out['fy_label'] = fy
+    return jsonify(out)
+
+
 # ---------------------------------------------------------------------------
 # Targets (FY monthly ABP + Outlook, with category-wise breakdown)
 # ---------------------------------------------------------------------------
@@ -1010,6 +1046,35 @@ def port_overview_targets_get():
         'targets': _load_fy_targets(financial_year),
         'totals': _fy_target_totals(financial_year),
     })
+
+
+@bp.route('/api/module/RP01/port-overview/targets/suggest')
+@login_required
+def port_overview_targets_suggest():
+    """Seasonality-aware target proposals for a FY, split by month and category.
+
+    Returns several anchors (repeat last year / trend / on current form /
+    committed floor) rather than one number — picking the FY commitment is the
+    user's call. Nothing is saved; the client fills the grid and the user
+    reviews and saves as usual.
+    """
+    try:
+        from . import forecast as fc
+    except ImportError as e:
+        return jsonify({'available': False,
+                        'reason': f'Suggestions need numpy on this server ({e}).'})
+
+    today = date.today()
+    default_fy = fy_label(today.year if today.month >= 4 else today.year - 1)
+    financial_year = (request.args.get('fy') or default_fy).strip()
+    try:
+        fy_start = int(financial_year.split('-')[0])
+    except (ValueError, IndexError):
+        return jsonify({'available': False, 'reason': f'Bad financial year {financial_year!r}.'})
+
+    out = fc.suggest(fy_start, today=_operational_date())
+    out['financial_year'] = financial_year
+    return jsonify(out)
 
 
 @bp.route('/api/module/RP01/port-overview/targets', methods=['POST'])

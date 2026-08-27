@@ -7,6 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Highcharts, served locally (no CDN round-trip). highcharts-more supplies
+     the arearange series the forecast band uses. -->
+<script src="{{ url_for('static', filename='vendor/highcharts.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts-more.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/highcharts-accessibility.min.js') }}"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -428,6 +433,74 @@ html, body {
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--border-2); border-radius:10px; }
 ::-webkit-scrollbar-thumb:hover { background:var(--text3); }
+
+/* ── Forecast modal ──────────────────────────────────────── */
+#fc-back {
+  position:fixed; inset:0; z-index:3000; display:none;
+  background:rgba(11,46,119,.42); backdrop-filter:blur(3px);
+  align-items:center; justify-content:center; padding:24px;
+}
+#fc-back.on { display:flex; }
+#fc-modal {
+  background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-lg);
+  width:min(1080px,100%); max-height:100%; display:flex; flex-direction:column;
+  overflow:hidden; animation:fc-in .18s ease-out;
+}
+@keyframes fc-in { from { opacity:0; transform:translateY(8px) scale(.99); } }
+.fc-hdr {
+  display:flex; align-items:center; gap:12px; padding:14px 18px;
+  background:var(--ocean-deep); color:#fff;
+}
+.fc-hdr h2 { font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600; letter-spacing:.2px; }
+.fc-hdr .sub { font-size:10.5px; color:rgba(255,255,255,.6); font-family:'JetBrains Mono',monospace; }
+.fc-seg { display:flex; gap:0; margin-left:auto; border:1px solid rgba(255,255,255,.28); border-radius:20px; overflow:hidden; }
+.fc-seg button {
+  border:0; background:transparent; color:rgba(255,255,255,.75); cursor:pointer;
+  font:600 10.5px/1 'Inter',sans-serif; letter-spacing:.5px; text-transform:uppercase; padding:7px 15px;
+}
+.fc-seg button.on { background:#3EF0C8; color:var(--ocean-deep); }
+.fc-x {
+  border:0; background:rgba(255,255,255,.12); color:#fff; cursor:pointer;
+  width:28px; height:28px; border-radius:8px; font-size:16px; line-height:1;
+}
+.fc-x:hover { background:rgba(255,255,255,.24); }
+.fc-body { padding:18px; overflow:auto; display:flex; flex-direction:column; gap:16px; }
+
+.fc-top { display:flex; gap:18px; align-items:stretch; flex-wrap:wrap; }
+.fc-prob {
+  flex:0 0 210px; border-radius:var(--r-md); padding:16px 18px; text-align:center;
+  border:1px solid var(--border-2); background:var(--surface-2);
+}
+.fc-prob .n { font-family:'Space Grotesk',sans-serif; font-size:52px; font-weight:700; line-height:1; }
+.fc-prob .c { font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:var(--text2); margin-top:7px; }
+.fc-prob .bar { height:6px; border-radius:4px; background:var(--border); margin-top:11px; overflow:hidden; }
+.fc-prob .bar i { display:block; height:100%; border-radius:4px; }
+
+.fc-stats { flex:1; display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:9px; min-width:340px; }
+.fc-stat { border:1px solid var(--border); border-radius:var(--r-sm); padding:9px 11px; background:var(--surface-2); }
+.fc-stat .k { font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text3); }
+.fc-stat .v { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; color:var(--text); margin-top:3px; }
+.fc-stat .u { font-size:9.5px; color:var(--text3); font-weight:500; }
+
+#fc-chart { height:310px; }
+
+.fc-scen { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.fc-card { border:1px solid var(--border); border-left-width:3px; border-radius:var(--r-sm); padding:10px 12px; }
+.fc-card .k { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+.fc-card .v { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:600; color:var(--text); margin-top:3px; }
+.fc-card .d { font-size:10.5px; color:var(--text2); margin-top:2px; }
+.fc-card.pess { border-left-color:var(--coral); } .fc-card.pess .k { color:var(--coral); }
+.fc-card.exp  { border-left-color:var(--ocean); } .fc-card.exp  .k { color:var(--ocean); }
+.fc-card.opt  { border-left-color:var(--green); } .fc-card.opt  .k { color:var(--green); }
+
+.fc-note {
+  font-size:10.5px; color:var(--text2); line-height:1.55;
+  border-top:1px dashed var(--border-2); padding-top:11px;
+}
+.fc-note b { color:var(--text); font-weight:600; }
+.fc-msg { padding:40px 20px; text-align:center; color:var(--text2); font-size:13px; }
+#hdr-fyend { cursor:pointer; }
+#hdr-fyend:hover { background:rgba(255,255,255,.2); }
 </style>
 </head>
 <body>
@@ -438,7 +511,9 @@ html, body {
   <div class="hdr-tag">RP01</div>
   <div class="hdr-live"><div class="hdr-live-dot"></div>Port Overview</div>
   <div class="hdr-flex"></div>
-  <div class="hdr-shift hdr-fyend" id="hdr-fyend">
+  <div class="hdr-shift hdr-fyend" id="hdr-fyend" role="button" tabindex="0"
+       title="Open throughput forecast"
+       onclick="openForecast()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openForecast();}">
     <span class="hdr-fyend-icon">⏳</span>
     <span class="hdr-fyend-text">
       <span class="hdr-shift-name" id="hdr-fyend-days">— days</span>
@@ -1069,6 +1144,208 @@ setInterval(() => {
 }, 1000);
 
 loadData();
+
+/* ── Forecast modal ──────────────────────────────────────────
+   Monte-Carlo forecast of the FY / month total, from the model in
+   port_overview/forecast.py. Fetched on open and on scope change only —
+   it is not part of the dashboard's polling loop.                       */
+let fcScope = 'fy', fcChart = null;
+
+function openForecast() {
+  document.getElementById('fc-back').classList.add('on');
+  loadForecast(fcScope);
+}
+function closeForecast() {
+  document.getElementById('fc-back').classList.remove('on');
+  if (fcChart) { fcChart.destroy(); fcChart = null; }
+}
+function setForecastScope(s) {
+  if (s === fcScope) return;
+  fcScope = s;
+  document.querySelectorAll('.fc-seg button').forEach(b =>
+    b.classList.toggle('on', b.dataset.scope === s));
+  loadForecast(s);
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeForecast();
+});
+
+// Reuses the dashboard's fmtNum, but shows an unset target as '—' rather than
+// the '0' fmtNum returns — "0 MT" reads as a real target of zero.
+const fcMT = n => (n === null || n === undefined) ? '—' : fmtNum(n);
+const fcM  = n => (n === null || n === undefined) ? '—' : (n / 1e6).toFixed(2) + 'M';
+
+function fcMsg(html) {
+  document.getElementById('fc-content').style.display = 'none';
+  const m = document.getElementById('fc-message');
+  m.style.display = 'block';
+  m.innerHTML = html;
+}
+
+function loadForecast(scope) {
+  fcMsg('Running simulation…');
+  fetch(`/api/module/RP01/port-overview/forecast?scope=${scope}`)
+    .then(r => r.json())
+    .then(renderForecast)
+    .catch(e => {
+      console.error('Forecast error:', e);
+      fcMsg('Could not load the forecast.');
+    });
+}
+
+function renderForecast(d) {
+  if (!d.available) {
+    fcMsg(d.reason || 'Forecast unavailable.');
+    return;
+  }
+  document.getElementById('fc-message').style.display = 'none';
+  document.getElementById('fc-content').style.display = 'flex';
+
+  const label = d.scope === 'fy' ? `FY ${d.fy_label}` : 'This month';
+  document.getElementById('fc-sub').textContent =
+    `${label} · ${d.period.start} → ${d.period.end} · actuals to ${d.as_of}`;
+
+  // Probability headline. Green / amber / coral by how likely the target is.
+  const p = d.p_hit;
+  const pn = document.getElementById('fc-prob-n');
+  const pc = document.getElementById('fc-prob-c');
+  const pb = document.getElementById('fc-prob-b');
+  if (p === null || p === undefined) {
+    pn.textContent = '—'; pn.style.color = 'var(--text3)';
+    pc.textContent = 'No target set';
+    pb.style.width = '0%';
+  } else {
+    const col = p >= .7 ? 'var(--green)' : p >= .4 ? 'var(--amber)' : 'var(--coral)';
+    pn.textContent = Math.round(p * 100) + '%';
+    pn.style.color = col;
+    pc.textContent = 'chance of hitting target';
+    pb.style.width = Math.max(2, p * 100) + '%';
+    pb.style.background = col;
+  }
+
+  const gap = d.target ? d.expected - d.target : null;
+  document.getElementById('fc-stats').innerHTML = [
+    ['Target',          fcMT(d.target),          'MT'],
+    ['Achieved',        fcMT(d.achieved),        'MT'],
+    ['Days left',       d.days_left,             ''],
+    ['Required / day',  fcMT(d.required_daily),  'MT'],
+    ['Forecast / day',  fcMT(d.forecast_daily),  'MT'],
+    ['Last 60d actual', fcMT(d.daily_rate),      'MT/day'],
+  ].map(([k, v, u]) =>
+    `<div class="fc-stat"><div class="k">${k}</div>
+       <div class="v">${v} <span class="u">${u}</span></div></div>`).join('');
+
+  const vs = t => d.target ? `<div class="d">${t - d.target >= 0 ? '+' : '−'}${fcM(Math.abs(t - d.target))} vs target</div>` : '';
+  document.getElementById('fc-scen').innerHTML = `
+    <div class="fc-card pess"><div class="k">Pessimistic · P10</div>
+      <div class="v">${fcM(d.pessimistic)}</div>${vs(d.pessimistic)}</div>
+    <div class="fc-card exp"><div class="k">Expected · P50</div>
+      <div class="v">${fcM(d.expected)}</div>${vs(d.expected)}</div>
+    <div class="fc-card opt"><div class="k">Optimistic · P90</div>
+      <div class="v">${fcM(d.optimistic)}</div>${vs(d.optimistic)}</div>`;
+
+  const a = d.accuracy;
+  document.getElementById('fc-note').innerHTML = a
+    ? `Simulated 5,000 times from ${d.days_left} remaining days, using this port's
+       month-of-year seasonality and a level that drifts as much as it historically has.
+       <b>P10</b> is beaten 9 years in 10; <b>P90</b> only 1 in 10.
+       Track record — <i>full-year</i> forecasts from this model, re-run for
+       <b>${a.years}</b> past financial years from 31 July of each:
+       typical error <b>±${a.mae_pct}%</b>, bias <b>${a.bias_pct >= 0 ? '+' : ''}${a.bias_pct}%</b>,
+       and <b>${a.in_band} of ${a.years}</b> actual outturns landed inside the P10–P90 band.`
+    : `Simulated 5,000 times from ${d.days_left} remaining days.`;
+
+  drawForecastChart(d);
+}
+
+function drawForecastChart(d) {
+  const ms = s => Date.parse(s + 'T00:00:00Z');
+  const actual = (d.actual || []).map(r => [ms(r.d), r.v]);
+  // Join the forecast onto the last actual point so the lines meet.
+  const tail = actual.length ? [actual[actual.length - 1]] : [];
+  const line = pts => tail.concat((pts || []).map(r => [ms(r.d), r.v]));
+  const lo = d.p10 || [], hi = d.p90 || [];
+  const band = (tail.length ? [[tail[0][0], tail[0][1], tail[0][1]]] : [])
+    .concat(lo.map((r, i) => [ms(r.d), r.v, (hi[i] || r).v]));
+
+  if (fcChart) fcChart.destroy();
+  fcChart = Highcharts.chart('fc-chart', {
+    chart: { spacing: [8, 4, 4, 4], style: { fontFamily: 'Inter, sans-serif' } },
+    title: { text: null }, credits: { enabled: false },
+    accessibility: {
+      description: `Cumulative throughput for ${d.scope === 'fy' ? 'the financial year' : 'the month'},` +
+                   ` actual to ${d.as_of} then forecast to ${d.period.end}.`
+    },
+    legend: { itemStyle: { fontSize: '11px', fontWeight: '600', color: '#51607A' } },
+    xAxis: { type: 'datetime', lineColor: '#D2DAE6', tickColor: '#D2DAE6',
+             labels: { style: { fontSize: '10px', color: '#97A2B7' } },
+             plotLines: tail.length ? [{
+               value: tail[0][0], color: '#97A2B7', width: 1, dashStyle: 'Dot',
+               label: { text: 'today', rotation: 0, y: 12,
+                        style: { fontSize: '9px', color: '#97A2B7' } } }] : [] },
+    yAxis: {
+      title: { text: 'Cumulative MT', style: { fontSize: '10px', color: '#97A2B7' } },
+      gridLineColor: '#EDF1F7',
+      labels: { formatter() { return (this.value / 1e6).toFixed(1) + 'M'; },
+                style: { fontSize: '10px', color: '#97A2B7' } },
+      plotLines: d.target ? [{
+        value: d.target, color: '#D6482F', width: 2, dashStyle: 'Dash', zIndex: 5,
+        label: { text: 'Target ' + (d.target / 1e6).toFixed(2) + 'M', align: 'right', x: -6, y: -6,
+                 style: { fontSize: '10px', fontWeight: '600', color: '#D6482F' } } }] : []
+    },
+    tooltip: {
+      shared: true, valueDecimals: 0,
+      xDateFormat: '%e %b %Y',
+      pointFormatter() {
+        return `<span style="color:${this.color}">●</span> ${this.series.name}: <b>` +
+               (this.high !== undefined
+                  ? (this.low / 1e6).toFixed(2) + 'M – ' + (this.high / 1e6).toFixed(2) + 'M'
+                  : (this.y / 1e6).toFixed(2) + 'M') + '</b><br/>';
+      }
+    },
+    plotOptions: { series: { marker: { enabled: false }, animation: false } },
+    series: [
+      { name: 'P10 – P90 range', type: 'arearange', data: band,
+        color: '#1955E0', fillOpacity: .13, lineWidth: 0, zIndex: 0 },
+      { name: 'Forecast (P50)', type: 'line', data: line(d.p50),
+        color: '#1955E0', dashStyle: 'ShortDash', lineWidth: 2, zIndex: 2 },
+      { name: 'Actual', type: 'line', data: actual,
+        color: '#0B2E77', lineWidth: 2.5, zIndex: 3 }
+    ]
+  });
+}
 </script>
+
+<div id="fc-back" onclick="if(event.target===this)closeForecast()">
+  <div id="fc-modal" role="dialog" aria-modal="true" aria-label="Throughput forecast">
+    <div class="fc-hdr">
+      <div>
+        <h2>Throughput Forecast</h2>
+        <div class="sub" id="fc-sub">—</div>
+      </div>
+      <div class="fc-seg">
+        <button data-scope="fy"    class="on" onclick="setForecastScope('fy')">Financial year</button>
+        <button data-scope="month"           onclick="setForecastScope('month')">This month</button>
+      </div>
+      <button class="fc-x" onclick="closeForecast()" aria-label="Close">×</button>
+    </div>
+    <div class="fc-body">
+      <div class="fc-msg" id="fc-message">Running simulation…</div>
+      <div id="fc-content" style="display:none;flex-direction:column;gap:16px">
+        <div class="fc-top">
+          <div class="fc-prob">
+            <div class="n" id="fc-prob-n">—</div>
+            <div class="c" id="fc-prob-c">chance of hitting target</div>
+            <div class="bar"><i id="fc-prob-b"></i></div>
+          </div>
+          <div class="fc-stats" id="fc-stats"></div>
+        </div>
+        <div id="fc-chart"></div>
+        <div class="fc-scen" id="fc-scen"></div>
+        <div class="fc-note" id="fc-note"></div>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
