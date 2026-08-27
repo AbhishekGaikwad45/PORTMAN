@@ -177,12 +177,18 @@ def check_overlap():
     conn = get_db()
     cur = get_cursor(conn)
     try:
+        # entry_date is TEXT and blank on delay rows, so the cast has to be
+        # guarded by a CASE — see forecast.LUEU_DATE for the full story.
         cur.execute("""
             SELECT t.entry_date, t.total AS excel, l.q AS lueu
             FROM rp01_daily_throughput t
             JOIN (
-                SELECT entry_date::date AS d, SUM(COALESCE(quantity, 0)) AS q
-                FROM lueu_lines WHERE is_deleted IS NOT TRUE GROUP BY 1
+                SELECT d, SUM(q) AS q FROM (
+                    SELECT CASE WHEN entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                                THEN LEFT(entry_date, 10)::date END AS d,
+                           COALESCE(quantity, 0) AS q
+                    FROM lueu_lines WHERE is_deleted IS NOT TRUE
+                ) s WHERE d IS NOT NULL GROUP BY d
             ) l ON l.d = t.entry_date
             ORDER BY t.entry_date
         """)

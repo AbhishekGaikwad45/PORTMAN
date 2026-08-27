@@ -30,6 +30,16 @@ RATIO_POOL = 730    # how far back residuals are drawn from
 MIN_FY_DAYS = 300   # a partial FY can't contribute a seasonal shape
 DRIFT_STEP = 30     # horizon over which level drift is calibrated
 
+# lueu_lines.entry_date is TEXT, and delay rows are saved with it blank — a bare
+# `entry_date::date` therefore dies with "invalid input syntax for type date".
+# Other queries in RP01 get away with the bare cast only because they also
+# filter `quantity IS NOT NULL`, which happens to exclude those rows; anything
+# aggregating every row (as the forecast does) must guard the cast itself.
+# CASE is what makes it safe: it fixes evaluation order, where a WHERE filter
+# alongside the cast does not.
+LUEU_DATE = ("CASE WHEN entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
+             "THEN LEFT(entry_date, 10)::date END")
+
 
 def load_series():
     """(dates, totals) — seeded history, extended with live lueu_lines days."""
@@ -50,12 +60,15 @@ def load_series():
         # from lueu_lines (see views._fy_window) — reading only lueu_lines would
         # silently drop every future April. Where a date exists in both,
         # lueu_lines wins, so the two can never be double-counted.
-        cur.execute("""
+        cur.execute(f"""
             WITH live AS (
-                SELECT entry_date::date AS d, SUM(COALESCE(quantity, 0)) AS q
-                FROM lueu_lines
-                WHERE is_deleted IS NOT TRUE AND entry_date::date > %(after)s
-                GROUP BY 1
+                SELECT d, SUM(q) AS q FROM (
+                    SELECT {LUEU_DATE} AS d, COALESCE(quantity, 0) AS q
+                    FROM lueu_lines
+                    WHERE is_deleted IS NOT TRUE
+                ) s
+                WHERE d > %(after)s
+                GROUP BY d
             ), hist AS (
                 SELECT entry_date AS d, SUM(COALESCE(quantity, 0)) AS q
                 FROM rp01_historical_lueu
@@ -189,11 +202,11 @@ def category_mix(fy_start_year):
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        cur.execute("""
+        cur.execute(f"""
             SELECT UPPER(TRIM(COALESCE(vc.cargo_type, 'OTHERS'))) AS ct,
                    SUM(COALESCE(q, 0)) AS q
             FROM (
-                SELECT cargo_name, quantity AS q, entry_date::date AS d
+                SELECT cargo_name, quantity AS q, {LUEU_DATE} AS d
                 FROM lueu_lines WHERE is_deleted IS NOT TRUE
                 UNION ALL
                 SELECT cargo_name, quantity AS q, entry_date AS d
