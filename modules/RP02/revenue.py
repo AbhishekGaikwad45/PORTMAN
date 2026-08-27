@@ -241,16 +241,15 @@ def month_key(date_text):
     return (date_text or '')[:7]
 
 
-def replace_months(rows, uploaded_by):
-    """Replace stored rows for every month present in the file, in one
-    transaction. Other months are untouched. Returns (inserted, months)."""
+def replace_all(rows, uploaded_by):
+    """Clear the stored backdated rows and insert the file's, in one
+    transaction. A backdated register is maintained as one whole sheet, so an
+    upload is the new truth in full — not a merge. Returns (inserted, months)."""
     months = sorted({month_key(r['invoice_date']) for r in rows})
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        if months:
-            cur.execute('DELETE FROM %s WHERE left(COALESCE(invoice_date, %%s), 7) = ANY(%%s)'
-                        % TABLE, ['', months])
+        cur.execute('DELETE FROM %s' % TABLE)
         cols = COLUMNS + ['uploaded_by']
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
             TABLE, ', '.join(cols), ', '.join(['%s'] * len(cols)))

@@ -22,7 +22,7 @@
            style="background:#3182ce;color:white;padding:8px 16px;border-radius:4px;text-decoration:none;font-size:13px;">⬇ Download Template (CSV)</a>
         <input type="file" id="rb-file" accept=".csv,.xlsx" style="font-size:13px;">
         <button class="btn" onclick="rbPreview()" style="background:#805ad5;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;">Preview</button>
-        <button class="btn" id="rb-apply" onclick="rbApply()" disabled style="background:#48bb78;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;opacity:0.5;">Apply (Replace Month)</button>
+        <button class="btn" id="rb-apply" onclick="rbApply()" disabled style="background:#48bb78;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px;opacity:0.5;">Apply (Replace All)</button>
     </div>
     {% else %}
     <div style="color:#718096;font-size:12px;margin-bottom:16px;">You have read-only access — uploading requires add/edit permission on RP02.</div>
@@ -109,14 +109,15 @@ async function rbPreview() {
 async function rbApply() {
     if (!rbValid) return;
     const f = rbFile(); if (!f) return;
-    if (!confirm(`This will REPLACE all stored backdated rows for ${rbMonths.join(', ') || '(unknown)'} with this file. Continue?`)) return;
+    if (!confirm(`This DELETES every stored backdated row and replaces them with this file`
+                 + ` (${rbMonths.join(', ') || 'no month'}). Continue?`)) return;
     const fd = new FormData(); fd.append('file', f);
     const res = await fetch('/api/module/RP02/revenue-backdated/apply', {method:'POST', body:fd});
     const d = await res.json();
     if (d.error) { alert(d.error + (d.format_errors ? '\n' + d.format_errors.slice(0,10).map(e=>`Row ${e.row}: ${e.message}`).join('\n') : '')); return; }
     document.getElementById('rb-result').innerHTML =
         `<div style="background:#c6f6d5;color:#276749;padding:10px 14px;border-radius:4px;">
-            ✓ Replaced ${(d.months||[]).join(', ')} — ${d.inserted} row(s) inserted.</div>`;
+            ✓ Replaced the whole dataset — ${d.inserted} row(s) inserted${(d.months||[]).length ? ', covering ' + (d.months||[]).join(', ') : ''}.</div>`;
     rbReloadGrid();
 }
 
