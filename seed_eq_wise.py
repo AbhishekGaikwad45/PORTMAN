@@ -1,5 +1,6 @@
 """Seed rp01_daily_throughput from the 'Eq Wise.xlsx' daily equipment sheet.
 
+    python -m alembic upgrade head           # creates the table (rp01dailythr01)
     python seed_eq_wise.py "C:/Users/Shubham/Downloads/Eq Wise.xlsx"
 
 The sheet is chronological but has a known defect: one FY's block was entered
@@ -127,15 +128,17 @@ def fix_excel(src, dst):
     return out
 
 
-def ensure_table(cur):
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS rp01_daily_throughput (
-            entry_date DATE PRIMARY KEY,
-            equipment  JSONB,
-            total      NUMERIC(14,3) NOT NULL,
-            updated_at TIMESTAMP DEFAULT NOW()
-        )
-    """)
+def require_table(cur):
+    """The table is owned by alembic revision rp01dailythr01, not by this script.
+
+    A data-loading tool has no business creating schema — that is how a table
+    ends up on a database nobody migrated. Fail with the fix instead.
+    """
+    cur.execute("SELECT to_regclass('rp01_daily_throughput') AS t")
+    if not cur.fetchone()['t']:
+        raise SystemExit(
+            "rp01_daily_throughput does not exist.\n"
+            "Run the migration first:  python -m alembic upgrade head")
 
 
 def seed(path):
@@ -145,7 +148,7 @@ def seed(path):
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        ensure_table(cur)
+        require_table(cur)
         for d, total, eq in rows:
             cur.execute("""
                 INSERT INTO rp01_daily_throughput (entry_date, equipment, total)
