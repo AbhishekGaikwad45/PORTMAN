@@ -521,9 +521,26 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
 
         out.append({
             'invoice_no': r.get('invoice_number') or '',
-            'group_type': '',
-            'revenue_type_1': '',
-            'revenue_type_2': '',
+            'group_type': (
+                'Group'
+                if any(x in str(r.get('customer_name') or '').lower()
+                       for x in ('jsw', 'amba'))
+                else 'Non Group'
+            ),
+            'revenue_type_1': (
+                'Scrap'
+                if 'scrap' in str(r.get('grouping') or '').lower()
+                else 'Operation'
+            ),
+            'revenue_type_2': (
+                'Scrap'
+                if 'scrap' in str(r.get('grouping') or '').lower()
+                else 'Wharfage'
+                if 'wharfage' in str(r.get('grouping') or '').lower()
+                else 'Berth Hiri'
+                if 'berth hire' in str(r.get('grouping') or '').lower()
+                else 'Cargo Handling'
+            ),
             'cargo_volume': '',
 
             'date': str(inv_date)[:10] if inv_date else '',
@@ -531,7 +548,7 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
             'cust_code': r.get('sap_customer_code') or r.get('customer_gl_code') or '',
             'customer_name': r.get('customer_name') or '',
             'gl_code': gl_code,
-            'grouping': r.get('service_name') or '',
+            'grouping': r.get('grouping') or '',
 
             'qty': r.get('quantity'),
             'rate': r.get('rate'),

@@ -15,11 +15,26 @@
             <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
             <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
-        <input id="rev-year" type="number" placeholder="Year (e.g. 2026)" style="padding:5px 8px;border-radius:4px;border:1px solid #cbd5e0;width:130px;">
-        <button class="btn" onclick="revReload()" style="background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Apply</button>
-        <button class="btn" onclick="revDownload()" style="margin-left:auto;background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">⬇ Download CSV</button>
-        <button class="btn" onclick="revGrid && revGrid.clearHeaderFilter()" style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">Clear filters</button>
+
+        <input id="rev-year" type="number" placeholder="Year (e.g. 2026)"
+               style="padding:5px 8px;border-radius:4px;border:1px solid #cbd5e0;width:130px;">
+
+        <button class="btn" onclick="revReload()"
+                style="background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">
+            Apply
+        </button>
+
+        <button class="btn" onclick="revDownload()"
+                style="margin-left:auto;background:#3182ce;color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">
+            ⬇ Download CSV
+        </button>
+
+        <button class="btn" onclick="revGrid && revGrid.clearHeaderFilter()"
+                style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:13px;">
+            Clear filters
+        </button>
     </div>
+
     <div id="rev-grid"></div>
     <div id="rev-status" style="font-size:11px;color:#718096;margin-top:6px;"></div>
 </div>
@@ -29,6 +44,89 @@ try { addToRecent('RP02', 'Finance Reports'); } catch(e) {}
 
 let revGrid = null;
 
+/*
+ * Save the three editable columns.
+ *
+ * Live rows:
+ *   /api/module/RP02/revenue/row/update
+ *
+ * Backdated rows:
+ *   /api/module/RP02/revenue-backdated/row/update
+ */
+async function saveRevenueRow(rowData) {
+    const isBackdated = String(rowData.source || '').toLowerCase() === 'backdated';
+
+    let payload;
+
+    if (isBackdated) {
+        // Backdated update_row expects the complete stored row.
+        payload = {
+            id: rowData.id,
+            invoice_no: rowData.invoice_no,
+            group_type: rowData.group_type,
+            revenue_type_1: rowData.revenue_type_1,
+            revenue_type_2: rowData.revenue_type_2,
+            cargo_volume: rowData.cargo_volume,
+            invoice_date: rowData.date,
+            cust_code: rowData.cust_code,
+            customer_name: rowData.customer_name,
+            gl_code: rowData.gl_code,
+            grouping_label: rowData.grouping,
+            qty: rowData.qty,
+            rate: rowData.rate,
+            tax_category: rowData.tax_category,
+            tax_rate: rowData.tax_rate,
+            basic_value: rowData.basic_value,
+            sgst: rowData.sgst,
+            cgst: rowData.cgst,
+            igst: rowData.igst,
+            invoice_value: rowData.invoice_value,
+            gstin: rowData.gstin,
+            sap_doc_no: rowData.sap_doc_no,
+            sac_code: rowData.sac_code,
+            hsn_code: rowData.hsn_code,
+            irn: rowData.irn,
+            ack_date: rowData.ack_date,
+            ack_no: rowData.ack_no,
+            barcode: rowData.barcode,
+            booking_status: rowData.booking_status,
+            tds_tcs: rowData.tds_tcs,
+            net_receivable: rowData.net_receivable
+        };
+    } else {
+        // Live update only needs the three editable values.
+        payload = {
+            id: rowData.id,
+            barcode: rowData.barcode || '',
+            cargo_volume: rowData.cargo_volume || '',
+            booking_status: rowData.booking_status || ''
+        };
+    }
+
+    const endpoint = isBackdated
+        ? '/api/module/RP02/revenue-backdated/row/update'
+        : '/api/module/RP02/revenue/row/update';
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    let result = {};
+    try {
+        result = await response.json();
+    } catch (e) {}
+
+    if (!response.ok || result.error) {
+        throw new Error(result.error || 'Unable to save changes');
+    }
+
+    return result;
+}
+
 function revInit() {
     revGrid = new Tabulator('#rev-grid', {
         layout: 'fitDataFill',
@@ -37,20 +135,95 @@ function revInit() {
         pagination: true,
         paginationSize: 100,
         paginationSizeSelector: [50, 100, 200, 500],
-        columnDefaults: {headerSort: true, headerFilter: 'input'},
+
+        columnDefaults: {
+            headerSort: true,
+            headerFilter: 'input'
+        },
+
         ajaxURL: '/api/module/RP02/revenue/data',
+
         ajaxResponse: (url, params, response) => {
             const rows = response.data || [];
             document.getElementById('rev-status').textContent = `${rows.length} row(s)`;
             return rows;
         },
+
+        /*
+         * Save whenever one of the three editable cells is changed.
+         */
+        cellEdited: async function(cell) {
+            const field = cell.getField();
+
+            if (!['barcode', 'cargo_volume', 'booking_status'].includes(field)) {
+                return;
+            }
+
+            const row = cell.getRow();
+            const rowData = row.getData();
+            const oldValue = cell.getOldValue();
+            const newValue = cell.getValue();
+
+            try {
+                document.getElementById('rev-status').textContent =
+                    'Saving change...';
+
+                await saveRevenueRow(rowData);
+
+                document.getElementById('rev-status').textContent =
+                    `${field.replace('_', ' ')} updated successfully`;
+
+                // Keep the latest value in the row.
+                row.update({
+                    [field]: newValue
+                });
+
+            } catch (error) {
+                console.error('Revenue update failed:', error);
+
+                // Revert the cell if the database update fails.
+                row.update({
+                    [field]: oldValue
+                });
+
+                document.getElementById('rev-status').textContent =
+                    `Save failed: ${error.message}`;
+
+                alert(`Unable to save ${field.replace('_', ' ')}.\n${error.message}`);
+            }
+        },
+
         columns: [
-            {title: 'Sr', formatter: 'rownum', width: 55, headerFilter: false, headerSort: false, frozen: true},
+            {
+                title: 'Sr',
+                formatter: 'rownum',
+                width: 55,
+                headerFilter: false,
+                headerSort: false,
+                frozen: true
+            },
+
             {title: 'Invoice No.', field: 'invoice_no', width: 140, frozen: true},
             {title: 'Group/Non group', field: 'group_type', width: 110},
             {title: 'Revenue type', field: 'revenue_type_1', width: 100},
             {title: 'Revenue type', field: 'revenue_type_2', width: 130},
-            {title: 'Cargo Volume', field: 'cargo_volume', width: 100},
+
+            /*
+             * EDITABLE
+             */
+            {
+                title: 'Cargo Volume',
+                field: 'cargo_volume',
+                width: 120,
+                editor: 'input',
+                editorParams: {
+                    elementAttributes: {
+                        maxlength: '100'
+                    }
+                },
+                cellEdited: undefined
+            },
+
             {title: 'Date', field: 'date', width: 100},
             {title: 'Cust Code', field: 'cust_code', width: 100},
             {title: 'Customer Name', field: 'customer_name', width: 180},
@@ -60,13 +233,33 @@ function revInit() {
             {title: 'Rate', field: 'rate', width: 90, hozAlign: 'right'},
             {title: 'Tax Category', field: 'tax_category', width: 100},
             {title: 'Tax Rate', field: 'tax_rate', width: 90},
-            {title: 'Basic Value (Rs.)', field: 'basic_value', width: 120, hozAlign: 'right',
-                formatter: c => c.getValue() != null ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''},
+
+            {
+                title: 'Basic Value (Rs.)',
+                field: 'basic_value',
+                width: 120,
+                hozAlign: 'right',
+                formatter: c =>
+                    c.getValue() != null
+                        ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2})
+                        : ''
+            },
+
             {title: 'SGST (Rs.)', field: 'sgst', width: 100, hozAlign: 'right'},
             {title: 'CGST (Rs.)', field: 'cgst', width: 100, hozAlign: 'right'},
             {title: 'IGST (Rs.)', field: 'igst', width: 100, hozAlign: 'right'},
-            {title: 'Invoice value (Rs.)', field: 'invoice_value', width: 130, hozAlign: 'right',
-                formatter: c => c.getValue() != null ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2}) : ''},
+
+            {
+                title: 'Invoice value (Rs.)',
+                field: 'invoice_value',
+                width: 130,
+                hozAlign: 'right',
+                formatter: c =>
+                    c.getValue() != null
+                        ? Number(c.getValue()).toLocaleString('en-IN', {minimumFractionDigits: 2})
+                        : ''
+            },
+
             {title: 'GSTIN', field: 'gstin', width: 140},
             {title: 'SAP Doc No', field: 'sap_doc_no', width: 110},
             {title: 'SAC CODE', field: 'sac_code', width: 90},
@@ -74,14 +267,44 @@ function revInit() {
             {title: 'IRN', field: 'irn', width: 140},
             {title: 'Ack Date', field: 'ack_date', width: 100},
             {title: 'Ack No', field: 'ack_no', width: 110},
-            {title: 'BARCODE', field: 'barcode', width: 110},
-            {title: 'BOOKING/PAYMENT STATUS', field: 'booking_status', width: 150},
+
+            /*
+             * EDITABLE
+             */
+            {
+                title: 'BARCODE',
+                field: 'barcode',
+                width: 130,
+                editor: 'input',
+                editorParams: {
+                    elementAttributes: {
+                        maxlength: '150'
+                    }
+                }
+            },
+
+            /*
+             * EDITABLE
+             */
+            {
+                title: 'BOOKING/PAYMENT STATUS',
+                field: 'booking_status',
+                width: 180,
+                editor: 'input',
+                editorParams: {
+                    elementAttributes: {
+                        maxlength: '100'
+                    }
+                }
+            },
+
             {title: 'TDS/TCS', field: 'tds_tcs', width: 90, hozAlign: 'right'},
             {title: 'NET RECEIVABLE', field: 'net_receivable', width: 130, hozAlign: 'right'},
             {title: 'Days', field: 'days', width: 70, hozAlign: 'right'},
             {title: 'Bucket', field: 'bucket', width: 80},
         ],
     });
+
     if (localStorage.getItem('theme') === 'dark')
         document.getElementById('rev-grid').classList.add('tabulator-dark');
 }
@@ -89,14 +312,18 @@ function revInit() {
 function revReload() {
     const month = document.getElementById('rev-month').value;
     const year = document.getElementById('rev-year').value;
+
     const qs = new URLSearchParams();
+
     if (month) qs.set('month', month);
     if (year) qs.set('year', year);
+
     revGrid.setData('/api/module/RP02/revenue/data?' + qs.toString());
 }
 
 function revDownload() {
-    if (revGrid) revGrid.download('csv', 'revenue_report.csv');
+    if (revGrid)
+        revGrid.download('csv', 'revenue_report.csv');
 }
 
 document.addEventListener('DOMContentLoaded', revInit);
