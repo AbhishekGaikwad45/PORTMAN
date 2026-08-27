@@ -108,7 +108,7 @@ def get_cargo_report():
 
             'INDIA' AS flag,
 
-            COALESCE(inv.invoice_numbers, 'NA') AS invoice_number,
+            COALESCE(inv.invoice_numbers, '') AS invoice_number,
 
             COALESCE(h.doc_status, '-') AS status
 
@@ -294,7 +294,7 @@ def get_cargo_report():
 
             COALESCE(v.nationality, '-') AS flag,
 
-            COALESCE(bln.bill_numbers, 'NA') AS bill_number,
+            COALESCE(inv_mv.invoice_numbers, '') AS invoice_number,
 
             COALESCE(vh.doc_status, '-') AS status
 
@@ -404,26 +404,29 @@ def get_cargo_report():
                LOWER(TRIM(vc.cargo_name))
 
 
-        LEFT JOIN (
+        /*
+        MV INVOICE LOOKUP:
+        VCN/MV source -> bill_lines.bill_id
+        -> invoice_lines.bill_id -> invoice_header.id
+        */
+        LEFT JOIN LATERAL (
             SELECT
-                bl.cargo_source_id,
-
                 STRING_AGG(
-                    DISTINCT bh.bill_number,
-                    ', '
-                ) AS bill_numbers
-
+                    DISTINCT ih.invoice_number,
+                    ', ' ORDER BY ih.invoice_number
+                ) AS invoice_numbers,
+                STRING_AGG(
+                    DISTINCT ih.invoice_status,
+                    ', ' ORDER BY ih.invoice_status
+                ) AS invoice_statuses
             FROM bill_lines bl
-
-            JOIN bill_header bh
-                ON bh.id = bl.bill_id
-
+            JOIN invoice_lines il
+                ON il.bill_id = bl.bill_id
+            JOIN invoice_header ih
+                ON ih.id = il.invoice_id
             WHERE bl.cargo_source_type = 'VCN_IMPORT'
-
-            GROUP BY bl.cargo_source_id
-
-        ) bln
-            ON bln.cargo_source_id = lh.id
+              AND bl.cargo_source_id = lh.id
+        ) inv_mv ON TRUE
 
 
         /*
@@ -474,7 +477,8 @@ def get_cargo_report():
             la.last_discharge_completed,
             v.nationality,
             mv.actual_discharge,
-            bln.bill_numbers,
+            inv_mv.invoice_numbers,
+            inv_mv.invoice_statuses,
             vh.doc_status
 
 
@@ -625,7 +629,7 @@ def get_cargo_report():
                 # Material PO -> bill_id -> invoice_lines -> invoice_header
                 # relationship for MBC records.
                 'invoice_number':
-                    row['invoice_number'] or 'NA',
+                    row['invoice_number'] or '',
 
                 'status':
                     row['status'] or '-',
@@ -783,7 +787,7 @@ def download_cargo_handling_report():
 
             COALESCE(v.nationality, '-') AS flag,
 
-            COALESCE(inv.invoice_numbers, 'NA') AS invoice_number,
+            COALESCE(inv.invoice_numbers, '') AS invoice_number,
 
             COALESCE(h.doc_status, '-') AS status
 
@@ -1033,10 +1037,7 @@ def download_cargo_handling_report():
             ) AS flag,
 
 
-            COALESCE(
-                bln.bill_numbers,
-                'NA'
-            ) AS bill_number,
+            COALESCE(inv_mv.invoice_numbers, '') AS invoice_number,
 
 
             COALESCE(
@@ -1196,35 +1197,29 @@ def download_cargo_handling_report():
 
 
 
-        LEFT JOIN (
+        /*
+        MV INVOICE LOOKUP:
+        VCN/MV source -> bill_lines.bill_id
+        -> invoice_lines.bill_id -> invoice_header.id
+        */
+        LEFT JOIN LATERAL (
             SELECT
-
-                bl.cargo_source_id,
-
                 STRING_AGG(
-                    DISTINCT bh.bill_number,
-                    ', '
-                ) AS bill_numbers
-
-
+                    DISTINCT ih.invoice_number,
+                    ', ' ORDER BY ih.invoice_number
+                ) AS invoice_numbers,
+                STRING_AGG(
+                    DISTINCT ih.invoice_status,
+                    ', ' ORDER BY ih.invoice_status
+                ) AS invoice_statuses
             FROM bill_lines bl
-
-
-            JOIN bill_header bh
-
-                ON bh.id = bl.bill_id
-
-
-            WHERE bl.cargo_source_type =
-                  'VCN_IMPORT'
-
-
-            GROUP BY
-                bl.cargo_source_id
-
-        ) bln
-
-            ON bln.cargo_source_id = lh.id
+            JOIN invoice_lines il
+                ON il.bill_id = bl.bill_id
+            JOIN invoice_header ih
+                ON ih.id = il.invoice_id
+            WHERE bl.cargo_source_type = 'VCN_IMPORT'
+              AND bl.cargo_source_id = lh.id
+        ) inv_mv ON TRUE
 
 
 
@@ -1290,7 +1285,8 @@ def download_cargo_handling_report():
 
             mv.actual_discharge,
 
-            bln.bill_numbers,
+            inv_mv.invoice_numbers,
+            inv_mv.invoice_statuses,
 
             vh.doc_status
 
@@ -1717,7 +1713,7 @@ def download_cargo_handling_report():
 
                 row['flag'] or '',
 
-                row['invoice_number'] or 'NA',
+                row['invoice_number'] or '',
 
                 row['status'] or '-'
 
