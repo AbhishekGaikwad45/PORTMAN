@@ -388,8 +388,8 @@ def revenue_report_data():
     conn = get_db()
     cur = get_cursor(conn)
 
-    where = ["ih.id >= %s"]
-    params = [158]
+    where = []
+    params = []
 
     if month:
         where.append("EXTRACT(MONTH FROM ih.invoice_date::date) = %s")
@@ -469,7 +469,7 @@ LEFT JOIN LATERAL (
 
 {where_sql}
 
-ORDER BY ih.invoice_number ASC
+ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
 """, params)
 
     rows = [dict(r) for r in cur.fetchall()]
@@ -628,7 +628,7 @@ def revenue_backdated_apply():
     if errors:
         return jsonify({'error': 'Fix format errors before applying',
                         'format_errors': errors}), 400
-    inserted, months = revenue.replace_all(rows, session.get('user_id'))
+    inserted, months = revenue.replace_months(rows, session.get('user_id'))
     return jsonify({'inserted': inserted, 'months': months})
 
 
