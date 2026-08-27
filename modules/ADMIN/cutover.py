@@ -197,9 +197,11 @@ def _apply_billed(cur, cargo_items, service_ids, billed):
         cargo_done += cur.rowcount
     for sid in service_ids or []:
         if billed:
-            cur.execute("UPDATE service_records SET is_billed=1 WHERE id=%s", [sid])
+            cur.execute("UPDATE service_records SET is_billed=1, "
+                        "billed_quantity=COALESCE(billable_quantity, 0) WHERE id=%s", [sid])
         else:
-            cur.execute("UPDATE service_records SET is_billed=0, bill_id=NULL WHERE id=%s", [sid])
+            cur.execute("UPDATE service_records SET is_billed=0, billed_quantity=0, "
+                        "bill_id=NULL WHERE id=%s", [sid])
         svc_done += cur.rowcount
     return {'cargo': cargo_done, 'services': svc_done}
 

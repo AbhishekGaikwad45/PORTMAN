@@ -160,6 +160,18 @@ def save_service_record(header_data, field_values):
     return record_id, header_data.get('record_number')
 
 
+def is_billed(record_id):
+    """True if record is billed in full or in part (locked from edit/delete)"""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''SELECT COALESCE(is_billed, 0) = 1
+                        OR COALESCE(billed_quantity, 0) > 0 AS locked
+                   FROM service_records WHERE id=%s''', [record_id])
+    row = cur.fetchone()
+    conn.close()
+    return bool(row and row['locked'])
+
+
 def delete_service_record(record_id):
     """Delete service record and its values (cascade)"""
     conn = get_db()
@@ -208,7 +220,9 @@ def get_unbilled_records_for_customer(customer_type, customer_id):
         FROM service_records sr
         JOIN finance_service_types st ON sr.service_type_id = st.id
         WHERE sr.source_type = %s AND sr.source_id = %s
-        AND sr.doc_status = 'Approved' AND sr.is_billed = 0
+        AND sr.doc_status = 'Approved' AND COALESCE(sr.is_billed, 0) = 0
+        AND (COALESCE(sr.billable_quantity, 0) <= 0
+             OR COALESCE(sr.billable_quantity, 0) - COALESCE(sr.billed_quantity, 0) > 0)
         ORDER BY sr.id
     ''', [customer_type, customer_id])
     rows = cur.fetchall()

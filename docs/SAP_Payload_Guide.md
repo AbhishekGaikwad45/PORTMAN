@@ -56,7 +56,7 @@ Every request/response is logged in `integration_logs` (viewable in FSAP01/FLOG0
 | `Reference` | 16 | `DPPL/26-27/166` | **PMS document number.** SAP matches everything back on this — see §7 |
 | `Document_type` | 2 | `DR` / `DG` | `DR` = Invoice & Debit Note, `DG` = Credit Note |
 | `Customer_Code` | 10 | `I510257` | SAP customer code from the party master |
-| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TDS − TCS + round-off**, always positive |
+| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TDS − TCS + round-off**, always positive. Built from the header's `subtotal`/`cgst`/`sgst`/`igst`, never from `total_amount` — that is a display total and already includes TCS. |
 | `Business_place` | 4 | `5130` | SAP config; defaults to company code |
 | `Section_code` | 4 | `5130` | SAP config; defaults to company code |
 | `Text` | 25 | invoice number | Short narration |

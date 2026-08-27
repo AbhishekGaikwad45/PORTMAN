@@ -101,6 +101,8 @@ def save():
 
     if data.get('id') and not perms['can_edit']:
         return jsonify({'success': False, 'error': 'No edit permission'})
+    if data.get('id') and model.is_billed(data['id']):
+        return jsonify({'success': False, 'error': 'Record is billed - cannot edit'})
     if not data.get('id') and not perms['can_add']:
         return jsonify({'success': False, 'error': 'No add permission'})
 
@@ -155,6 +157,8 @@ def delete():
         return jsonify({'success': False, 'error': 'No delete permission'})
 
     record_id = request.json.get('id')
+    if model.is_billed(record_id):
+        return jsonify({'success': False, 'error': 'Record is billed - cannot delete'})
     model.delete_service_record(record_id)
     return jsonify({'success': True})
 

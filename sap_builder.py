@@ -351,10 +351,15 @@ def _build_items(lines, reference, amount_field='line_amount',
 def _total_invoice_amount(header, lines, amount_field='line_amount'):
     """Return net invoice value (taxable + GST + TDS - TCS + Round_off).
 
-    `total_amount` in invoice headers stores taxable + GST only (verified in
-    FIN01/FDCN01 model layers), so TDS/TCS/round-off are added on top.
+    This is the documented PORTBIRD `Invoice_Amount` contract (SAP_Payload_Guide
+    §4). The taxable + GST base is rebuilt from the header's own components —
+    never from `total_amount`, which is a display total whose convention has
+    changed once already (it now includes TCS, which would double-count here).
     """
-    total = float(header.get('total_amount') or 0)
+    total = (float(header.get('subtotal') or 0)
+             + float(header.get('cgst_amount') or 0)
+             + float(header.get('sgst_amount') or 0)
+             + float(header.get('igst_amount') or 0))
     if not total:
         total  = sum(float(l.get(amount_field) or 0) for l in lines)
         total += sum(float(l.get('cgst_amount') or 0) for l in lines)

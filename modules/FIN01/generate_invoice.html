@@ -116,6 +116,7 @@
                     data-cgst="{{ row.cgst_amount }}"
                     data-sgst="{{ row.sgst_amount }}"
                     data-igst="{{ row.igst_amount }}"
+                    data-tcs="{{ row.tcs_amount or 0 }}"
                     data-total="{{ row.total_amount }}"
                     data-customer-id="{{ row.customer_id }}"
                     data-gstin="{{ row.customer_gstin or '' }}"
@@ -211,6 +212,10 @@
             <tr>
                 <td style="font-weight:600;">IGST</td>
                 <td style="text-align:right;"><span id="igst">0.00</span></td>
+            </tr>
+            <tr id="tcsRow" style="display:none;">
+                <td style="font-weight:600;">TCS Collected</td>
+                <td style="text-align:right;">(+) <span id="tcs">0.00</span></td>
             </tr>
             <tr>
                 <td style="font-weight:600;">Round Off</td>
@@ -353,6 +358,7 @@ function calculateTotals() {
     let cgst = 0;
     let sgst = 0;
     let igst = 0;
+    let tcs = 0;
 
     selected.forEach(cb => {
         const row = cb.closest('tr');
@@ -360,16 +366,19 @@ function calculateTotals() {
         cgst += parseFloat(row.dataset.cgst) || 0;
         sgst += parseFloat(row.dataset.sgst) || 0;
         igst += parseFloat(row.dataset.igst) || 0;
+        tcs += parseFloat(row.dataset.tcs) || 0;
     });
 
     const roundOff = parseFloat(document.getElementById('roundOff').value) || 0;
-    const total = subtotal + cgst + sgst + igst + roundOff;
+    const total = subtotal + cgst + sgst + igst + tcs + roundOff;
 
     document.getElementById('billCount').textContent = selected.length;
     document.getElementById('subtotal').textContent = subtotal.toFixed(2);
     document.getElementById('cgst').textContent = cgst.toFixed(2);
     document.getElementById('sgst').textContent = sgst.toFixed(2);
     document.getElementById('igst').textContent = igst.toFixed(2);
+    document.getElementById('tcs').textContent = tcs.toFixed(2);
+    document.getElementById('tcsRow').style.display = tcs > 0 ? '' : 'none';
     document.getElementById('totalAmount').textContent = total.toFixed(2);
 
     // Auto-calculate due date
@@ -427,6 +436,7 @@ async function generateInvoice() {
         cgst_amount: parseFloat(document.getElementById('cgst').textContent),
         sgst_amount: parseFloat(document.getElementById('sgst').textContent),
         igst_amount: parseFloat(document.getElementById('igst').textContent),
+        tcs_amount: parseFloat(document.getElementById('tcs').textContent),
         round_off: parseFloat(document.getElementById('roundOff').value),
         total_amount: parseFloat(document.getElementById('totalAmount').textContent),
         payment_terms: paymentTerms,

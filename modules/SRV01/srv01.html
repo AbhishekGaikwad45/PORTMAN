@@ -155,7 +155,7 @@
 
     <div style="margin-top: 15px; display: flex; gap: 5px;">
         {% if perms.can_add or perms.can_edit %}
-        <button class="btn btn-save" onclick="saveRecord()">Save</button>
+        <button class="btn btn-save" id="saveBtn" onclick="saveRecord()">Save</button>
         {% endif %}
         <button class="btn btn-cancel" onclick="hideEntryForm()">Cancel</button>
     </div>
@@ -215,16 +215,18 @@
             <td>
                 {% if row.is_billed %}
                 <span class="badge badge-billed">Billed</span>
+                {% elif row.billed_quantity %}
+                <span class="badge badge-pending">Part {{ '%.2f'|format(row.billed_quantity|float) }}</span>
                 {% else %}
                 -
                 {% endif %}
             </td>
             <td>
-                <button class="btn btn-save" onclick="editRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Edit</button>
+                <button class="btn btn-save" onclick="editRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">{{ 'View' if (row.is_billed or row.billed_quantity) else 'Edit' }}</button>
                 {% if is_approver and row.doc_status == 'Pending' %}
                 <button class="btn btn-approve" onclick="approveRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Approve</button>
                 {% endif %}
-                {% if perms.can_delete and not row.is_billed %}
+                {% if perms.can_delete and not row.is_billed and not row.billed_quantity %}
                 <button class="btn btn-delete" onclick="deleteRecord({{ row.id }})" style="font-size:10px; padding:3px 8px;">Del</button>
                 {% endif %}
             </td>
@@ -298,7 +300,16 @@ async function loadRefOptions() {
     });
 }
 
+function setReadOnly(ro) {
+    // ponytail: billed records are locked; server enforces it too, this is just the UI
+    const sb = document.getElementById('saveBtn');
+    if (sb) sb.style.display = ro ? 'none' : '';
+    document.querySelectorAll('#entryPanel input, #entryPanel select, #entryPanel textarea')
+        .forEach(el => el.disabled = ro);
+}
+
 function showEntryForm() {
+    setReadOnly(false);
     document.getElementById('entryPanel').style.display = 'block';
     document.getElementById('entryTitle').textContent = 'New Service Record';
     resetForm();
@@ -619,7 +630,9 @@ async function editRecord(recordId) {
     const h = json.header;
     currentRecordId = h.id;
     document.getElementById('editRecordId').value = h.id;
-    document.getElementById('entryTitle').textContent = 'Edit Service Record - ' + h.record_number;
+    const locked = !!(h.is_billed || parseFloat(h.billed_quantity || 0) > 0);
+    document.getElementById('entryTitle').textContent = (locked ? 'View Service Record (Billed) - ' : 'Edit Service Record - ') + h.record_number;
+    setReadOnly(locked);
     document.getElementById('recordNumber').value = h.record_number;
     document.getElementById('recordDate').value = h.record_date || '';
     document.getElementById('docStatus').value = h.doc_status || 'Pending';

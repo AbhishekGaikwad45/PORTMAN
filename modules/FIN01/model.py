@@ -122,6 +122,45 @@ def _unmark_cargo_source_billed(cur, cargo_source_type, cargo_source_id, bill_qt
     ''', [bill_qty, bill_qty, bill_qty, cargo_source_id])
 
 
+
+def _mark_service_record_billed(cur, service_record_id, bill_qty, bill_id):
+    """Increment billed_quantity on a service record (partial billing)."""
+    if not service_record_id:
+        return
+    bill_qty = float(bill_qty or 0)
+    cur.execute("""
+        UPDATE service_records
+        SET billed_quantity = COALESCE(billed_quantity, 0) + %s,
+            bill_id = %s,
+            is_billed = CASE
+                WHEN COALESCE(billed_quantity, 0) + %s >= COALESCE(billable_quantity, 0)
+                     AND COALESCE(billable_quantity, 0) > 0 THEN 1
+                ELSE 0
+            END
+        WHERE id = %s
+    """, [bill_qty, bill_id, bill_qty, service_record_id])
+
+
+def _unmark_service_record_billed(cur, service_record_id, bill_qty):
+    """Decrement billed_quantity on a service record (bill delete/reversal)."""
+    if not service_record_id:
+        return
+    bill_qty = float(bill_qty or 0)
+    cur.execute("""
+        UPDATE service_records
+        SET billed_quantity = GREATEST(COALESCE(billed_quantity, 0) - %s, 0),
+            is_billed = CASE
+                WHEN GREATEST(COALESCE(billed_quantity, 0) - %s, 0) >= COALESCE(billable_quantity, 0)
+                     AND COALESCE(billable_quantity, 0) > 0 THEN 1
+                ELSE 0
+            END,
+            bill_id = CASE
+                WHEN GREATEST(COALESCE(billed_quantity, 0) - %s, 0) <= 0 THEN NULL
+                ELSE bill_id
+            END
+        WHERE id = %s
+    """, [bill_qty, bill_qty, bill_qty, service_record_id])
+
 # ===== PARTY GUARDS (one invoice = one party) =====
 
 def _norm_party(name):
@@ -290,8 +329,20 @@ def release_bill_sources(cur, bill_id, only_if_still_linked=False):
         )
         cur.execute(f'UPDATE {table} SET bill_id = NULL WHERE id = %s AND bill_id = %s',
                     [row['cargo_source_id'], bill_id])
-    cur.execute('UPDATE service_records SET is_billed=0, bill_id=NULL WHERE bill_id = %s',
-                [bill_id])
+    cur.execute('''
+        SELECT service_record_id, SUM(quantity) AS q
+        FROM bill_lines
+        WHERE bill_id = %s AND service_record_id IS NOT NULL
+        GROUP BY service_record_id
+    ''', [bill_id])
+    for row in [dict(r) for r in cur.fetchall()]:
+        srid = row['service_record_id']
+        if only_if_still_linked:
+            cur.execute('SELECT 1 FROM service_records WHERE id = %s AND bill_id = %s',
+                        [srid, bill_id])
+            if not cur.fetchone():
+                continue
+        _unmark_service_record_billed(cur, srid, float(row['q'] or 0))
 
 
 def reapply_bill_sources(cur, bill_id):
@@ -312,8 +363,8 @@ def reapply_bill_sources(cur, bill_id):
             bill_id
         )
         if row.get('service_record_id'):
-            cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s',
-                        [bill_id, row['service_record_id']])
+            _mark_service_record_billed(cur, row['service_record_id'],
+                                        float(row['quantity'] or 0), bill_id)
 
 
 def reconcile_billed_tracking(cur=None):
@@ -368,17 +419,33 @@ def reconcile_billed_tracking(cur=None):
         if cur.rowcount:
             repaired[table] = cur.rowcount
 
-    # Service records carry the same flag with no quantity to split.
+    # Service records carry the same counters (partial billing), same recompute.
     cur.execute('''
         UPDATE service_records sr
-        SET is_billed = 0, bill_id = NULL
-        WHERE COALESCE(sr.is_billed, 0) = 1
+        SET billed_quantity = live.q,
+            is_billed = CASE WHEN live.q >= COALESCE(sr.billable_quantity, 0)
+                              AND COALESCE(sr.billable_quantity, 0) > 0 THEN 1 ELSE 0 END,
+            bill_id = live.bill_id
+        FROM (
+            SELECT bl.service_record_id AS id,
+                   COALESCE(SUM(CASE WHEN bh.bill_status <> ALL(%s)
+                                     THEN bl.quantity ELSE 0 END), 0) AS q,
+                   MAX(CASE WHEN bh.bill_status <> ALL(%s)
+                            THEN bl.bill_id END) AS bill_id
+            FROM bill_lines bl
+            JOIN bill_header bh ON bh.id = bl.bill_id
+            WHERE bl.service_record_id IS NOT NULL
+            GROUP BY bl.service_record_id
+        ) live
+        WHERE sr.id = live.id
+          -- same rule as cargo: bill_id IS NULL + flagged billed is the admin
+          -- cutover signature, never guessed at here.
           AND sr.bill_id IS NOT NULL
-          AND EXISTS (SELECT 1 FROM bill_lines bl WHERE bl.service_record_id = sr.id)
-          AND NOT EXISTS (SELECT 1 FROM bill_lines bl
-                          JOIN bill_header bh ON bh.id = bl.bill_id
-                          WHERE bl.service_record_id = sr.id AND bh.bill_status <> ALL(%s))
-    ''', [dead])
+          AND (COALESCE(sr.billed_quantity, 0) <> live.q
+               OR COALESCE(sr.is_billed, 0) <> CASE WHEN live.q >= COALESCE(sr.billable_quantity, 0)
+                                                     AND COALESCE(sr.billable_quantity, 0) > 0
+                                                    THEN 1 ELSE 0 END)
+    ''', [dead, dead])
     if cur.rowcount:
         repaired['service_records'] = cur.rowcount
 
@@ -453,8 +520,11 @@ def unbill_invoice_sources(cur, invoice_id):
                 row['cargo_source_id'],
                 float(row['quantity'] or 0)
             )
-        cur.execute('''UPDATE service_records SET is_billed=0, bill_id=NULL
-            WHERE bill_id = %s''', [bill_id])
+        cur.execute('''SELECT service_record_id, SUM(quantity) AS q FROM bill_lines
+            WHERE bill_id = %s AND service_record_id IS NOT NULL
+            GROUP BY service_record_id''', [bill_id])
+        for row in [dict(r) for r in cur.fetchall()]:
+            _unmark_service_record_billed(cur, row['service_record_id'], float(row['q'] or 0))
         cur.execute("UPDATE bill_header SET bill_status='Cancelled' WHERE id=%s", [bill_id])
 
     return [b['bill_number'] for b in bills]
@@ -599,15 +669,16 @@ def _release_bill_for_delete(cur, bill_id):
         other = _other_active_bill_for_cargo(cur, cstype, csid, bill_id)
         cur.execute(f'UPDATE {table} SET bill_id=%s WHERE id=%s', [other, csid])
 
-    cur.execute('''SELECT DISTINCT service_record_id FROM bill_lines
-                   WHERE bill_id=%s AND service_record_id IS NOT NULL''', [bill_id])
-    for row in cur.fetchall():
+    cur.execute('''SELECT service_record_id, SUM(quantity) AS q FROM bill_lines
+                   WHERE bill_id=%s AND service_record_id IS NOT NULL
+                   GROUP BY service_record_id''', [bill_id])
+    for row in [dict(r) for r in cur.fetchall()]:
         srid = row['service_record_id']
+        # Undo this bill's quantity contribution, then hand ownership over.
+        _unmark_service_record_billed(cur, srid, float(row['q'] or 0))
         other = _other_active_bill_for_service(cur, srid, bill_id)
         if other:
-            cur.execute('UPDATE service_records SET is_billed=1, bill_id=%s WHERE id=%s', [other, srid])
-        else:
-            cur.execute('UPDATE service_records SET is_billed=0, bill_id=NULL WHERE id=%s', [srid])
+            cur.execute('UPDATE service_records SET bill_id=%s WHERE id=%s', [other, srid])
 
 
 # ===== CARGO SWAP (replace wrong cargo on a bill, money untouched) =====
@@ -1236,22 +1307,31 @@ def bill_totals(lines):
     cgst = sum(float(l.get('cgst_amount') or 0) for l in lines)
     sgst = sum(float(l.get('sgst_amount') or 0) for l in lines)
     igst = sum(float(l.get('igst_amount') or 0) for l in lines)
+    tds = sum(float(l.get('tds_amount') or 0) for l in lines)
+    tcs = sum(float(l.get('tcs_amount') or 0) for l in lines)
+    # TCS is collected from the customer, so it is part of what they owe and
+    # belongs in total_amount. TDS is their own deduction at payment time —
+    # informational, never subtracted here. The SAP payload does NOT read
+    # total_amount; it rebuilds taxable + GST from the components (see
+    # sap_builder._total_invoice_amount) so this convention cannot leak into it.
     return {'subtotal': round(subtotal, 2), 'cgst_amount': round(cgst, 2),
             'sgst_amount': round(sgst, 2), 'igst_amount': round(igst, 2),
-            'total_amount': round(subtotal + cgst + sgst + igst, 2)}
+            'tds_amount': round(tds, 2), 'tcs_amount': round(tcs, 2),
+            'total_amount': round(subtotal + cgst + sgst + igst + tcs, 2)}
 
 
 def recalc_bill_totals(cur, bill_id):
     """Rewrite a bill header's totals from its stored lines. Caller commits."""
-    cur.execute("""SELECT line_amount, cgst_amount, sgst_amount, igst_amount
+    cur.execute("""SELECT line_amount, cgst_amount, sgst_amount, igst_amount,
+                          tds_amount, tcs_amount
                    FROM bill_lines WHERE bill_id=%s""", [bill_id])
     t = bill_totals([dict(r) for r in cur.fetchall()])
     cur.execute("""UPDATE bill_header
                    SET subtotal=%s, cgst_amount=%s, sgst_amount=%s,
-                       igst_amount=%s, total_amount=%s
+                       igst_amount=%s, tds_amount=%s, tcs_amount=%s, total_amount=%s
                    WHERE id=%s""",
                 [t['subtotal'], t['cgst_amount'], t['sgst_amount'], t['igst_amount'],
-                 t['total_amount'], bill_id])
+                 t['tds_amount'], t['tcs_amount'], t['total_amount'], bill_id])
     return t
 
 
@@ -1468,8 +1548,8 @@ def save_bill_line(data, cur=None):
 
     # Mark the service record as billed if service_record_id is provided
     if data.get('service_record_id'):
-        cur.execute('UPDATE service_records SET is_billed = 1, bill_id = %s WHERE id = %s',
-                     [data.get('bill_id'), data.get('service_record_id')])
+        _mark_service_record_billed(cur, data.get('service_record_id'),
+                                    float(data.get('quantity') or 0), data.get('bill_id'))
 
     if conn is not None:
         conn.commit()
@@ -1494,10 +1574,8 @@ def delete_bill_line(row_id):
             float(bl['quantity'] or 0)
         )
         if bl.get('service_record_id'):
-            cur.execute(
-                'UPDATE service_records SET is_billed=0, bill_id=NULL WHERE id=%s',
-                [bl['service_record_id']]
-            )
+            _unmark_service_record_billed(cur, bl['service_record_id'],
+                                          float(bl['quantity'] or 0))
     cur.execute('DELETE FROM bill_lines WHERE id=%s', (row_id,))
     conn.commit()
     conn.close()
@@ -1657,11 +1735,13 @@ def _reconcile_invoice_gst(cur, invoice_id):
             WHERE id=%s''',
             [g['cgst_amount'], g['sgst_amount'], g['igst_amount'], g['line_total'], lid])
 
-    cur.execute('SELECT round_off FROM invoice_header WHERE id=%s', [invoice_id])
+    cur.execute('SELECT round_off, tcs_amount FROM invoice_header WHERE id=%s', [invoice_id])
     r = cur.fetchone()
     round_off = float((r['round_off'] if r else 0) or 0)
+    # TCS is collected from the customer — same convention as bill_totals().
+    tcs = float((r['tcs_amount'] if r else 0) or 0)
     total = round(totals['subtotal'] + totals['cgst_amount'] + totals['sgst_amount']
-                  + totals['igst_amount'] + round_off, 2)
+                  + totals['igst_amount'] + tcs + round_off, 2)
     cur.execute('''UPDATE invoice_header
         SET subtotal=%s, cgst_amount=%s, sgst_amount=%s, igst_amount=%s,
             total_amount=%s, amount_in_words=%s

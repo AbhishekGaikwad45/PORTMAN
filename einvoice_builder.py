@@ -195,6 +195,11 @@ def build_einvoice_from_invoice(invoice_header, invoice_lines):
         total_invoice += line_total
 
     # --- ValDtls ---
+    # TCS is charged on the invoice, so the IRP sees it as an other-charge and
+    # it has to be inside TotInvVal — the portal validates
+    # TotInvVal ~= AssVal + taxes + OthChrg and rejects a total that omits it.
+    tcs = _safe_float(invoice_header.get('tcs_amount'))
+    round_off = _safe_float(invoice_header.get('round_off'))
     val_dtls = {
         'AssVal': round(total_assessable, 2),
         'CgstVal': round(total_cgst, 2),
@@ -203,9 +208,9 @@ def build_einvoice_from_invoice(invoice_header, invoice_lines):
         'CesVal': 0,
         'StCesVal': 0,
         'Discount': 0,
-        'OthChrg': 0,
-        'RndOffAmt': 0,
-        'TotInvVal': round(total_invoice, 2),
+        'OthChrg': round(tcs, 2),
+        'RndOffAmt': round(round_off, 2),
+        'TotInvVal': round(total_invoice + tcs + round_off, 2),
     }
 
     return {

@@ -164,6 +164,18 @@
         <span>IGST:</span>
         <span>{{ "%.2f"|format(bill.igst_amount) }}</span>
     </div>
+    {% if bill.tds_amount and bill.tds_amount > 0 %}
+    <div class="total-row">
+        <span>TDS Deducted:</span>
+        <span>(-) {{ "%.2f"|format(bill.tds_amount) }}</span>
+    </div>
+    {% endif %}
+    {% if bill.tcs_amount and bill.tcs_amount > 0 %}
+    <div class="total-row">
+        <span>TCS Collected:</span>
+        <span>(+) {{ "%.2f"|format(bill.tcs_amount) }}</span>
+    </div>
+    {% endif %}
     <div class="total-row grand">
         <span>Total Amount:</span>
         <span>₹ {{ "%.2f"|format(bill.total_amount) }}</span>

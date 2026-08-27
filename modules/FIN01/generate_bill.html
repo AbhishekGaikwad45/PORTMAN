@@ -183,6 +183,9 @@
                         <th>Date</th>
                         <th>Service Type</th>
                         <th>Qty</th>
+                        <th>Billed</th>
+                        <th>Balance</th>
+                        <th>Bill Qty</th>
                         <th>UOM</th>
                         <th>Rate</th>
                         <th>Amount</th>
@@ -190,7 +193,7 @@
                     </tr>
                 </thead>
                 <tbody id="otherServicesBody">
-                    <tr><td colspan="9" class="empty-state">No other services</td></tr>
+                    <tr><td colspan="12" class="empty-state">No other services</td></tr>
                 </tbody>
             </table>
         </div>
@@ -448,13 +451,16 @@ function renderOtherServices(records) {
     badge.textContent = records.length > 0 ? records.length : '';
 
     if (records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No unbilled service records for this customer</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="empty-state">No unbilled service records for this customer</td></tr>';
         return;
     }
 
     tbody.innerHTML = '';
     records.forEach((rec, idx) => {
         const st = serviceTypesMap[rec.service_type_id] || {};
+        const totalQty  = parseFloat(rec.billable_quantity || 0);
+        const billedQty = parseFloat(rec.billed_quantity || 0);
+        const balance   = parseFloat(rec.balance_quantity != null ? rec.balance_quantity : totalQty);
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><input type="checkbox" class="service-check" data-idx="${idx}" data-id="${rec.id}"
@@ -463,7 +469,12 @@ function renderOtherServices(records) {
             <td>${rec.record_number}</td>
             <td>${formatDateDMY(rec.record_date || '')}</td>
             <td>${rec.service_name || ''}${hsnInput('svc', idx, rec.service_type_id, true)}</td>
-            <td>${parseFloat(rec.billable_quantity || 0).toFixed(2)}</td>
+            <td style="text-align:right;">${totalQty.toFixed(2)}</td>
+            <td style="text-align:right; color:${billedQty > 0 ? '#e67e22' : '#95a5a6'}; font-size:10px;">${billedQty > 0 ? billedQty.toFixed(2) : '-'}</td>
+            <td style="text-align:right; font-weight:600; color:${billedQty > 0 ? '#2980b9' : 'inherit'};">${balance.toFixed(2)}</td>
+            <td><input type="number" step="0.01" min="0.01" max="${balance.toFixed(2)}" id="svc_billqty_${idx}"
+                value="${balance.toFixed(2)}" data-balance="${balance.toFixed(2)}"
+                onchange="validateBillQty(this); recalcTotals()" style="width:80px;padding:3px 5px;font-size:11px;"></td>
             <td>${rec.billable_uom || st.uom || ''}</td>
             <td><input type="number" step="0.01" id="svc_rate_${idx}" value="${rec.rate != null ? Number(rec.rate).toFixed(2) : ''}" placeholder="0.00"
                 data-idx="${idx}" onchange="recalcTotals()" style="width:80px; padding:3px 5px; font-size:11px;"></td>
@@ -575,7 +586,8 @@ function recalcTotals() {
     // Service record items
     document.querySelectorAll('.service-check').forEach(cb => {
         const idx = cb.dataset.idx;
-        const qty = parseFloat(cb.dataset.qty || 0);
+        const billQtyInput = document.getElementById(`svc_billqty_${idx}`);
+        const qty = parseFloat(billQtyInput ? billQtyInput.value : cb.dataset.qty) || 0;
         const rateInput = document.getElementById(`svc_rate_${idx}`);
         const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
         const amount = qty * rate;
@@ -673,7 +685,9 @@ async function generateBill() {
         const rec = billableData.other_services[idx];
         const rateInput = document.getElementById(`svc_rate_${idx}`);
         const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
-        const qty = parseFloat(rec.billable_quantity || 0);
+        const billQtyInput = document.getElementById(`svc_billqty_${idx}`);
+        const qty = parseFloat(billQtyInput ? billQtyInput.value : rec.billable_quantity) || 0;
+        if (qty <= 0) return; // skip zero-qty selections
         lines.push({
             line_type: 'service_record',
             service_type_id: rec.service_type_id,

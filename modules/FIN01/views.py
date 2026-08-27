@@ -39,10 +39,14 @@ def _find_already_billed(lines):
     try:
         for line in lines:
             if line.get('line_type') == 'service_record' and line.get('service_record_id'):
-                cur.execute('SELECT is_billed FROM service_records WHERE id=%s',
+                cur.execute('SELECT COALESCE(billed_quantity,0) AS bq, '
+                            'COALESCE(billable_quantity,0) AS tot, is_billed '
+                            'FROM service_records WHERE id=%s',
                             [line['service_record_id']])
                 r = cur.fetchone()
-                if r and r['is_billed']:
+                if r and (r['is_billed']
+                          or (float(r['tot'] or 0) > 0
+                              and model.would_overbill(r['bq'], line.get('quantity'), r['tot']))):
                     return line.get('description') or f"service #{line['service_record_id']}"
             cstype, csid = line.get('cargo_source_type'), line.get('cargo_source_id')
             if cstype and csid:
@@ -905,11 +909,15 @@ def get_customer_billables(customer_type, customer_id):
     # --- B. Other Services: approved unbilled service records for this customer ---
     cur.execute("""
         SELECT sr.*, st.service_name, st.service_code, st.sac_code, st.gst_rate_id,
-               st.is_tds, st.tds_percent, st.is_tcs, st.tcs_percent
+               st.is_tds, st.tds_percent, st.is_tcs, st.tcs_percent,
+               ROUND(COALESCE(sr.billable_quantity, 0)
+                     - COALESCE(sr.billed_quantity, 0), 3) AS balance_quantity
         FROM service_records sr
         JOIN finance_service_types st ON sr.service_type_id = st.id
         WHERE sr.source_type = %s AND sr.source_id = %s
-        AND sr.doc_status = 'Approved' AND (sr.is_billed = 0 OR sr.is_billed IS NULL)
+        AND sr.doc_status = 'Approved' AND COALESCE(sr.is_billed, 0) = 0
+        AND (COALESCE(sr.billable_quantity, 0) <= 0
+             OR COALESCE(sr.billable_quantity, 0) - COALESCE(sr.billed_quantity, 0) > 0)
         ORDER BY sr.id
     """, [customer_type, customer_id])
     other_services = [dict(r) for r in cur.fetchall()]
@@ -1120,6 +1128,8 @@ def get_customers_for_billing(customer_type):
                 FROM service_records
                 WHERE source_type = %s AND doc_status = 'Approved'
                   AND COALESCE(is_billed, 0) = 0
+                  AND (COALESCE(billable_quantity, 0) <= 0
+                       OR COALESCE(billable_quantity, 0) - COALESCE(billed_quantity, 0) > 0)
                 GROUP BY source_id
             )
             SELECT p.{cols.replace(', ', ', p.')},
