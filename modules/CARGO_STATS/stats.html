@@ -183,6 +183,11 @@
         box-shadow: 0 0 0 2px rgba(66,133,212,.12);
     }
 
+    #receipt-column-source {
+        background: #fff;
+        cursor: pointer;
+    }
+
     .cargo-column-modal-actions {
         display: flex;
         justify-content: flex-end;
@@ -1128,6 +1133,16 @@
                 + Add
             </button>
 
+            {% if session.is_admin %}
+            <button
+                class="cargo-btn cargo-btn-column"
+                onclick="addReceiptColumn('pnp_receipt')"
+                title="Add a cargo/location column to this receipt section"
+            >
+                + Add Column
+            </button>
+            {% endif %}
+
             <button
                 class="cargo-btn cargo-btn-save"
                 onclick="saveTable('pnp_receipt')"
@@ -1156,6 +1171,16 @@
             >
                 + Add
             </button>
+
+            {% if session.is_admin %}
+            <button
+                class="cargo-btn cargo-btn-column"
+                onclick="addReceiptColumn('karanja_receipt')"
+                title="Add a cargo/location column to this receipt section"
+            >
+                + Add Column
+            </button>
+            {% endif %}
 
             <button
                 class="cargo-btn cargo-btn-save"
@@ -1186,6 +1211,16 @@
                 + Add
             </button>
 
+            {% if session.is_admin %}
+            <button
+                class="cargo-btn cargo-btn-column"
+                onclick="addReceiptColumn('roha_receipt')"
+                title="Add a cargo/location column to this receipt section"
+            >
+                + Add Column
+            </button>
+            {% endif %}
+
             <button
                 class="cargo-btn cargo-btn-save"
                 onclick="saveTable('roha_receipt')"
@@ -1215,6 +1250,16 @@
                 + Add
             </button>
 
+            {% if session.is_admin %}
+            <button
+                class="cargo-btn cargo-btn-column"
+                onclick="addReceiptColumn('dolvi_receipt')"
+                title="Add a cargo/location column to this receipt section"
+            >
+                + Add Column
+            </button>
+            {% endif %}
+
             <button
                 class="cargo-btn cargo-btn-save"
                 onclick="saveTable('dolvi_receipt')"
@@ -1234,18 +1279,55 @@
 <div id="cargo-column-modal" class="cargo-column-modal" aria-hidden="true">
     <div class="cargo-column-modal-card" role="dialog" aria-modal="true" aria-labelledby="cargo-column-modal-title">
         <h3 id="cargo-column-modal-title" class="cargo-column-modal-title">Add Column</h3>
-        <label class="cargo-column-modal-label" for="cargo-column-name">Column Name</label>
-        <input
-            id="cargo-column-name"
-            class="cargo-column-name-input"
-            type="text"
-            autocomplete="off"
-            maxlength="80"
-            placeholder="e.g. Dolomite"
-        >
+
+        <!-- Normal Consumption / Production / Stock column -->
+        <div id="standard-column-fields">
+            <label class="cargo-column-modal-label" for="cargo-column-name">Column Name</label>
+            <input
+                id="cargo-column-name"
+                class="cargo-column-name-input"
+                type="text"
+                autocomplete="off"
+                maxlength="80"
+                placeholder="e.g. Dolomite"
+            >
+        </div>
+
+        <!-- Receipt column -->
+        <div id="receipt-column-fields" style="display:none;">
+            <label class="cargo-column-modal-label" for="receipt-column-cargo">Cargo</label>
+            <input
+                id="receipt-column-cargo"
+                class="cargo-column-name-input"
+                type="text"
+                autocomplete="off"
+                maxlength="80"
+                placeholder="e.g. Coal"
+            >
+
+            <label class="cargo-column-modal-label" for="receipt-column-location" style="margin-top:12px;">Location</label>
+            <input
+                id="receipt-column-location"
+                class="cargo-column-name-input"
+                type="text"
+                autocomplete="off"
+                maxlength="80"
+                placeholder="e.g. Maharashtra"
+            >
+
+            <label class="cargo-column-modal-label" for="receipt-column-source" style="margin-top:12px;">Add Under</label>
+            <select
+                id="receipt-column-source"
+                class="cargo-column-name-input"
+            >
+                <option value="Through Rake">Through Rake</option>
+                <option value="Through Road">Through Road</option>
+            </select>
+        </div>
+
         <div class="cargo-column-modal-actions">
             <button type="button" class="cargo-btn cargo-btn-cancel" onclick="closeColumnModal()">Cancel</button>
-            <button type="button" class="cargo-btn cargo-btn-add" onclick="confirmAddColumn()">Add Column</button>
+            <button type="button" class="cargo-btn cargo-btn-add" id="cargo-column-confirm-btn" onclick="confirmAddColumn()">Add Column</button>
         </div>
     </div>
 </div>
@@ -1700,23 +1782,64 @@ function isSystemField(section, field) {
 }
 
 let activeColumnSection = null;
+let activeColumnMode = "standard";
 
 function openColumnModal(section) {
     activeColumnSection = section;
+    activeColumnMode = "standard";
+
     const modal = document.getElementById("cargo-column-modal");
     const input = document.getElementById("cargo-column-name");
+    const standardFields = document.getElementById("standard-column-fields");
+    const receiptFields = document.getElementById("receipt-column-fields");
     if (!modal || !input) return;
+
+    if (standardFields) standardFields.style.display = "block";
+    if (receiptFields) receiptFields.style.display = "none";
+
     input.value = "";
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
     setTimeout(() => input.focus(), 0);
 }
 
+function openReceiptColumnModal(section) {
+    activeColumnSection = section;
+    activeColumnMode = "receipt";
+
+    const modal = document.getElementById("cargo-column-modal");
+    const cargoInput = document.getElementById("receipt-column-cargo");
+    const locationInput = document.getElementById("receipt-column-location");
+    const sourceInput = document.getElementById("receipt-column-source");
+    const standardFields = document.getElementById("standard-column-fields");
+    const receiptFields = document.getElementById("receipt-column-fields");
+    if (!modal || !cargoInput || !locationInput || !sourceInput) return;
+
+    if (standardFields) standardFields.style.display = "none";
+    if (receiptFields) receiptFields.style.display = "block";
+
+    cargoInput.value = "";
+    locationInput.value = "";
+    sourceInput.value = "Through Rake";
+
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    setTimeout(() => cargoInput.focus(), 0);
+}
+
 function closeColumnModal() {
     activeColumnSection = null;
+    activeColumnMode = "standard";
+
     const modal = document.getElementById("cargo-column-modal");
     const input = document.getElementById("cargo-column-name");
+    const cargoInput = document.getElementById("receipt-column-cargo");
+    const locationInput = document.getElementById("receipt-column-location");
+
     if (input) input.value = "";
+    if (cargoInput) cargoInput.value = "";
+    if (locationInput) locationInput.value = "";
+
     if (modal) {
         modal.classList.remove("show");
         modal.setAttribute("aria-hidden", "true");
@@ -1727,7 +1850,15 @@ function addColumn(section) {
     openColumnModal(section);
 }
 
+function addReceiptColumn(section) {
+    if (!isReceiptSection(section)) return;
+    openReceiptColumnModal(section);
+}
+
 function confirmAddColumn() {
+    if (activeColumnMode === "receipt") {
+        return confirmAddReceiptColumn();
+    }
     const section = activeColumnSection;
     const input = document.getElementById("cargo-column-name");
     if (!section || !input) return;
@@ -1779,6 +1910,94 @@ function confirmAddColumn() {
 
     initializeDataTable(section);
     setStatus(section, `Column "${label}" added. Enter values and click Save.`, false);
+    closeColumnModal();
+}
+
+function confirmAddReceiptColumn() {
+    const section = activeColumnSection;
+    const cargoInput = document.getElementById("receipt-column-cargo");
+    const locationInput = document.getElementById("receipt-column-location");
+    const sourceInput = document.getElementById("receipt-column-source");
+
+    if (!section || !isReceiptSection(section) ||
+        !cargoInput || !locationInput || !sourceInput) {
+        return;
+    }
+
+    const cargo = cargoInput.value.trim();
+    const location = locationInput.value.trim();
+    const source = sourceInput.value;
+
+    if (!cargo) {
+        alert("Please enter the cargo name.");
+        cargoInput.focus();
+        return;
+    }
+
+    if (!location) {
+        alert("Please enter the location.");
+        locationInput.focus();
+        return;
+    }
+
+    const group = RECEIPT_LAYOUT.sourceGroups.find(
+        item => item.name === source
+    );
+
+    if (!group) {
+        alert("Invalid receipt source selected.");
+        return;
+    }
+
+    /*
+     * The field name records the selected transport section:
+     * rake_<cargo> for Through Rake
+     * road_<cargo> for Through Road
+     *
+     * If the same cargo is added more than once, append a number
+     * so every receipt column remains a separate stored value.
+     */
+    const prefix = source === "Through Rake" ? "rake" : "road";
+    const baseField = `${prefix}_${normalizeFieldKey(cargo)}`;
+    let field = baseField;
+    let counter = 2;
+
+    const allFields = new Set(
+        receiptColumns().map(col => col.field)
+    );
+
+    while (allFields.has(field)) {
+        field = `${baseField}_${counter++}`;
+    }
+
+    const newColumn = {
+        field: field,
+        cargo: cargo,
+        location: location,
+        dynamic: true
+    };
+
+    group.columns.push(newColumn);
+
+    /*
+     * Give every currently loaded date a value slot for the new
+     * column. The value itself is entered by the user.
+     */
+    const rows = tableData[section] || [];
+    rows.forEach(row => {
+        if (row[field] === undefined || row[field] === null) {
+            row[field] = "";
+        }
+    });
+
+    receiptRender(section);
+
+    setStatus(
+        section,
+        `Column "${cargo}" (${location}) added under ${source}. Enter values and click Save.`,
+        false
+    );
+
     closeColumnModal();
 }
 
@@ -2213,7 +2432,23 @@ function receiptRender(section) {
             <th class="receipt-delete-head" rowspan="3"></th>
         </tr>
         <tr class="receipt-cargo-row">
-            ${cols.map(col => `<th>${escapeHtml(col.cargo)}</th>`).join("")}
+            ${cols.map(col => `
+                <th>
+                    ${col.dynamic ? `
+                        <span class="cargo-dynamic-column-header">
+                            <span class="cargo-dynamic-column-label">${escapeHtml(col.cargo)}</span>
+                            <button
+                                type="button"
+                                class="cargo-remove-column-btn"
+                                data-action="remove-receipt-column"
+                                data-field="${escapeHtml(col.field)}"
+                                title="Remove ${escapeHtml(col.cargo)} column"
+                                aria-label="Remove ${escapeHtml(col.cargo)} column"
+                            >×</button>
+                        </span>
+                    ` : escapeHtml(col.cargo)}
+                </th>
+            `).join("")}
         </tr>
         <tr class="receipt-location-row">
             ${cols.map(col => `<th>${escapeHtml(col.location)}</th>`).join("")}
@@ -2335,6 +2570,128 @@ function receiptRender(section) {
                 }
             }
         );
+
+    /*
+     * Receipt dynamic-column delete button.
+     */
+    $(table)
+        .off("click.receiptColumnDelete")
+        .on(
+            "click.receiptColumnDelete",
+            "button[data-action='remove-receipt-column']",
+            function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const field = this.dataset.field;
+                if (field) {
+                    removeReceiptColumn(section, field);
+                }
+            }
+        );
+}
+
+async function removeReceiptColumn(section, field) {
+    const column = receiptColumns().find(col => col.field === field);
+
+    if (!column || !column.dynamic) {
+        return;
+    }
+
+    if (!confirm(
+        `Remove column "${column.cargo}" (${column.location})?\n\n` +
+        `The column and all its stored values will be removed.`
+    )) {
+        return;
+    }
+
+    try {
+        setStatus(section, `Removing "${column.cargo}"...`, false);
+
+        /*
+         * Remove it from the layout immediately.
+         */
+        RECEIPT_LAYOUT.sourceGroups.forEach(group => {
+            group.columns = group.columns.filter(
+                col => col.field !== field
+            );
+        });
+
+        /*
+         * Remove the value from all loaded rows.
+         */
+        (tableData[section] || []).forEach(row => {
+            delete row[field];
+        });
+
+        receiptRender(section);
+
+        /*
+         * Use the existing dynamic-column DELETE endpoint.
+         */
+        const url =
+            `/module/CARGO_STATS/api/${section}/column/` +
+            encodeURIComponent(field);
+
+        const response = await fetch(url, {
+            method: "DELETE",
+            headers: {
+                "Accept": "application/json"
+            },
+            credentials: "same-origin"
+        });
+
+        const contentType =
+            response.headers.get("content-type") || "";
+
+        let result;
+
+        if (contentType.includes("application/json")) {
+            result = await response.json();
+        } else {
+            const serverText = await response.text();
+            throw new Error(
+                `Server returned ${response.status}: ` +
+                serverText.substring(0, 300)
+            );
+        }
+
+        if (!response.ok || !result || !result.success) {
+            throw new Error(
+                result && result.error
+                    ? result.error
+                    : "Unable to remove receipt column from database."
+            );
+        }
+
+        /*
+         * Persist the updated layout and remaining values.
+         * The existing receipt Save API already stores __receipt_layout.
+         */
+        await saveReceiptTable(section);
+
+        setStatus(
+            section,
+            `Column "${column.cargo}" removed ✓`,
+            true
+        );
+
+    } catch (error) {
+        console.error(
+            "RECEIPT COLUMN DELETE ERROR:",
+            section,
+            field,
+            error
+        );
+
+        await loadReceiptTable(section);
+
+        setStatus(
+            section,
+            "Receipt column remove failed: " + error.message,
+            false
+        );
+    }
 }
 
 function updateReceiptSummary(section) {
@@ -2566,7 +2923,18 @@ async function saveReceiptTable(section) {
             const hasValue = receiptColumns().some(col =>
                 row[col.field] !== "" && row[col.field] !== null && row[col.field] !== undefined
             );
-            if (!hasValue && (row.id === null || row.id === undefined)) continue;
+
+            /*
+             * A newly-added receipt column is part of the saved layout.
+             * Therefore an unsaved date row must also be sent even when
+             * all quantity cells are blank, otherwise the layout would
+             * never reach the database.
+             */
+            /*
+             * Do not skip a new date row here.
+             * Even if every quantity is blank, the row carries
+             * __receipt_layout so a newly-added column is persisted.
+             */
 
             const dataForSave = {};
             receiptColumns().forEach(col => {
@@ -2617,6 +2985,37 @@ async function loadReceiptTable(section) {
         if (!response.ok) throw new Error(result.error || "Unable to load data");
 
         const rawRows = Array.isArray(result) ? result : [];
+
+        /*
+         * Restore the saved receipt layout first.
+         * The backend may return the JSONB value directly as
+         * __receipt_layout or inside a data object.
+         */
+        const layoutRow = rawRows.find(row =>
+            row &&
+            (
+                row.__receipt_layout ||
+                (row.data && row.data.__receipt_layout)
+            )
+        );
+
+        if (layoutRow) {
+            const savedLayout =
+                layoutRow.__receipt_layout ||
+                (layoutRow.data && layoutRow.data.__receipt_layout);
+
+            if (savedLayout &&
+                Array.isArray(savedLayout.sourceGroups)) {
+                RECEIPT_LAYOUT.sourceGroups =
+                    savedLayout.sourceGroups.map(group => ({
+                        name: group.name,
+                        columns: Array.isArray(group.columns)
+                            ? group.columns.map(col => ({ ...col }))
+                            : []
+                    }));
+            }
+        }
+
         const builtRows = receiptBuildRows(rawRows);
         tableData[section] = builtRows;
         tableData[section + "__history"] = rawRows.map(row => ({ ...row }));
@@ -3492,6 +3891,22 @@ $(document).ready(function() {
             }
         });
     }
+
+    const receiptCargoInput = document.getElementById("receipt-column-cargo");
+    const receiptLocationInput = document.getElementById("receipt-column-location");
+
+    [receiptCargoInput, receiptLocationInput].forEach(input => {
+        if (input) {
+            input.addEventListener("keydown", function(event) {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    confirmAddColumn();
+                } else if (event.key === "Escape") {
+                    closeColumnModal();
+                }
+            });
+        }
+    });
 
     loadTable("consumption");
 
