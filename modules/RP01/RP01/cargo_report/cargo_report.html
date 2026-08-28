@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Cargo Handling - RP01{% endblock %}
+{% block title %}Cargo Handling - {{ module_code|default('RP01') }}{% endblock %}
 
 {% block head %}
 <!-- WebDataRocks pivot table -->
@@ -440,10 +440,10 @@
 
 <div class="page-header">
     <h2>Cargo Handling</h2>
-    <span class="module-badge">RP01</span>
+    <span class="module-badge">{{ module_code|default('RP01') }}</span>
 </div>
 <div class="breadcrumb">
-    <a href="/module/RP01/">Reports</a> &rsaquo; Cargo Handling
+    <a href="{{ module_href|default('/module/RP01/') }}">Reports</a> &rsaquo; Cargo Handling
 </div>
 
 <!-- <div class="report-page"> -->
