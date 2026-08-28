@@ -14,7 +14,8 @@ Day-of-week is deliberately not modelled — measured indices are 0.98-1.02
 across all seven days, which is a 7-day port with nothing to learn.
 
 History comes from rp01_daily_throughput (see seed_eq_wise.py); days after the
-last seeded date come live from lueu_lines, so the forecast self-updates.
+last seeded date come live — from rp01_historical_lueu before LIVE_START and
+from lueu_lines on or after it — so the forecast self-updates.
 """
 import bisect
 import calendar
@@ -41,6 +42,12 @@ DRIFT_STEP = 30     # horizon over which level drift is calibrated
 LUEU_DATE = ("CASE WHEN entry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
              "THEN LEFT(entry_date, 10)::date END")
 
+# Hard cutover, same boundary the dashboard uses (views._fy_window): lueu_lines
+# is the source of truth from 1 May 2026 on, and everything before it comes from
+# the old tables. lueu_lines does hold April-2026 rows, but they are partial —
+# reading them would understate April and disagree with every other RP01 card.
+LIVE_START = date(2026, 5, 1)
+
 
 def load_series():
     """(dates, totals) — seeded history, extended with live lueu_lines days."""
@@ -56,30 +63,26 @@ def load_series():
         if not rows:
             return [], np.array([])
 
-        # Days past the seeded history. Both live tables are consulted because
-        # RP01 sources a FY's April from rp01_historical_lueu and May-onward
-        # from lueu_lines (see views._fy_window) — reading only lueu_lines would
-        # silently drop every future April. Where a date exists in both,
-        # lueu_lines wins, so the two can never be double-counted.
+        # Days past the seeded history, split at LIVE_START. The two windows
+        # are disjoint by construction, so UNION ALL can never double-count a
+        # day and no date can be sourced from the wrong table.
         cur.execute(f"""
-            WITH live AS (
-                SELECT d, SUM(q) AS q FROM (
-                    SELECT {LUEU_DATE} AS d, COALESCE(quantity, 0) AS q
-                    FROM lueu_lines
-                    WHERE is_deleted IS NOT TRUE
-                ) s
-                WHERE d > %(after)s
-                GROUP BY d
-            ), hist AS (
-                SELECT entry_date AS d, SUM(COALESCE(quantity, 0)) AS q
-                FROM rp01_historical_lueu
-                WHERE entry_date > %(after)s
-                GROUP BY 1
-            )
-            SELECT COALESCE(l.d, h.d) AS d, COALESCE(l.q, h.q) AS q
-            FROM live l FULL OUTER JOIN hist h ON l.d = h.d
+            SELECT d, SUM(q) AS q FROM (
+                SELECT {LUEU_DATE} AS d, COALESCE(quantity, 0) AS q
+                FROM lueu_lines
+                WHERE is_deleted IS NOT TRUE
+            ) s
+            WHERE d > %(after)s AND d >= %(live_start)s
+            GROUP BY d
+
+            UNION ALL
+
+            SELECT entry_date AS d, SUM(COALESCE(quantity, 0)) AS q
+            FROM rp01_historical_lueu
+            WHERE entry_date > %(after)s AND entry_date < %(live_start)s
+            GROUP BY 1
             ORDER BY 1
-        """, {'after': rows[-1][0]})
+        """, {'after': rows[-1][0], 'live_start': LIVE_START})
         rows += [(r['d'], float(r['q'] or 0)) for r in cur.fetchall()]
     finally:
         conn.close()
