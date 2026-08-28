@@ -565,6 +565,136 @@
 
     }
 
+
+    /* ========================================================
+       RECEIPT REPORT TABLE
+       ======================================================== */
+    .receipt-report-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+    }
+    .receipt-report-table th,
+    .receipt-report-table td {
+        border: 1px solid #c8c8c8;
+        padding: 0;
+        height: 34px;
+        box-sizing: border-box;
+    }
+    .receipt-report-table th {
+        background: #f7f7f7;
+        color: #333;
+        font-weight: 500;
+        font-size: 14px;
+        text-align: left;
+        padding: 3px 8px;
+        white-space: nowrap;
+    }
+    .receipt-report-table .receipt-source-row th,
+    .receipt-report-table .receipt-cargo-row th,
+    .receipt-report-table .receipt-location-row th {
+        height: 26px;
+        vertical-align: middle;
+    }
+    .receipt-report-table .receipt-date-head {
+        width: 105px;
+        min-width: 105px;
+        text-align: left;
+        vertical-align: middle;
+    }
+    .receipt-report-table .receipt-group-head {
+        text-align: left;
+    }
+    .receipt-report-table .receipt-date-cell {
+        width: 105px;
+        min-width: 105px;
+        padding: 4px 8px;
+        background: #fff;
+        font-size: 14px;
+        white-space: nowrap;
+    }
+    .receipt-report-table .receipt-date-label {
+        width: 105px;
+        min-width: 105px;
+        padding: 4px 8px;
+        vertical-align: middle;
+        text-align: left;
+        background: #fff;
+        font-size: 14px;
+    }
+    .receipt-report-table .receipt-input {
+        display: block;
+        width: 100%;
+        height: 34px;
+        border: 0;
+        outline: 0;
+        padding: 4px 8px;
+        box-sizing: border-box;
+        background: #fff;
+        font-size: 14px;
+        text-align: right;
+    }
+    .receipt-report-table .receipt-input:focus {
+        box-shadow: inset 0 0 0 2px #4285d4;
+    }
+    .receipt-report-table .receipt-summary-label {
+        padding: 5px 8px;
+        background: #f7f7f7;
+        font-size: 14px;
+        text-align: left;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .receipt-report-table .receipt-summary-value {
+        padding: 5px 8px;
+        background: #fff;
+        text-align: right;
+        font-size: 14px;
+    }
+    .receipt-report-table .receipt-summary-row td {
+        height: 27px;
+    }
+    .receipt-section .cargo-table-wrapper {
+        overflow-x: auto;
+    }
+    .receipt-section .cargo-section-header {
+        background: #e5edf6;
+    }
+
+    /* Receipt row delete button */
+    .receipt-report-table .receipt-delete-head,
+    .receipt-report-table .receipt-delete-cell {
+        width: 45px !important;
+        min-width: 45px !important;
+        max-width: 45px !important;
+        text-align: center !important;
+        padding: 0 !important;
+    }
+
+    .receipt-report-table .receipt-delete-head {
+        background: #f7f7f7;
+    }
+
+    .receipt-report-table .receipt-delete-cell {
+        background: #fff;
+        vertical-align: middle;
+    }
+
+    .receipt-report-table .receipt-delete-btn {
+        border: none;
+        background: transparent;
+        color: #dc2626;
+        font-size: 23px;
+        cursor: pointer;
+        line-height: 1;
+        padding: 5px;
+    }
+
+    .receipt-report-table .receipt-delete-btn:hover {
+        color: #b91c1c;
+    }
+
 </style>
 
 
@@ -984,6 +1114,122 @@
 </div>
 
 
+<!-- ======================================================
+     PNP : RECEIPT
+     ====================================================== -->
+<div class="cargo-section receipt-section" id="section-pnp_receipt">
+    <div class="cargo-section-header">
+        <div class="cargo-section-title">PNP : Receipt</div>
+        <div class="cargo-section-actions">
+            <button
+                class="cargo-btn cargo-btn-add"
+                onclick="receiptAddRow('pnp_receipt')"
+            >
+                + Add
+            </button>
+
+            <button
+                class="cargo-btn cargo-btn-save"
+                onclick="saveTable('pnp_receipt')"
+            >
+                Save
+            </button>
+        </div>
+    </div>
+    <div class="cargo-table-wrapper">
+        <table class="receipt-report-table" id="table-pnp_receipt"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="cargo-status normal" id="status-pnp_receipt">Loading...</div>
+</div>
+
+
+<!-- ======================================================
+     KARANJA : RECEIPT
+     ====================================================== -->
+<div class="cargo-section receipt-section" id="section-karanja_receipt">
+    <div class="cargo-section-header">
+        <div class="cargo-section-title">Karanja : Receipt</div>
+        <div class="cargo-section-actions">
+            <button
+                class="cargo-btn cargo-btn-add"
+                onclick="receiptAddRow('karanja_receipt')"
+            >
+                + Add
+            </button>
+
+            <button
+                class="cargo-btn cargo-btn-save"
+                onclick="saveTable('karanja_receipt')"
+            >
+                Save
+            </button>
+        </div>
+    </div>
+    <div class="cargo-table-wrapper">
+        <table class="receipt-report-table" id="table-karanja_receipt"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="cargo-status normal" id="status-karanja_receipt">Loading...</div>
+</div>
+
+
+<!-- ======================================================
+     ROHA : RECEIPT
+     ====================================================== -->
+<div class="cargo-section receipt-section" id="section-roha_receipt">
+    <div class="cargo-section-header">
+        <div class="cargo-section-title">Roha : Receipt</div>
+        <div class="cargo-section-actions">
+            <button
+                class="cargo-btn cargo-btn-add"
+                onclick="receiptAddRow('roha_receipt')"
+            >
+                + Add
+            </button>
+
+            <button
+                class="cargo-btn cargo-btn-save"
+                onclick="saveTable('roha_receipt')"
+            >
+                Save
+            </button>
+        </div>
+    </div>
+    <div class="cargo-table-wrapper">
+        <table class="receipt-report-table" id="table-roha_receipt"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="cargo-status normal" id="status-roha_receipt">Loading...</div>
+</div>
+
+
+<!-- ======================================================
+     DOLVI : RECEIPT
+     ====================================================== -->
+<div class="cargo-section receipt-section" id="section-dolvi_receipt">
+    <div class="cargo-section-header">
+        <div class="cargo-section-title">Dolvi : Receipt</div>
+        <div class="cargo-section-actions">
+            <button
+                class="cargo-btn cargo-btn-add"
+                onclick="receiptAddRow('dolvi_receipt')"
+            >
+                + Add
+            </button>
+
+            <button
+                class="cargo-btn cargo-btn-save"
+                onclick="saveTable('dolvi_receipt')"
+            >
+                Save
+            </button>
+        </div>
+    </div>
+    <div class="cargo-table-wrapper">
+        <table class="receipt-report-table" id="table-dolvi_receipt"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="cargo-status normal" id="status-dolvi_receipt">Loading...</div>
+</div>
+
+
 <!-- Dynamic column modal -->
 <div id="cargo-column-modal" class="cargo-column-modal" aria-hidden="true">
     <div class="cargo-column-modal-card" role="dialog" aria-modal="true" aria-labelledby="cargo-column-modal-title">
@@ -1312,6 +1558,42 @@ const TABLES = {
         ],
         totalField: "total",
         dynamicFields: []
+    },
+
+    pnp_receipt: {
+        title: "PNP : Receipt",
+        fields: ["source", "cargo", "location", "for_day", "mtd", "ytd"],
+        labels: ["Source", "Cargo", "Location", "For the Day", "MTD", "YTD"],
+        numericFields: ["for_day", "mtd", "ytd"],
+        totalField: null,
+        dynamicFields: []
+    },
+
+    karanja_receipt: {
+        title: "Karanja : Receipt",
+        fields: ["source", "cargo", "location", "for_day", "mtd", "ytd"],
+        labels: ["Source", "Cargo", "Location", "For the Day", "MTD", "YTD"],
+        numericFields: ["for_day", "mtd", "ytd"],
+        totalField: null,
+        dynamicFields: []
+    },
+
+    roha_receipt: {
+        title: "Roha : Receipt",
+        fields: ["source", "cargo", "location", "for_day", "mtd", "ytd"],
+        labels: ["Source", "Cargo", "Location", "For the Day", "MTD", "YTD"],
+        numericFields: ["for_day", "mtd", "ytd"],
+        totalField: null,
+        dynamicFields: []
+    },
+
+    dolvi_receipt: {
+        title: "Dolvi : Receipt",
+        fields: ["source", "cargo", "location", "for_day", "mtd", "ytd"],
+        labels: ["Source", "Cargo", "Location", "For the Day", "MTD", "YTD"],
+        numericFields: ["for_day", "mtd", "ytd"],
+        totalField: null,
+        dynamicFields: []
     }
 };
 
@@ -1330,7 +1612,11 @@ const tableData = {
     consumption: [],
     production: [],
     stock_rmhs: [],
-    stock_pnp: []
+    stock_pnp: [],
+    pnp_receipt: [],
+    karanja_receipt: [],
+    roha_receipt: [],
+    dolvi_receipt: []
 };
 
 // Keep immutable copies of the original/static columns. Dynamic
@@ -1774,7 +2060,579 @@ async function removeColumn(section, field) {
 }
 
 
+const RECEIPT_LAYOUT = {
+    sourceGroups: [
+        {
+            name: "Through Rake",
+            columns: [
+                { field: "rake_mel", cargo: "MEL", location: "Karnataka" },
+                { field: "rake_jabalpur_fines", cargo: "Jabalpur Fines", location: "M.P" },
+                { field: "rake_surajgad_fines", cargo: "Surajgad Fines", location: "Vidharbha" },
+                { field: "rake_limestone", cargo: "Limestone", location: "Rajasthan" },
+                { field: "rake_dolomite", cargo: "Dolomite", location: "Rajasthan" }
+            ]
+        },
+        {
+            name: "Through Road",
+            columns: [
+                { field: "road_limestone", cargo: "Limestone", location: "Rajasthan" },
+                { field: "road_dolomite", cargo: "Dolomite", location: "Rajasthan" }
+            ]
+        }
+    ]
+};
+
+function isReceiptSection(section) {
+    return Object.prototype.hasOwnProperty.call(tableData, section) &&
+           section.endsWith("_receipt");
+}
+
+function receiptColumns() {
+    return RECEIPT_LAYOUT.sourceGroups.flatMap(group => group.columns);
+}
+
+function receiptMonthStart(dateObj) {
+    return new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
+}
+
+function receiptMonthEnd(dateObj) {
+    return new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0);
+}
+
+function isoLocalDate(dateObj) {
+    return [
+        dateObj.getFullYear(),
+        String(dateObj.getMonth() + 1).padStart(2, "0"),
+        String(dateObj.getDate()).padStart(2, "0")
+    ].join("-");
+}
+
+function receiptDisplayDate(iso) {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short"
+    }).replace(" ", "-");
+}
+
+function receiptNumber(value) {
+    if (value === null || value === undefined || value === "") return 0;
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function receiptFormat(value) {
+    const n = receiptNumber(value);
+    if (n === 0) return "0";
+    return Number(n.toFixed(2)).toString();
+}
+
+function receiptCreateRow(date) {
+    const row = {
+        id: null,
+        date: date
+    };
+    receiptColumns().forEach(col => row[col.field] = "");
+    return row;
+}
+
+function receiptGetDisplayMonth(rawRows) {
+    const valid = rawRows
+        .map(r => r.date)
+        .filter(Boolean)
+        .sort();
+    if (valid.length) {
+        const d = new Date(valid[valid.length - 1] + "T00:00:00");
+        return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    return receiptMonthStart(new Date());
+}
+
+function receiptBuildRows(rawRows) {
+    /*
+     * IMPORTANT:
+     * Do NOT create dates automatically for the whole month.
+     *
+     * Only dates that already exist in the database are shown.
+     * A new date is created only when the user clicks + Add.
+     */
+    const byDate = {};
+
+    rawRows.forEach(raw => {
+        if (!raw.date) return;
+
+        const dateKey = String(raw.date).slice(0, 10);
+
+        if (!byDate[dateKey]) {
+            byDate[dateKey] = receiptCreateRow(dateKey);
+        }
+
+        if (raw.id !== undefined && raw.id !== null) {
+            byDate[dateKey].id = raw.id;
+        }
+
+        receiptColumns().forEach(col => {
+            if (
+                raw[col.field] !== undefined &&
+                raw[col.field] !== null
+            ) {
+                byDate[dateKey][col.field] = raw[col.field];
+            }
+        });
+    });
+
+    return Object.values(byDate).sort(
+        (a, b) => String(a.date).localeCompare(String(b.date))
+    );
+}
+
+function receiptSum(rows, field, predicate) {
+    return rows.reduce((sum, row) => {
+        if (!predicate || predicate(row)) {
+            return sum + receiptNumber(row[field]);
+        }
+        return sum;
+    }, 0);
+}
+
+function receiptRender(section) {
+    const table = document.getElementById("table-" + section);
+    if (!table) return;
+
+    const cols = receiptColumns();
+    const rows = tableData[section] || [];
+    const thead = table.querySelector("thead");
+    const tbody = table.querySelector("tbody");
+
+    thead.innerHTML = `
+        <tr class="receipt-source-row">
+            <th class="receipt-date-head" rowspan="3">Date</th>
+            ${RECEIPT_LAYOUT.sourceGroups.map(group =>
+                `<th class="receipt-group-head" colspan="${group.columns.length}">${escapeHtml(group.name)}</th>`
+            ).join("")}
+            <th class="receipt-delete-head" rowspan="3"></th>
+        </tr>
+        <tr class="receipt-cargo-row">
+            ${cols.map(col => `<th>${escapeHtml(col.cargo)}</th>`).join("")}
+        </tr>
+        <tr class="receipt-location-row">
+            ${cols.map(col => `<th>${escapeHtml(col.location)}</th>`).join("")}
+        </tr>
+    `;
+
+    /*
+     * Do not create a date when the table is empty.
+     * The date appears only after + Add is clicked.
+     */
+    const first = rows.length ? rows[0] : null;
+    const currentMonth = first
+        ? new Date(first.date + "T00:00:00").getMonth()
+        : null;
+    const currentYear = first
+        ? new Date(first.date + "T00:00:00").getFullYear()
+        : null;
+
+    tbody.innerHTML = "";
+
+    rows.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.dataset.date = row.date;
+        tr.dataset.id = row.id ?? "";
+        tr.innerHTML = `
+            <td class="receipt-date-cell">${escapeHtml(receiptDisplayDate(row.date))}</td>
+            ${cols.map(col => `
+                <td>
+                    <input type="text" inputmode="decimal"
+                        autocomplete="off"
+                        class="receipt-input"
+                        data-receipt-field="${col.field}"
+                        value="${escapeHtml(row[col.field] ?? "")}">
+                </td>
+            `).join("")}
+            <td class="receipt-delete-cell">
+                <button
+                    type="button"
+                    class="cargo-delete-btn receipt-delete-btn"
+                    data-action="receipt-delete"
+                    title="Delete"
+                    aria-label="Delete receipt row"
+                >×</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    const ytdRows = (tableData[section + "__history"] || []).filter(row => {
+        if (!row.date || currentYear === null) return false;
+        return new Date(row.date + "T00:00:00").getFullYear() === currentYear;
+    });
+
+    const mtdRows = rows.filter(row => {
+        if (!row.date || currentMonth === null) return false;
+        return new Date(row.date + "T00:00:00").getMonth() === currentMonth;
+    });
+
+    const summary = (label, sourceRows) => `
+        <tr class="receipt-summary-row">
+            <td class="receipt-summary-label">${label}</td>
+            ${cols.map(col => `
+                <td class="receipt-summary-value" data-summary="${label}" data-field="${col.field}">
+                    ${receiptFormat(receiptSum(sourceRows, col.field))}
+                </td>
+            `).join("")}
+            <td class="receipt-delete-cell"></td>
+        </tr>
+    `;
+
+    tbody.insertAdjacentHTML("beforeend", summary("MTD (MT)", mtdRows));
+    tbody.insertAdjacentHTML("beforeend", summary("YTD (MT)", ytdRows));
+
+    /*
+     * IMPORTANT:
+     * Do NOT call receiptRender() on every keystroke.
+     *
+     * Re-rendering the table while the user is typing destroys the
+     * current input element and moves focus away. That is why only
+     * one digit/value could be entered at a time.
+     *
+     * Update the row and the MTD/YTD cells in place instead.
+     */
+    $(table).off("input.receipt").on("input.receipt", ".receipt-input", function() {
+        const tr = this.closest("tr");
+        const row = rows.find(r => r.date === tr.dataset.date);
+        if (!row) return;
+
+        const field = this.dataset.receiptField;
+        row[field] = this.value;
+
+        updateReceiptSummary(section);
+
+        setStatus(section, "Unsaved changes", false);
+    });
+
+    /*
+     * Receipt row delete button.
+     * Works for both unsaved rows and rows already stored in PostgreSQL.
+     */
+    $(table)
+        .off("click.receiptDelete")
+        .on(
+            "click.receiptDelete",
+            "button[data-action='receipt-delete']",
+            function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const tr = this.closest("tr");
+                if (!tr) return;
+
+                const row = rows.find(
+                    r => String(r.date) === String(tr.dataset.date)
+                );
+
+                if (row) {
+                    deleteReceiptRow(section, row);
+                }
+            }
+        );
+}
+
+function updateReceiptSummary(section) {
+    const table = document.getElementById("table-" + section);
+    if (!table) return;
+
+    const rows = tableData[section] || [];
+    const cols = receiptColumns();
+
+    if (!rows.length) return;
+
+    const first = rows[0];
+    const currentDate = new Date(first.date + "T00:00:00");
+    const currentMonth = currentDate.getMonth();
+    const currentYear = currentDate.getFullYear();
+
+    const mtdRows = rows.filter(row => {
+        if (!row.date) return false;
+
+        const d = new Date(row.date + "T00:00:00");
+
+        return (
+            d.getMonth() === currentMonth &&
+            d.getFullYear() === currentYear
+        );
+    });
+
+    const historyRows =
+        tableData[section + "__history"] || rows;
+
+    const ytdRows = historyRows.filter(row => {
+        if (!row.date) return false;
+
+        const d = new Date(row.date + "T00:00:00");
+
+        return d.getFullYear() === currentYear;
+    });
+
+    const mtdCells =
+        table.querySelectorAll(
+            '[data-summary="MTD (MT)"]'
+        );
+
+    const ytdCells =
+        table.querySelectorAll(
+            '[data-summary="YTD (MT)"]'
+        );
+
+    cols.forEach((col, index) => {
+        const mtdTotal = receiptSum(
+            mtdRows,
+            col.field
+        );
+
+        const ytdTotal = receiptSum(
+            ytdRows,
+            col.field
+        );
+
+        if (mtdCells[index]) {
+            mtdCells[index].textContent =
+                receiptFormat(mtdTotal);
+        }
+
+        if (ytdCells[index]) {
+            ytdCells[index].textContent =
+                receiptFormat(ytdTotal);
+        }
+    });
+}
+
+
+async function deleteReceiptRow(section, row) {
+    if (!confirm("Delete this receipt entry?")) {
+        return;
+    }
+
+    /*
+     * New unsaved receipt row.
+     */
+    if (row.id === null || row.id === undefined) {
+        const index = tableData[section].indexOf(row);
+
+        if (index !== -1) {
+            tableData[section].splice(index, 1);
+        }
+
+        receiptRender(section);
+
+        setStatus(
+            section,
+            "Receipt row removed",
+            true
+        );
+
+        return;
+    }
+
+    /*
+     * Existing database receipt row.
+     */
+    try {
+        setStatus(section, "Deleting...", false);
+
+        const response = await fetch(
+            "/module/CARGO_STATS/api/" +
+            section +
+            "/id/" +
+            row.id,
+            {
+                method: "DELETE",
+                headers: {
+                    "Accept": "application/json"
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.error || "Delete failed"
+            );
+        }
+
+        const index = tableData[section].findIndex(
+            item => Number(item.id) === Number(row.id)
+        );
+
+        if (index !== -1) {
+            tableData[section].splice(index, 1);
+        }
+
+        /*
+         * Remove the same row from the history copy so
+         * YTD updates immediately after deletion.
+         */
+        const history =
+            tableData[section + "__history"] || [];
+
+        const historyIndex = history.findIndex(
+            item => Number(item.id) === Number(row.id)
+        );
+
+        if (historyIndex !== -1) {
+            history.splice(historyIndex, 1);
+        }
+
+        receiptRender(section);
+
+        setStatus(
+            section,
+            "Deleted successfully ✓",
+            true
+        );
+
+    } catch (error) {
+        console.error(
+            "RECEIPT DELETE ERROR:",
+            section,
+            error
+        );
+
+        setStatus(
+            section,
+            "Delete failed: " + error.message,
+            false
+        );
+    }
+}
+
+function receiptAddRow(section) {
+    if (!isReceiptSection(section)) {
+        return;
+    }
+
+    /*
+     * Same date behavior as the existing tables:
+     * the date is generated dynamically from today's date.
+     * Nothing is hardcoded.
+     */
+    const newDate = todayISO();
+
+    const rows = tableData[section] || [];
+
+    /*
+     * Do not create a second row for the same date.
+     */
+    const existing = rows.find(
+        row => String(row.date).slice(0, 10) === newDate
+    );
+
+    if (existing) {
+        setStatus(
+            section,
+            "Today's date is already added.",
+            false
+        );
+        return;
+    }
+
+    const row = receiptCreateRow(newDate);
+
+    rows.push(row);
+
+    rows.sort(
+        (a, b) =>
+            String(a.date).localeCompare(String(b.date))
+    );
+
+    tableData[section] = rows;
+
+    receiptRender(section);
+
+    setStatus(
+        section,
+        "New date added. Enter the receipt quantities and click Save.",
+        false
+    );
+}
+
+async function saveReceiptTable(section) {
+    try {
+        setStatus(section, "Saving...", false);
+        const cfg = TABLES[section];
+        const rows = tableData[section] || [];
+
+        for (const row of rows) {
+            const hasValue = receiptColumns().some(col =>
+                row[col.field] !== "" && row[col.field] !== null && row[col.field] !== undefined
+            );
+            if (!hasValue && (row.id === null || row.id === undefined)) continue;
+
+            const dataForSave = {};
+            receiptColumns().forEach(col => {
+                dataForSave[col.field] = row[col.field] === "" ? null : receiptNumber(row[col.field]);
+            });
+
+            dataForSave.__receipt_layout = RECEIPT_LAYOUT;
+
+            const response = await fetch(
+                "/module/CARGO_STATS/api/" + section,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    body: JSON.stringify({
+                        id: row.id ?? null,
+                        date: row.date,
+                        data: dataForSave
+                    })
+                }
+            );
+
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || "Save failed");
+            }
+            row.id = result.id;
+        }
+
+        await loadReceiptTable(section);
+        setStatus(section, "Saved successfully ✓", true);
+    } catch (error) {
+        console.error("RECEIPT SAVE ERROR:", section, error);
+        setStatus(section, "Save failed: " + error.message, false);
+    }
+}
+
+async function loadReceiptTable(section) {
+    try {
+        setStatus(section, "Loading...", false);
+        const response = await fetch("/module/CARGO_STATS/api/" + section, {
+            method: "GET",
+            headers: { "Accept": "application/json" }
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Unable to load data");
+
+        const rawRows = Array.isArray(result) ? result : [];
+        const builtRows = receiptBuildRows(rawRows);
+        tableData[section] = builtRows;
+        tableData[section + "__history"] = rawRows.map(row => ({ ...row }));
+        receiptRender(section);
+        setStatus(section, "Loaded successfully", true);
+    } catch (error) {
+        console.error("RECEIPT LOAD ERROR:", section, error);
+        setStatus(section, "Load failed: " + error.message, false);
+    }
+}
+
 function calculateTotal(cfg, row) {
+    if (!cfg.totalField) {
+        return "";
+    }
+
     let total = 0;
 
     cfg.numericFields.forEach(field => {
@@ -1883,7 +2741,7 @@ function inputHtml(row, field, cfg) {
         `;
     }
 
-    if (field === cfg.totalField) {
+    if (cfg.totalField && field === cfg.totalField) {
         return `
             <input
                 type="text"
@@ -1896,12 +2754,15 @@ function inputHtml(row, field, cfg) {
     }
 
     const isDynamic = (cfg.dynamicFields || []).includes(field);
+    const isNumeric = cfg.numericFields.includes(field);
+
     return `
         <input
-            type="text"
-            inputmode="decimal"
+            type="${isNumeric ? "number" : "text"}"
+            ${isNumeric ? 'step="any"' : ""}
+            inputmode="${isNumeric ? "decimal" : "text"}"
             autocomplete="off"
-            class="cargo-input cargo-quantity-input${isDynamic ? " cargo-dynamic-input" : ""}"
+            class="cargo-input${isNumeric ? " cargo-quantity-input" : ""}${isDynamic ? " cargo-dynamic-input" : ""}"
             data-field="${field}"
             value="${escapeHtml(row[field] ?? "")}"
             placeholder="${isDynamic ? "Enter value" : ""}"
@@ -1923,6 +2784,13 @@ function escapeHtml(value) {
    ============================================================ */
 
 function getColumnWidth(cfg, field) {
+    if (cfg.title && cfg.title.includes(": Receipt")) {
+        if (field === "source") return "150px";
+        if (field === "cargo") return "180px";
+        if (field === "location") return "180px";
+        return "135px";
+    }
+
     if ((cfg.dynamicFields || []).includes(field)) {
         return "150px";
     }
@@ -2219,6 +3087,11 @@ function initializeDataTable(section) {
 async function loadTable(section) {
     const cfg = TABLES[section];
 
+    if (isReceiptSection(section)) {
+        await loadReceiptTable(section);
+        return;
+    }
+
     try {
         setStatus(section, "Loading...", false);
 
@@ -2283,6 +3156,10 @@ async function loadTable(section) {
    ============================================================ */
 
 function addRow(section) {
+    if (isReceiptSection(section)) {
+        return;
+    }
+
     const cfg = TABLES[section];
 
     const row = createNewRow(cfg);
@@ -2316,6 +3193,10 @@ function addRow(section) {
    ============================================================ */
 
 async function saveTable(section) {
+    if (isReceiptSection(section)) {
+        return saveReceiptTable(section);
+    }
+
     const cfg = TABLES[section];
 
     try {
@@ -2338,9 +3219,7 @@ async function saveTable(section) {
 
         for (const row of rows) {
             if (!row.date) {
-                throw new Error(
-                    "Please enter a date for every row."
-                );
+                row.date = todayISO();
             }
 
             calculateTotal(cfg, row);
@@ -2621,6 +3500,11 @@ $(document).ready(function() {
     loadTable("stock_rmhs");
 
     loadTable("stock_pnp");
+
+    loadTable("pnp_receipt");
+    loadTable("karanja_receipt");
+    loadTable("roha_receipt");
+    loadTable("dolvi_receipt");
 
 });
 </script>
