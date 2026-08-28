@@ -606,6 +606,16 @@ def revenue_backdated_index():
                            status=revenue.get_status(), can_upload=_can_upload(),
                            fields=revenue.FIELDS, derived=revenue.DERIVED_FIELDS)
 
+@bp.route('/module/RP02/cargo-report/')
+@login_required
+def cargo_report_rp02():
+    return render_template(
+        'cargo_report/cargo_report.html',
+        username=session.get('username'),
+        module_code='RP02',
+        module_href='/module/RP02/'
+    )
+
 
 @bp.route('/api/module/RP02/revenue-backdated/template')
 @read_required

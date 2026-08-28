@@ -45,7 +45,7 @@ def login_required(f):
 
 
 # =========================================================
-# INDEX PAGE
+# INDEX PAGE (RP01)
 # =========================================================
 
 @bp.route('/module/RP01/cargo-report/')
@@ -53,7 +53,9 @@ def login_required(f):
 def cargo_report_index():
     return render_template(
         'cargo_report/cargo_report.html',
-        username=session.get('username')
+        username=session.get('username'),
+        module_code='RP01',
+        module_href='/module/RP01/'
     )
 
 
@@ -175,9 +177,7 @@ def get_cargo_report():
                               |
                               +--> invoice_lines.bill_id
                                         |
-                                        +--> invoice_lines.invoice_id
-                                                  |
-                                                  +--> invoice_header.id
+                                        +--> invoice_header.id
 
         This prevents one MBC's consolidated invoice from being
         incorrectly displayed for every Material PO belonging to
