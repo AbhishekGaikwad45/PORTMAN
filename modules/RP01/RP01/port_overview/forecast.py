@@ -16,6 +16,7 @@ across all seven days, which is a 7-day port with nothing to learn.
 History comes from rp01_daily_throughput (see seed_eq_wise.py); days after the
 last seeded date come live from lueu_lines, so the forecast self-updates.
 """
+import bisect
 import calendar
 from datetime import date, timedelta
 
@@ -418,17 +419,29 @@ def forecast(scope='fy', target=None, today=None, seed=None):
     the targets table (and views.py stays the single owner of ABP/Outlook logic).
     """
     dates, y = load_series()
+    today = today or date.today()
+
+    # Today is still being worked, so it is not history. Treating it as history
+    # is wrong twice over: its part-day total drags the trailing rate down, and
+    # it vanishes from "days left" — on the 28th of a 31-day month the crew has
+    # 4 days to work, not 3. History therefore stops at yesterday and today is
+    # the first simulated day; the same rule gives the FY count 28 Aug -> 31 Mar
+    # inclusive, matching the header countdown.
+    partial_today = float(sum(v for d, v in zip(dates, y) if d == today))
+    n_hist = bisect.bisect_right(dates, today - timedelta(days=1))
+    dates, y = dates[:n_hist], y[:n_hist]
+
     if len(y) < LEVEL_WINDOW + BLOCK * 2:
         return {'available': False,
                 'reason': 'Not enough daily history — run seed_eq_wise.py.'}
 
-    today = today or date.today()
     start, end = period_bounds(scope, today)
     months = np.array([d.month for d in dates])
     midx = month_index(dates, y)
 
-    achieved = float(y[[i for i, d in enumerate(dates) if start <= d <= today]].sum())
-    last_actual = min(dates[-1], today)
+    hist = [(d, v) for d, v in zip(dates, y) if d >= start]
+    achieved = float(sum(v for _, v in hist))
+    last_actual = dates[-1]
 
     future = []
     d = max(last_actual + timedelta(days=1), start)
@@ -453,7 +466,6 @@ def forecast(scope='fy', target=None, today=None, seed=None):
         p_hit = float((totals >= float(target)).mean())
 
     # Actual cumulative to date, for the "actual vs forecast" line.
-    hist = [(d, v) for d, v in zip(dates, y) if start <= d <= today]
     run, actual = 0.0, []
     for d, v in hist:
         run += v
@@ -463,6 +475,11 @@ def forecast(scope='fy', target=None, today=None, seed=None):
         return [{'d': f.isoformat(), 'v': round(float(v), 1)}
                 for f, v in zip(future, np.percentile(paths, q, axis=0))]
 
+    def dband(q):
+        """Same percentiles on the per-day rate, not the cumulative total."""
+        return [{'d': f.isoformat(), 'v': round(float(v), 1)}
+                for f, v in zip(future, np.percentile(sims, q, axis=0))]
+
     return {
         'available':    True,
         'scope':        scope,
@@ -470,7 +487,10 @@ def forecast(scope='fy', target=None, today=None, seed=None):
         'period':       {'start': start.isoformat(), 'end': end.isoformat()},
         'target':       float(target) if target else None,
         'achieved':     round(achieved, 1),
-        'days_left':    len(future),
+        # Booked so far on the in-progress day, reported separately so the drop
+        # in `achieved` against the dashboard's month-to-date card is explained.
+        'partial_today': round(partial_today, 1),
+        'days_left':    len(future),   # includes today, which is still to be worked
         'p_hit':        p_hit,
         # Plain average of the last 60 actual days — directly comparable to
         # required_daily. `level` is the de-seasonalised version the model runs
@@ -489,4 +509,8 @@ def forecast(scope='fy', target=None, today=None, seed=None):
         'p10':          band(10),
         'p50':          band(50),
         'p90':          band(90),
+        'daily_actual': [{'d': d.isoformat(), 'v': round(v, 1)} for d, v in hist],
+        'daily_p10':    dband(10),
+        'daily_p50':    dband(50),
+        'daily_p90':    dband(90),
     }

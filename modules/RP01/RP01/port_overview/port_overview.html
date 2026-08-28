@@ -482,7 +482,8 @@ html, body {
 .fc-stat .v { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; color:var(--text); margin-top:3px; }
 .fc-stat .u { font-size:9.5px; color:var(--text3); font-weight:500; }
 
-#fc-chart { height:310px; }
+#fc-chart { height:300px; }
+#fc-chart-d { height:200px; }
 
 .fc-scen { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
 .fc-card { border:1px solid var(--border); border-left-width:3px; border-radius:var(--r-sm); padding:10px 12px; }
@@ -1149,7 +1150,7 @@ loadData();
    Monte-Carlo forecast of the FY / month total, from the model in
    port_overview/forecast.py. Fetched on open and on scope change only —
    it is not part of the dashboard's polling loop.                       */
-let fcScope = 'fy', fcChart = null;
+let fcScope = 'fy', fcChart = null, fcChartD = null;
 
 function openForecast() {
   document.getElementById('fc-back').classList.add('on');
@@ -1157,7 +1158,8 @@ function openForecast() {
 }
 function closeForecast() {
   document.getElementById('fc-back').classList.remove('on');
-  if (fcChart) { fcChart.destroy(); fcChart = null; }
+  if (fcChart)  { fcChart.destroy();  fcChart  = null; }
+  if (fcChartD) { fcChartD.destroy(); fcChartD = null; }
 }
 function setForecastScope(s) {
   if (s === fcScope) return;
@@ -1223,15 +1225,18 @@ function renderForecast(d) {
     pb.style.background = col;
   }
 
-  const gap = d.target ? d.expected - d.target : null;
-  document.getElementById('fc-stats').innerHTML = [
+  // Achieved stops at the last *complete* day, so today's part-day total gets
+  // its own tile — otherwise it just looks like the number went backwards.
+  const stats = [
     ['Target',          fcMT(d.target),          'MT'],
     ['Achieved',        fcMT(d.achieved),        'MT'],
-    ['Days left',       d.days_left,             ''],
+    ['Days left',       d.days_left,             'incl. today'],
     ['Required / day',  fcMT(d.required_daily),  'MT'],
     ['Forecast / day',  fcMT(d.forecast_daily),  'MT'],
     ['Last 60d actual', fcMT(d.daily_rate),      'MT/day'],
-  ].map(([k, v, u]) =>
+  ];
+  if (d.partial_today) stats.splice(2, 0, ['Booked today', fcMT(d.partial_today), 'MT so far']);
+  document.getElementById('fc-stats').innerHTML = stats.map(([k, v, u]) =>
     `<div class="fc-stat"><div class="k">${k}</div>
        <div class="v">${v} <span class="u">${u}</span></div></div>`).join('');
 
@@ -1256,6 +1261,7 @@ function renderForecast(d) {
     : `Simulated 5,000 times from ${d.days_left} remaining days.`;
 
   drawForecastChart(d);
+  drawDailyChart(d);
 }
 
 function drawForecastChart(d) {
@@ -1314,6 +1320,59 @@ function drawForecastChart(d) {
     ]
   });
 }
+
+// Same simulation, un-cumulated: what we discharge on a given day. The
+// cumulative chart answers "do we get there"; this one answers "at what rate",
+// which is the number a shift plan is actually built from.
+function drawDailyChart(d) {
+  const ms = s => Date.parse(s + 'T00:00:00Z');
+  const act = (d.daily_actual || []).map(r => [ms(r.d), r.v]);
+  const p50 = (d.daily_p50 || []).map(r => [ms(r.d), r.v]);
+  const lo = d.daily_p10 || [], hi = d.daily_p90 || [];
+  const band = lo.map((r, i) => [ms(r.d), r.v, (hi[i] || r).v]);
+  const k = v => (v / 1e3).toFixed(0) + 'k';
+
+  if (fcChartD) fcChartD.destroy();
+  fcChartD = Highcharts.chart('fc-chart-d', {
+    chart: { spacing: [8, 4, 4, 4], style: { fontFamily: 'Inter, sans-serif' } },
+    title: { text: 'Daily discharge', align: 'left', x: 2,
+             style: { fontSize: '11px', fontWeight: '600', color: '#51607A' } },
+    credits: { enabled: false },
+    accessibility: {
+      description: `Discharge per day, actual to ${d.as_of} then forecast to ${d.period.end}.`
+    },
+    legend: { enabled: false },
+    xAxis: { type: 'datetime', lineColor: '#D2DAE6', tickColor: '#D2DAE6',
+             labels: { style: { fontSize: '10px', color: '#97A2B7' } } },
+    yAxis: {
+      title: { text: 'MT / day', style: { fontSize: '10px', color: '#97A2B7' } },
+      gridLineColor: '#EDF1F7', min: 0,
+      labels: { formatter() { return k(this.value); },
+                style: { fontSize: '10px', color: '#97A2B7' } },
+      plotLines: d.required_daily ? [{
+        value: d.required_daily, color: '#D6482F', width: 2, dashStyle: 'Dash', zIndex: 5,
+        label: { text: 'Required ' + k(d.required_daily) + '/day', align: 'right', x: -6, y: -5,
+                 style: { fontSize: '10px', fontWeight: '600', color: '#D6482F' } } }] : []
+    },
+    tooltip: {
+      shared: true, xDateFormat: '%e %b %Y',
+      pointFormatter() {
+        return `<span style="color:${this.color}">●</span> ${this.series.name}: <b>` +
+               (this.high !== undefined ? k(this.low) + ' – ' + k(this.high)
+                                        : fmtNum(Math.round(this.y)) + ' MT') + '</b><br/>';
+      }
+    },
+    plotOptions: { series: { animation: false, marker: { enabled: false } },
+                   column: { borderWidth: 0, groupPadding: .04, pointPadding: .02 } },
+    series: [
+      { name: 'P10 – P90 range', type: 'arearange', data: band,
+        color: '#1955E0', fillOpacity: .13, lineWidth: 0, zIndex: 0 },
+      { name: 'Forecast / day (P50)', type: 'line', data: p50,
+        color: '#1955E0', dashStyle: 'ShortDash', lineWidth: 2, zIndex: 3 },
+      { name: 'Actual / day', type: 'column', data: act, color: '#0B2E77', zIndex: 1 }
+    ]
+  });
+}
 </script>
 
 <div id="fc-back" onclick="if(event.target===this)closeForecast()">
@@ -1341,6 +1400,7 @@ function drawForecastChart(d) {
           <div class="fc-stats" id="fc-stats"></div>
         </div>
         <div id="fc-chart"></div>
+        <div id="fc-chart-d"></div>
         <div class="fc-scen" id="fc-scen"></div>
         <div class="fc-note" id="fc-note"></div>
       </div>
