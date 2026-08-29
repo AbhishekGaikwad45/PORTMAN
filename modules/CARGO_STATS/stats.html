@@ -628,6 +628,24 @@
         background: #fff;
         font-size: 14px;
     }
+
+    .receipt-report-table .receipt-date-input {
+        display: block;
+        width: 100%;
+        min-width: 105px;
+        height: 34px;
+        border: 0;
+        outline: 0;
+        padding: 4px 6px;
+        box-sizing: border-box;
+        background: #fff;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .receipt-report-table .receipt-date-input:focus {
+        box-shadow: inset 0 0 0 2px #4285d4;
+    }
     .receipt-report-table .receipt-input {
         display: block;
         width: 100%;
@@ -2474,7 +2492,15 @@ function receiptRender(section) {
         tr.dataset.date = row.date;
         tr.dataset.id = row.id ?? "";
         tr.innerHTML = `
-            <td class="receipt-date-cell">${escapeHtml(receiptDisplayDate(row.date))}</td>
+            <td class="receipt-date-cell">
+                <input
+                    type="date"
+                    class="receipt-date-input"
+                    data-receipt-date="true"
+                    value="${escapeHtml(String(row.date || "").slice(0, 10))}"
+                    aria-label="Receipt date"
+                >
+            </td>
             ${cols.map(col => `
                 <td>
                     <input type="text" inputmode="decimal"
@@ -2534,7 +2560,12 @@ function receiptRender(section) {
      */
     $(table).off("input.receipt").on("input.receipt", ".receipt-input", function() {
         const tr = this.closest("tr");
-        const row = rows.find(r => r.date === tr.dataset.date);
+        if (!tr) return;
+
+        const row = rows.find(r =>
+            (r.id !== null && r.id !== undefined && String(r.id) === String(tr.dataset.id)) ||
+            (r.id === null && String(r.date) === String(tr.dataset.date))
+        );
         if (!row) return;
 
         const field = this.dataset.receiptField;
@@ -2543,6 +2574,54 @@ function receiptRender(section) {
         updateReceiptSummary(section);
 
         setStatus(section, "Unsaved changes", false);
+    });
+
+    /*
+     * Receipt date editing.
+     * Existing rows are identified by database ID first, so changing
+     * the date does not break the link to the stored record.
+     */
+    $(table).off("change.receiptDate").on("change.receiptDate", ".receipt-date-input", function() {
+        const tr = this.closest("tr");
+        if (!tr) return;
+
+        const oldDate = tr.dataset.date;
+        const newDate = String(this.value || "").slice(0, 10);
+
+        const row = rows.find(r =>
+            (r.id !== null && r.id !== undefined && String(r.id) === String(tr.dataset.id)) ||
+            (r.id === null && String(r.date) === String(oldDate))
+        );
+
+        if (!row) return;
+
+        if (!newDate) {
+            this.value = String(row.date || "").slice(0, 10);
+            return;
+        }
+
+        const duplicate = rows.find(other =>
+            other !== row &&
+            String(other.date || "").slice(0, 10) === newDate
+        );
+
+        if (duplicate) {
+            alert("A receipt entry already exists for " + newDate + ".");
+            this.value = String(row.date || "").slice(0, 10);
+            return;
+        }
+
+        row.date = newDate;
+        tr.dataset.date = newDate;
+
+        rows.sort((a, b) =>
+            String(a.date || "").localeCompare(String(b.date || ""))
+        );
+
+        receiptRender(section);
+        updateReceiptSummary(section);
+
+        setStatus(section, "Date changed. Click Save to store the new date.", false);
     });
 
     /*
