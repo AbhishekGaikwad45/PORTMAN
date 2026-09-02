@@ -30,6 +30,7 @@ BLOCK = 7           # residual bootstrap block length, in days
 LEVEL_WINDOW = 60   # trailing days defining "our current rate"
 RATIO_POOL = 730    # how far back residuals are drawn from
 MIN_FY_DAYS = 300   # a partial FY can't contribute a seasonal shape
+STALE_DAYS = 7      # data older than this is a broken feed, not a lag
 DRIFT_STEP = 30     # horizon over which level drift is calibrated
 
 # lueu_lines.entry_date is TEXT, and delay rows are saved with it blank — a bare
@@ -58,29 +59,40 @@ def load_series():
         if not cur.fetchone()['t']:
             return [], np.array([])
 
-        cur.execute("SELECT entry_date, total FROM rp01_daily_throughput ORDER BY entry_date")
+        # entry_date <= today: one junk future-dated row in the seed (an Excel
+        # total line, a mistyped year) would otherwise become `after` below and
+        # silence the whole live extension — the series would stop dead at the
+        # last real seeded day and `achieved` would read 0 for the current FY.
+        cur.execute("SELECT entry_date, total FROM rp01_daily_throughput "
+                    "WHERE entry_date <= CURRENT_DATE ORDER BY entry_date")
         rows = [(r['entry_date'], float(r['total'] or 0)) for r in cur.fetchall()]
         if not rows:
             return [], np.array([])
 
-        # Days past the seeded history, split at LIVE_START. The two windows
-        # are disjoint by construction, so UNION ALL can never double-count a
-        # day and no date can be sourced from the wrong table.
+        # Days past the seeded history. Before LIVE_START rp01_historical_lueu
+        # is preferred (lueu_lines only holds partial rows for that period);
+        # from LIVE_START on it has nothing and lueu_lines is the truth. The
+        # join is a fallback, not a hard split: a hard split drops every
+        # pre-cutover day rp01_historical_lueu happens not to cover, and a
+        # 9-month hole understates the series far worse than partial rows do.
+        # COALESCE picks one side per day, so nothing is double-counted.
         cur.execute(f"""
-            SELECT d, SUM(q) AS q FROM (
-                SELECT {LUEU_DATE} AS d, COALESCE(quantity, 0) AS q
-                FROM lueu_lines
-                WHERE is_deleted IS NOT TRUE
-            ) s
-            WHERE d > %(after)s AND d >= %(live_start)s
-            GROUP BY d
-
-            UNION ALL
-
-            SELECT entry_date AS d, SUM(COALESCE(quantity, 0)) AS q
-            FROM rp01_historical_lueu
-            WHERE entry_date > %(after)s AND entry_date < %(live_start)s
-            GROUP BY 1
+            WITH live AS (
+                SELECT d, SUM(q) AS q FROM (
+                    SELECT {LUEU_DATE} AS d, COALESCE(quantity, 0) AS q
+                    FROM lueu_lines
+                    WHERE is_deleted IS NOT TRUE
+                ) s
+                WHERE d > %(after)s
+                GROUP BY d
+            ), hist AS (
+                SELECT entry_date AS d, SUM(COALESCE(quantity, 0)) AS q
+                FROM rp01_historical_lueu
+                WHERE entry_date > %(after)s AND entry_date < %(live_start)s
+                GROUP BY 1
+            )
+            SELECT COALESCE(h.d, l.d) AS d, COALESCE(h.q, l.q) AS q
+            FROM hist h FULL OUTER JOIN live l ON l.d = h.d
             ORDER BY 1
         """, {'after': rows[-1][0], 'live_start': LIVE_START})
         rows += [(r['d'], float(r['q'] or 0)) for r in cur.fetchall()]
@@ -442,9 +454,21 @@ def forecast(scope='fy', target=None, today=None, seed=None):
     months = np.array([d.month for d in dates])
     midx = month_index(dates, y)
 
+    last_actual = dates[-1]
+
+    # A stale series silently produces nonsense: `achieved` reads 0 because no
+    # day falls inside the period, the whole period is then "forecast", and the
+    # modal shows a confident probability computed from nothing. Say what is
+    # wrong instead — the number matters too much to guess at.
+    lag = (today - last_actual).days
+    if lag > STALE_DAYS:
+        return {'available': False,
+                'reason': f'Daily throughput data stops at {last_actual} '
+                          f'({lag} days ago). Check rp01_daily_throughput, '
+                          'rp01_historical_lueu and lueu_lines for the gap.'}
+
     hist = [(d, v) for d, v in zip(dates, y) if d >= start]
     achieved = float(sum(v for _, v in hist))
-    last_actual = dates[-1]
 
     future = []
     d = max(last_actual + timedelta(days=1), start)

@@ -1132,7 +1132,12 @@ function loadData() {
       document.getElementById('hdr-shift-name').textContent = d.shift_incharge || '—';
       document.getElementById('ftr-upd').textContent = d.as_of || '—';
     })
-    .catch(e => console.error('Port overview error:', e));
+    .catch(e => {
+      // Wall display: a silent failure leaves yesterday's numbers up looking
+      // live. Say it in the footer, not just the console.
+      console.error('Port overview error:', e);
+      document.getElementById('ftr-upd').textContent = 'connection lost — retrying';
+    });
 }
 
 function reload() { cd = REFRESH; loadData(); }
