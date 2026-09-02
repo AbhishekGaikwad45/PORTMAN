@@ -17,6 +17,7 @@ from .mbc_tracking      import views as _mbc_tracking_views    # noqa: registers
 from .port_map          import views as _port_map_views        # noqa: registers port-map routes on bp
 from .daily_barge_report import views as _mv_barge_report_views  # noqa: registers mv-barge-report routes on bp
 from .cargo_report import views as _cargo_report_views
+from .cargo_statistics import cargo_statistics as _cargo_statistics_views
 from .historical_data import views as _historical_data_views  # noqa: registers historical-data routes on bp
 from .Barge_Position_Report  import views as _barge_position_views
 
