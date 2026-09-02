@@ -1,0 +1,4321 @@
+{% extends "base.html" %}
+
+{% block title %}Cargo Statistics - RP01{% endblock %}
+
+{% block head %}
+<style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: auto;
+        }
+
+        .report-page {
+            width: max-content;
+            min-width: 100%;
+            max-width: none;
+        }
+        .report-layout {
+            width: max-content;
+            min-width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            align-items: flex-start;
+        }
+
+        .top-report-row {
+            display: grid;
+            grid-template-columns: 908px 450px;
+            column-gap: 25px;
+            align-items: start;
+            width: max-content;
+        }
+
+        .main-report {
+            width: 908px;
+            min-width: 908px;
+        }
+
+        .consumption-section {
+            width: 450px;
+            min-width: 450px;
+            /* Align Consumption exactly with the Outlook row */
+            margin-top: 68px;
+        }
+
+        .consumption-table-wrap {
+            width: 450px;
+            overflow: visible;
+        }
+
+/* Base layout/header is provided by base.html.
+       These styles only control the Cargo Statistics report. */
+
+
+        /* Standard RP01 page header — matches the reference Jinja page */
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border-color, #d9dee7);
+        }
+
+        .page-header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: var(--text-primary, #344054);
+            line-height: 1.2;
+        }
+
+        .module-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #4a90d9;
+            color: #fff;
+            padding: 3px 10px;
+            min-height: 24px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            line-height: 1;
+        }
+
+        .breadcrumb {
+            font-size: 11px;
+            color: var(--text-secondary, #667085);
+            margin-bottom: 14px;
+        }
+
+        .breadcrumb a {
+            color: #4a90d9;
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .report-page {
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .cargo-report-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 20px;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+
+        .cargo-report-header .date-controls {
+            justify-content: flex-start;
+            margin: 0;
+        }
+
+        .cargo-report-header .report-title {
+            justify-self: center;
+            white-space: nowrap;
+        }
+
+        .cargo-report-header .balance-box {
+            justify-self: end;
+            justify-content: flex-end;
+            margin: 0;
+            padding-bottom: 0;
+        }
+
+        .document-box {
+            border: 1px solid #222;
+        }
+
+        .document-title {
+            min-height: 27px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 1px solid #222;
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .document-details {
+            min-height: 25px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.7fr;
+            align-items: center;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .report-title {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            padding-bottom: 7px;
+        }
+
+        .balance-box {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 28px;
+            padding-bottom: 7px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .balance-days {
+            color: red;
+            font-size: 17px;
+        }
+
+        .date-controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 9px;
+            margin: 8px 0 10px;
+            font-size: 13px;
+        }
+
+        .date-controls label {
+            font-weight: 700;
+        }
+
+        .date-controls input {
+            height: 31px;
+            padding: 4px 8px;
+            border: 1px solid #777;
+            border-radius: 3px;
+            background: #fff;
+            font: inherit;
+        }
+
+        .date-controls button {
+            height: 31px;
+            padding: 4px 12px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            background: #eee;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .date-controls button:hover {
+            background: #e2e2e2;
+        }
+
+        .date-controls .download-excel-btn {
+            background: #217346;
+            color: #fff;
+            border-color: #217346;
+            width: 170px;
+            min-width: 170px;
+            padding-left: 18px;
+            padding-right: 18px;
+            white-space: nowrap;
+        }
+
+        .date-controls .download-excel-btn:hover {
+            background: #185c37;
+            border-color: #185c37;
+        }
+
+        .date-controls .download-excel-btn:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        /* Balance Days must always be displayed in red */
+        #balanceDays {
+            color: #ff0000 !important;
+            font-weight: 700;
+        }
+
+        .report-date-line {
+            text-align: center;
+            margin: 0 0 8px;
+            font-size: 13px;
+        }
+
+        .report-date-line strong {
+            font-weight: 700;
+        }
+
+        .table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        table {
+            width: 100%;
+            min-width: 908px;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        th,
+        td {
+            border: 1px solid #222;
+            padding: 7px 7px;
+            vertical-align: middle;
+        }
+
+        thead th {
+            background: #f1f1f1;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .cargo-col {
+            width: 108px;
+        }
+
+        .target-col {
+            width: 132px;
+        }
+
+        .day-col {
+            width: 138px;
+        }
+
+        .actual-col {
+            width: 112px;
+        }
+
+        .gap-col,
+        .asking-col {
+            width: 122px;
+        }
+
+        .stock-col {
+            width: 115px;
+        }
+
+        .group-head {
+            height: 52px;
+            font-size: 14px;
+        }
+
+        .sub-head {
+            height: 75px;
+            font-size: 13px;
+            line-height: 1.35;
+        }
+
+        .unit-head {
+            height: 32px;
+            font-size: 13px;
+        }
+
+        .cargo-head {
+            font-size: 13px;
+        }
+
+        td {
+            height: 41px;
+            font-size: 13px;
+        }
+
+        .cargo-cell {
+            text-align: left;
+            font-weight: 400;
+        }
+
+        .number-cell {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .stock-cell {
+            background: #dce3ea;
+            text-align: right;
+        }
+
+        .total-row td {
+            font-weight: 700;
+        }
+
+        .loading-row td,
+        .error-row td {
+            text-align: center;
+            padding: 24px;
+        }
+
+        .error-row td {
+            color: #b00000;
+            font-weight: 700;
+        }
+
+        .refresh-note {
+            margin-top: 7px;
+            text-align: right;
+            color: #666;
+            font-size: 11px;
+        }
+.consumption-table {
+            width: 450px;
+            min-width: 450px;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .consumption-table th,
+        .consumption-table td {
+            border: 1px solid #222;
+            padding: 8px 9px;
+            vertical-align: middle;
+        }
+
+        .consumption-table thead th {
+            background: #f1f1f1;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .consumption-table .consumption-title {
+            height: 52px;
+            font-size: 15px;
+        }
+
+        .consumption-table .consumption-subhead {
+            height: 42px;
+            font-size: 13px;
+        }
+
+        .consumption-table .consumption-unit {
+            height: 32px;
+            font-size: 13px;
+        }
+
+        .consumption-table td {
+            height: 41px;
+            font-size: 13px;
+        }
+
+        .consumption-table .consumption-cargo {
+            text-align: left;
+        }
+
+        .consumption-table .consumption-number {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .consumption-table .consumption-total td {
+            font-weight: 700;
+        }
+
+        .consumption-table .consumption-average td {
+            font-weight: 700;
+            background: #f1f1f1;
+        }
+
+        .consumption-table .consumption-day-cell {
+            background: #dce3ea;
+        }
+
+
+        @media print {
+            body {
+                padding: 0;
+            }
+
+            .report-page {
+                max-width: none;
+            }
+
+            .table-wrap {
+                overflow: visible;
+            }
+
+            table {
+                min-width: 0;
+            }
+
+            .refresh-note {
+                display: none;
+            }
+        }
+
+
+        @media (max-width: 1000px) {
+            .report-layout {
+                width: 100%;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+
+            .top-report-row,
+            .production-pnp-row {
+                width: 100%;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+
+            .main-report,
+            .consumption-section,
+            .production-pnp-row .production-section,
+            .pnp-additional-stack,
+            .pnp-additional-stack .pnp-receipt-section,
+            .pnp-additional-stack .additional-receipts-section {
+                width: 100%;
+                min-width: 0;
+                margin: 0;
+            }
+
+            .production-table-wrap,
+            .production-table,
+            .pnp-receipt-table-wrap,
+            .pnp-receipt-table,
+            .consumption-table-wrap,
+            .consumption-table {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .pnp-additional-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+        }
+
+        @media (max-width: 1000px) {
+            .report-layout {
+                grid-template-columns: 1fr;
+                width: 100%;
+                min-width: 0;
+            }
+
+            .main-report {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .consumption-section {
+                width: 100%;
+                min-width: 0;
+                margin-top: 18px;
+            }
+
+            .consumption-table-wrap,
+            .consumption-table {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .cargo-report-header {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .cargo-report-header .date-controls,
+            .cargo-report-header .report-title,
+            .cargo-report-header .balance-box {
+                justify-self: start;
+            }
+
+            .cargo-report-header .date-controls {
+                flex-wrap: wrap;
+            }
+        }
+    
+
+        /* ============================================================
+           PRODUCTION TABLE
+           ============================================================ */
+
+        .production-section {
+            margin-top: 18px;
+            width: 100%;
+        }
+
+        .production-table-wrap {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .production-table {
+            width: 715px;
+            min-width: 715px;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .production-table th,
+        .production-table td {
+            border: 1px solid #222;
+            padding: 7px 8px;
+            vertical-align: middle;
+        }
+
+        .production-table thead th {
+            background: #f1f1f1;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .production-table .production-head {
+            height: 52px;
+            font-weight: 700;
+        }
+
+        .production-table td {
+            height: 44px;
+            font-size: 13px;
+        }
+
+        .production-table .production-unit {
+            text-align: center;
+        }
+
+        .production-table .production-number {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .production-table .production-actual {
+            background: #dce3ea;
+        }
+
+        .production-table .production-target {
+            font-weight: 700;
+        }
+
+        /* ============================================================
+           PNP : RECEIPT / SUPPLY OF RM
+           ============================================================ */
+
+
+        .production-pnp-row {
+            display: grid;
+            grid-template-columns: 715px 636px;
+            column-gap: 25px;
+            align-items: start;
+            width: max-content;
+        }
+
+        .production-pnp-row .production-section {
+            grid-column: 1;
+            grid-row: 1;
+            width: 715px;
+            min-width: 715px;
+            margin: 0;
+        }
+
+        .pnp-additional-stack {
+            grid-column: 2;
+            grid-row: 1;
+            width: 636px;
+            min-width: 636px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 18px;
+        }
+
+        .pnp-additional-stack .pnp-receipt-section,
+        .pnp-additional-stack .additional-receipts-section {
+            width: 636px;
+            min-width: 636px;
+            margin: 0;
+        }
+
+        .pnp-additional-stack .additional-receipts-section {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .pnp-receipt-table-wrap {
+            width: 636px;
+            overflow: visible;
+        }
+
+        .pnp-receipt-table {
+            width: 636px;
+            min-width: 636px;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 13px;
+        }
+
+        .pnp-receipt-table th,
+        .pnp-receipt-table td {
+            border: 1px solid #222;
+            padding: 6px 7px;
+            vertical-align: middle;
+        }
+
+        .pnp-receipt-table thead th {
+            background: #f1f1f1;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .pnp-receipt-title {
+            height: 38px;
+            font-size: 14px;
+            font-weight: 700 !important;
+        }
+
+        .pnp-receipt-table .pnp-head {
+            height: 43px;
+        }
+
+        .pnp-receipt-table .pnp-unit-head {
+            height: 28px;
+        }
+
+        .pnp-receipt-table td {
+            height: 31px;
+        }
+
+        .pnp-receipt-table .pnp-source-group {
+            text-align: center;
+            font-weight: 700;
+        }
+
+        .pnp-receipt-table .pnp-cargo {
+            text-align: left;
+            font-weight: 700;
+        }
+
+        .pnp-receipt-table .pnp-source {
+            text-align: left;
+            font-weight: 700;
+        }
+
+        .pnp-receipt-table .pnp-number {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .pnp-receipt-table .pnp-day-cell {
+            background: #dce3ea;
+        }
+
+        .pnp-receipt-table .pnp-total td {
+            font-weight: 700;
+        }
+
+        @media (max-width: 1000px) {
+            .production-pnp-row {
+                display: block;
+                width: 100%;
+                min-width: 0;
+            }
+
+            .production-pnp-row .production-section,
+            .production-pnp-row .pnp-receipt-section {
+                display: block;
+            }
+
+            .production-pnp-row .production-section,
+            .pnp-receipt-section,
+            .pnp-receipt-table-wrap,
+            .pnp-receipt-table {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .production-pnp-row .production-section {
+                margin-top: 18px;
+            }
+
+            .pnp-receipt-section {
+                margin-top: 18px;
+                margin-left: 0;
+            }
+
+            .pnp-additional-stack {
+                width: 100%;
+                min-width: 0;
+                margin-left: 0;
+            }
+
+            .pnp-additional-stack .pnp-receipt-section,
+            .pnp-additional-stack .additional-receipts-section {
+                width: 100%;
+                min-width: 0;
+                margin-left: 0;
+            }
+        }
+
+
+        /* ============================================================
+           DAILY PORT OPERATIONS SUMMARY
+           ============================================================ */
+
+        .daily-operations-section {
+            width: max-content;
+            min-width: 100%;
+            margin-top: 0;
+        }
+
+        .daily-operations-wrap {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .daily-operations-table {
+            width: 100%;
+            min-width: 980px;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 13px;
+        }
+
+        .daily-operations-table th,
+        .daily-operations-table td {
+            border: 1px solid #222;
+            padding: 7px 7px;
+            vertical-align: middle;
+        }
+
+        .daily-operations-table thead th {
+            background: #f1f1f1;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .daily-operations-table .daily-operations-title {
+            height: 42px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .daily-operations-table .daily-operations-head {
+            height: 62px;
+            font-size: 12px;
+            line-height: 1.25;
+        }
+
+        .daily-operations-table .daily-operations-unit {
+            height: 30px;
+            font-size: 12px;
+        }
+
+        .daily-operations-table td {
+            height: 35px;
+            font-size: 13px;
+        }
+
+        .daily-operations-table .daily-date {
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .daily-operations-table .daily-number {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .daily-operations-table .daily-total-row td {
+            font-weight: 700;
+        }
+
+        .daily-operations-table .daily-average-row td {
+            font-weight: 700;
+            background: #f1f1f1;
+        }
+
+        .daily-operations-table .daily-loading-row td,
+        .daily-operations-table .daily-error-row td {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .daily-operations-table .daily-error-row td {
+            color: #b00000;
+            font-weight: 700;
+        }
+
+        @media print {
+            .daily-operations-wrap {
+                overflow: visible;
+            }
+
+            .daily-operations-table {
+                min-width: 0;
+            }
+        }
+
+
+        /* ============================================================
+           LOWER REPORT AREA
+           Production + Daily Operations on LEFT
+           PNP + Karanja + Roha + Dolvi on RIGHT
+           ============================================================ */
+
+        .lower-report-row {
+            display: grid;
+            grid-template-columns: 715px 636px;
+            column-gap: 25px;
+            align-items: start;
+            width: max-content;
+        }
+
+        .left-lower-stack {
+            grid-column: 1;
+            width: 715px;
+            min-width: 715px;
+            max-width: none;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            overflow: visible;
+        }
+
+        .left-lower-stack .production-section {
+            width: 715px;
+            min-width: 715px;
+            margin: 0;
+        }
+
+        .left-lower-stack .daily-operations-section {
+            width: 715px;
+            min-width: 715px;
+            margin: 0;
+        }
+
+        .lower-report-row > .pnp-additional-stack {
+            grid-column: 2;
+            grid-row: 1;
+            width: 636px;
+            min-width: 636px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 18px;
+        }
+
+        .lower-report-row .pnp-additional-stack .pnp-receipt-section,
+        .lower-report-row .pnp-additional-stack .additional-receipts-section {
+            width: 636px;
+            min-width: 636px;
+            margin: 0;
+        }
+
+        .lower-report-row .pnp-additional-stack .additional-receipts-section {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        @media (max-width: 1000px) {
+            .lower-report-row {
+                width: 100%;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+
+            .left-lower-stack,
+            .left-lower-stack .production-section,
+            .left-lower-stack .daily-operations-section,
+            .lower-report-row > .pnp-additional-stack,
+            .lower-report-row .pnp-additional-stack .pnp-receipt-section,
+            .lower-report-row .pnp-additional-stack .additional-receipts-section {
+                width: 100%;
+                min-width: 0;
+                margin: 0;
+            }
+
+            .left-lower-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+
+            .lower-report-row .pnp-additional-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+        }
+
+        @media (max-width: 1000px) {
+            .lower-report-row {
+                width: 100%;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+
+            .left-lower-stack,
+            .left-lower-stack .production-section,
+            .left-lower-stack .daily-operations-section,
+            .lower-report-row .pnp-additional-stack,
+            .lower-report-row .pnp-additional-stack .pnp-receipt-section,
+            .lower-report-row .pnp-additional-stack .additional-receipts-section {
+                width: 100%;
+                min-width: 0;
+                margin: 0;
+            }
+
+            .left-lower-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+        }
+
+        /* ============================================================
+           JETTY & MV DISCHARGE BAR CHART
+           Kept strictly inside the LEFT report column so it never
+           overlaps PNP / Karanja / Roha / Dolvi on the right.
+           ============================================================ */
+
+        .discharge-chart-section {
+            width: min(100%, 1500px);
+            min-width: 0;
+            max-width: 1500px;
+            margin: 0;
+            box-sizing: border-box;
+            border: 1px solid #222;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        .discharge-chart-title {
+            min-height: 42px;
+            padding: 9px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 700;
+            line-height: 1.2;
+            border-bottom: 1px solid #d5d5d5;
+            box-sizing: border-box;
+        }
+
+        .discharge-chart-wrap {
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            height: 480px;
+            min-width: 0;
+            box-sizing: border-box;
+            padding: 14px 16px 10px;
+            overflow: hidden;
+        }
+
+        #jettyMvDischargeChart {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100%;
+        }
+
+        .discharge-chart-error {
+            position: absolute;
+            inset: 0;
+            min-height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #b00000;
+            font-weight: 700;
+            padding: 20px;
+        }
+
+        @media (max-width: 1000px) {
+            .discharge-chart-section {
+                width: 100%;
+                min-width: 0;
+                max-width: 100%;
+            }
+
+            .discharge-chart-wrap {
+                height: 400px;
+            }
+        }
+
+        @media print {
+            .discharge-chart-section {
+                width: 100%;
+                min-width: 0;
+                max-width: 100%;
+                break-inside: avoid;
+            }
+        }
+
+
+        @media print {
+            .discharge-chart-section {
+                min-width: 0;
+                break-inside: avoid;
+            }
+        }
+
+/* ============================================================
+   CLEAN LOWER REPORT LAYOUT
+   ============================================================ */
+
+.lower-report-row {
+    display: grid;
+    grid-template-columns: minmax(680px, 1fr) minmax(620px, 0.95fr);
+    column-gap: 18px;
+    align-items: start;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: visible;
+}
+
+.left-lower-stack {
+    grid-column: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-sizing: border-box;
+}
+
+.right-lower-stack {
+    grid-column: 2;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    box-sizing: border-box;
+}
+
+.left-lower-stack > *,
+.right-lower-stack > * {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* The chart belongs only to the left column. */
+.lower-report-row .discharge-chart-section,
+.lower-report-row .left-lower-stack .discharge-chart-section {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.lower-report-row .discharge-chart-wrap {
+    width: 100%;
+    min-width: 0;
+    height: 460px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.lower-report-row #jettyMvDischargeChart {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100%;
+}
+
+/* Receipt tables on the right never overlay the left column. */
+.lower-report-row .right-lower-stack .receipt-section,
+.lower-report-row .right-lower-stack .rm-section,
+.lower-report-row .right-lower-stack table {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Keep the lower section usable on smaller screens. */
+@media (max-width: 1350px) {
+    .lower-report-row {
+        grid-template-columns: minmax(620px, 1fr) minmax(560px, 0.9fr);
+        column-gap: 14px;
+    }
+}
+
+@media (max-width: 1050px) {
+    .lower-report-row {
+        grid-template-columns: 1fr;
+        row-gap: 18px;
+    }
+
+    .left-lower-stack,
+    .right-lower-stack {
+        grid-column: 1;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .lower-report-row .discharge-chart-section {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .lower-report-row .discharge-chart-wrap {
+        height: 430px;
+    }
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <h2>Cargo Statistics</h2>
+    <span class="module-badge">RP01</span>
+</div>
+
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a>
+    &rsaquo;
+    Cargo Statistics
+</div>
+<div class="report-page">
+
+    <div class="report-layout">
+
+        <div class="top-report-row">
+
+        <div class="main-report">
+
+    <div class="cargo-report-header">
+
+        <div class="date-controls no-print">
+            <label for="reportDatePicker">Select Date:</label>
+            <input type="date" id="reportDatePicker">
+            <button type="button" id="refreshBtn">Refresh</button>
+            <button type="button" id="downloadExcelBtn" class="download-excel-btn">
+                Download Excel
+            </button>
+        </div>
+
+        <div class="report-title">
+            Cargo Statistics
+        </div>
+
+        <div class="balance-box">
+            <span>Balance Days</span>
+            <span id="balanceDays" class="balance-days">-</span>
+        </div>
+
+    </div>
+
+    <div class="report-date-line">
+
+        Selected Date: <strong id="selectedDateText">-</strong>
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        Report Date: <strong id="reportDateText">-</strong>
+    </div>
+
+    <div class="table-wrap">
+        <table aria-label="Cargo Statistics">
+            <colgroup>
+                <col class="cargo-col">
+                <col class="target-col">
+                <col class="target-col">
+                <col class="day-col">
+                <col class="actual-col">
+                <col class="actual-col">
+                <col class="gap-col">
+                <col class="gap-col">
+                <col class="asking-col">
+                <col class="asking-col">
+                <col class="stock-col">
+                <col class="stock-col">
+            </colgroup>
+
+            <thead>
+                <tr>
+                    <th rowspan="3" class="cargo-head">Cargo</th>
+
+                    <th colspan="2" class="group-head">
+                        Outlook
+                    </th>
+
+                    <th rowspan="2" class="group-head">
+                        Actual Cargo<br>
+                        Handled for the day
+                    </th>
+
+                    <th colspan="2" class="group-head">
+                        Actual Cargo Handled till Date
+                    </th>
+
+                    <th colspan="2" class="group-head">
+                        GAP
+                    </th>
+
+                    <th colspan="2" class="group-head">
+                        Asking Rate
+                    </th>
+
+                    <th rowspan="2" class="group-head">
+                        Stock as on Date<br>
+                        (JSW Steel)
+                    </th>
+
+                    <th rowspan="2" class="group-head">
+                        Stock as on Date<br>
+                        (PNP)
+                    </th>
+                </tr>
+
+                <tr>
+                    <th class="sub-head">
+                        As per ABP<br>
+                        <strong id="outlookAbpTarget">-</strong>
+                    </th>
+
+                    <th class="sub-head">
+                        As per SCM<br>
+                        <strong id="outlookScmTarget">-</strong>
+                    </th>
+
+                    <th class="sub-head">
+                        MTD
+                    </th>
+
+                    <th class="sub-head">
+                        YTD
+                    </th>
+
+                    <th class="sub-head">
+                        As per ABP<br>
+                        <strong id="gapAbpTarget">-</strong>
+                    </th>
+
+                    <th class="sub-head">
+                        As per SCM<br>
+                        <strong id="gapScmTarget">-</strong>
+                    </th>
+
+                    <th class="sub-head">
+                        As per ABP<br>
+                        <strong id="askingAbpTarget">-</strong>
+                    </th>
+
+                    <th class="sub-head">
+                        As per SCM<br>
+                        <strong id="askingScmTarget">-</strong>
+                    </th>
+                </tr>
+
+                <tr>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                </tr>
+            </thead>
+
+            <tbody id="cargoBody">
+                <tr class="loading-row">
+                    <td colspan="12">Loading Cargo Statistics...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="refreshNote" class="refresh-note"></div>
+        </div>
+
+        <!-- ============================================================
+             CONSUMPTION — RIGHT SIDE
+             ============================================================ -->
+        <div class="consumption-section">
+    <div class="consumption-table-wrap">
+        <table class="consumption-table" aria-label="Consumption">
+            <colgroup>
+                <col style="width: 29%;">
+                <col style="width: 23.666%;">
+                <col style="width: 23.666%;">
+                <col style="width: 23.666%;">
+            </colgroup>
+
+            <thead>
+                <tr>
+                    <th colspan="4" class="consumption-title">
+                        Consumption
+                    </th>
+                </tr>
+
+                <tr>
+                    <th></th>
+                    <th class="consumption-subhead">For the Day</th>
+                    <th class="consumption-subhead">MTD</th>
+                    <th class="consumption-subhead">YTD</th>
+                </tr>
+
+                <tr>
+                    <th></th>
+                    <th class="consumption-unit">(MT)</th>
+                    <th class="consumption-unit">(MT)</th>
+                    <th class="consumption-unit">(MT)</th>
+                </tr>
+            </thead>
+
+            <tbody id="consumptionBody">
+                <tr>
+                    <td colspan="4" style="text-align:center;">
+                        Loading Consumption...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+        </div>
+
+
+
+
+
+
+<!-- ============================================================
+     PRODUCTION
+     ============================================================ -->
+    </div>
+
+    
+    <div class="lower-report-row">
+        <div class="left-lower-stack">
+            <div class="production-section">
+        <div class="production-table-wrap">
+            <table class="production-table" aria-label="Production">
+                <colgroup>
+                    <col style="width:17%;">
+                    <col style="width:23%;">
+                    <col style="width:13%;">
+                    <col style="width:13%;">
+                    <col style="width:11%;">
+                    <col style="width:13%;">
+                    <col style="width:10%;">
+                </colgroup>
+
+                <thead>
+                    <tr>
+                        <th class="production-head">UNIT</th>
+                        <th class="production-head">Target Production (TPD)</th>
+                        <th class="production-head">Actual<br>Production<br>(TPD)</th>
+                        <th class="production-head">MTD</th>
+                        <th class="production-head">AVG</th>
+                        <th class="production-head">YTD</th>
+                        <th class="production-head">AVG</th>
+                    </tr>
+                </thead>
+
+                <tbody id="productionBody">
+                    <tr>
+                        <td colspan="7" style="text-align:center;">
+                            Loading Production...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+            <div class="daily-operations-section">
+    <div class="daily-operations-wrap">
+        <table class="daily-operations-table" aria-label="Daily Port Operations">
+            <colgroup>
+                <col style="width:10%;">
+                <col style="width:18%;">
+                <col style="width:18%;">
+                <col style="width:17%;">
+                <col style="width:15%;">
+                <col style="width:14%;">
+                <col style="width:18%;">
+            </colgroup>
+
+            <thead>
+                <tr>
+                    <th colspan="7" class="daily-operations-title">
+                        Daily Port Operations
+                    </th>
+                </tr>
+
+                <tr>
+                    <th class="daily-operations-head">DATE</th>
+                    <th class="daily-operations-head">
+                        Jetty Discharge-Avg :
+                        <strong id="dailyJettyAvg">-</strong> MT
+                    </th>
+                    <th class="daily-operations-head">
+                        Jetty Discharge (Steel Plant)-Avg :
+                        <strong id="dailySteelAvg">-</strong> MT
+                    </th>
+                    <th class="daily-operations-head">
+                        Jetty Discharge (Cement Plant)-Avg :
+                        <strong id="dailyCementAvg">-</strong> MT
+                    </th>
+                    <th class="daily-operations-head">
+                        MBC Discharge-Avg :
+                        <strong id="dailyMbcAvg">-</strong> MT
+                    </th>
+                    <th class="daily-operations-head">
+                        MV Discharge-Avg :
+                        <strong id="dailyMvAvg">-</strong> MT
+                    </th>
+                    <th class="daily-operations-head">
+                        Daily Consumption-Avg :
+                        <strong id="dailyConsumptionAvg">-</strong> MT
+                    </th>
+                </tr>
+
+                <tr>
+                    <th class="daily-operations-unit">(DATE)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                    <th class="daily-operations-unit">(MT)</th>
+                </tr>
+            </thead>
+
+            <tbody id="dailyOperationsBody">
+                <tr class="daily-loading-row">
+                    <td colspan="7">Loading Daily Port Operations...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ============================================================
+     JETTY & MV DISCHARGE BAR CHART
+     ============================================================ -->
+<div class="discharge-chart-section">
+    <div class="discharge-chart-title">
+        Jetty &amp; MV Discharge
+    </div>
+    <div class="discharge-chart-wrap">
+        <canvas id="jettyMvDischargeChart"></canvas>
+        <div id="dischargeChartError"
+             class="discharge-chart-error"
+             style="display:none;">
+        </div>
+    </div>
+</div>
+
+
+        </div>
+
+        <div class="pnp-additional-stack">
+
+        <div class="pnp-receipt-section">
+                <div class="pnp-receipt-table-wrap">
+                    <table class="pnp-receipt-table" aria-label="PNP : Receipt / Supply of RM">
+                        <colgroup>
+                            <col style="width:120px;">
+                            <col style="width:168px;">
+                            <col style="width:86px;">
+                            <col style="width:88px;">
+                            <col style="width:88px;">
+                            <col style="width:86px;">
+                        </colgroup>
+        
+                        <thead>
+                            <tr>
+                                <th colspan="6" class="pnp-receipt-title">
+                                    PNP : Receipt / Supply of RM
+                                </th>
+                            </tr>
+                            <tr>
+                                <th></th>
+                                <th>Cargo</th>
+                                <th>Source</th>
+                                <th class="pnp-head">For the Day</th>
+                                <th class="pnp-head">MTD</th>
+                                <th class="pnp-head">YTD</th>
+                            </tr>
+                            <tr>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th class="pnp-unit-head">(MT)</th>
+                                <th class="pnp-unit-head">(MT)</th>
+                                <th class="pnp-unit-head">(MT)</th>
+                            </tr>
+                        </thead>
+        
+                        <tbody id="pnpReceiptBody">
+                            <tr>
+                                <td colspan="6" style="text-align:center;">
+                                    Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+        
+        
+                <!-- ============================================================
+                     PRODUCTION
+                     ============================================================ -->
+                
+        
+            </div>
+
+        
+                <div class="additional-receipts-section">
+        
+                    <div class="additional-receipt-table-wrap">
+                        <table class="additional-receipt-table" aria-label="Karanja Receipt Supply of RM">
+                            <colgroup>
+                                <col style="width:120px;"><col style="width:126px;"><col style="width:86px;">
+                                <col style="width:88px;"><col style="width:88px;"><col style="width:88px;">
+                            </colgroup>
+                            <thead>
+                                <tr><th colspan="6" class="additional-receipt-title">Karanja : Receipt / Supply of RM</th></tr>
+                                <tr><th></th><th>Cargo</th><th>Source</th><th class="additional-receipt-head">For the Day</th><th class="additional-receipt-head">MTD</th><th class="additional-receipt-head">YTD</th></tr>
+                                <tr><th></th><th></th><th></th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th></tr>
+                            </thead>
+                            <tbody id="karanjaReceiptBody"><tr><td colspan="6" style="text-align:center;">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+        
+                    <div class="additional-receipt-table-wrap">
+                        <table class="additional-receipt-table" aria-label="Roha Receipt Supply of RM">
+                            <colgroup>
+                                <col style="width:120px;"><col style="width:126px;"><col style="width:86px;">
+                                <col style="width:88px;"><col style="width:88px;"><col style="width:88px;">
+                            </colgroup>
+                            <thead>
+                                <tr><th colspan="6" class="additional-receipt-title">Roha : Receipt / Supply of RM</th></tr>
+                                <tr><th></th><th>Cargo</th><th>Source</th><th class="additional-receipt-head">For the Day</th><th class="additional-receipt-head">MTD</th><th class="additional-receipt-head">YTD</th></tr>
+                                <tr><th></th><th></th><th></th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th></tr>
+                            </thead>
+                            <tbody id="rohaReceiptBody"><tr><td colspan="6" style="text-align:center;">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+        
+                    <div class="additional-receipt-table-wrap">
+                        <table class="additional-receipt-table" aria-label="Dolvi Receipt Supply of RM">
+                            <colgroup>
+                                <col style="width:120px;"><col style="width:126px;"><col style="width:86px;">
+                                <col style="width:88px;"><col style="width:88px;"><col style="width:88px;">
+                            </colgroup>
+                            <thead>
+                                <tr><th colspan="6" class="additional-receipt-title">Dolvi : Receipt / Supply of RM</th></tr>
+                                <tr><th></th><th>Cargo</th><th>Source</th><th class="additional-receipt-head">For the Day</th><th class="additional-receipt-head">MTD</th><th class="additional-receipt-head">YTD</th></tr>
+                                <tr><th></th><th></th><th></th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th><th class="additional-receipt-unit">(MT)</th></tr>
+                            </thead>
+                            <tbody id="dolviReceiptBody"><tr><td colspan="6" style="text-align:center;">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+        
+                </div>
+        
+
+    </div>
+    </div>
+
+
+<!-- ============================================================
+     DAILY PORT OPERATIONS SUMMARY
+     ============================================================ -->
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+(function () {
+    'use strict';
+
+    // RP01 supplies targets / stock / report metadata.
+    const API_URL = '/api/module/RP01/cargo_statistics/data';
+
+    // Consumption is fetched directly from stats_cargo through the
+    // CARGO_STATS Consumption API.  This keeps Day / MTD / YTD tied to
+    // the actual Consumption records for the selected date/month/year.
+    const CONSUMPTION_API_URL = '/module/CARGO_STATS/api/consumption';
+    const PRODUCTION_API_URL = '/api/production';
+
+    // Daily Port Operations:
+    // Jetty / Steel / Cement / MBC / MV come from the 24-hour SMS data,
+    // while Daily Consumption comes from stats_cargo Consumption.
+    const DAILY_OPERATIONS_API_URL =
+        '/api/module/RP01/cargo_statistics/daily-operations';
+    const DISCHARGE_CHART_API_URL =
+        '/api/module/RP01/cargo_statistics/discharge-chart';
+
+    const datePicker = document.getElementById('reportDatePicker');
+    const selectedDateText = document.getElementById('selectedDateText');
+    const reportDateText = document.getElementById('reportDateText');
+    const balanceDaysEl = document.getElementById('balanceDays');
+    const cargoBodyEl = document.getElementById('cargoBody');
+    const refreshNoteEl = document.getElementById('refreshNote');
+    const consumptionBodyEl = document.getElementById('consumptionBody');
+    const productionBodyEl = document.getElementById('productionBody');
+
+    const dailyOperationsBodyEl =
+        document.getElementById('dailyOperationsBody');
+    const dailyJettyAvgEl =
+        document.getElementById('dailyJettyAvg');
+    const dailySteelAvgEl =
+        document.getElementById('dailySteelAvg');
+    const dailyCementAvgEl =
+        document.getElementById('dailyCementAvg');
+    const dailyMbcAvgEl =
+        document.getElementById('dailyMbcAvg');
+    const dailyMvAvgEl =
+        document.getElementById('dailyMvAvg');
+    const dailyConsumptionAvgEl =
+        document.getElementById('dailyConsumptionAvg');
+
+    const refreshBtn = document.getElementById('refreshBtn');
+    const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+    const gapAbpTargetEl = document.getElementById('gapAbpTarget');
+    const gapScmTargetEl = document.getElementById('gapScmTarget');
+    const outlookAbpTargetEl = document.getElementById('outlookAbpTarget');
+    const outlookScmTargetEl = document.getElementById('outlookScmTarget');
+
+    function formatTargetLacs(value) {
+        if (value === null || value === undefined || value === '') {
+            return '-';
+        }
+
+        // financial_target values are stored in MT.
+        // Display them as lacs MT in the column header.
+        const number = Number(value);
+
+        if (!Number.isFinite(number)) {
+            return String(value);
+        }
+
+        return `${(number / 100000).toFixed(2)} lacs MT`;
+    }
+
+    function formatNumber(value) {
+        if (value === null || value === undefined || value === '') {
+            return '-';
+        }
+
+        const number = Number(value);
+
+        if (!Number.isFinite(number)) {
+            return '-';
+        }
+
+        return number.toLocaleString('en-IN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function formatDateForDisplay(value) {
+        if (!value) return '-';
+
+        const parts = value.split('-');
+        if (parts.length !== 3) return value;
+
+        return `${parts[2]}.${parts[1]}.${parts[0]}`;
+    }
+
+    function numberCell(value) {
+        return `<td class="number-cell">${formatNumber(value)}</td>`;
+    }
+
+    function stockCell(value) {
+        return `<td class="stock-cell">${formatNumber(value)}</td>`;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function renderRow(row) {
+        const totalClass = row.key === 'TOTAL' ? 'total-row' : '';
+
+        return `
+            <tr class="${totalClass}">
+                <td class="cargo-cell">${escapeHtml(row.cargo)}</td>
+                ${numberCell(row.abp)}
+                ${numberCell(row.scm)}
+                ${numberCell(row.actual_day)}
+                ${numberCell(row.actual_mtd)}
+                ${numberCell(row.actual_ytd)}
+                ${numberCell(row.gap_abp)}
+                ${numberCell(row.gap_scm)}
+                ${numberCell(row.asking_abp)}
+                ${numberCell(row.asking_scm)}
+                ${stockCell(row.stock_jsw)}
+                ${stockCell(row.stock_pnp)}
+            </tr>
+        `;
+    }
+
+    function showError(message) {
+        cargoBodyEl.innerHTML = `
+            <tr class="error-row">
+                <td colspan="12">${escapeHtml(message)}</td>
+            </tr>
+        `;
+    }
+
+
+    function financialYearStartDate(selectedDate) {
+        const d = parseLocalDate(selectedDate);
+        if (!d) return null;
+
+        return d.getMonth() >= 3
+            ? new Date(d.getFullYear(), 3, 1)
+            : new Date(d.getFullYear() - 1, 3, 1);
+    }
+
+    function calendarDayCount(startDate, endDate) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        return Math.floor((endDate - startDate) / msPerDay) + 1;
+    }
+
+    function renderConsumptionTable(rawRows, selectedDate) {
+        if (!consumptionBodyEl) return;
+
+        const actuals = buildConsumptionActuals(
+            rawRows,
+            selectedDate
+        );
+
+        const labels = [
+            'IBRM',
+            'CBRM',
+            'Fluxes',
+            'Clinker/ Slag',
+            'FG Goods'
+        ];
+
+        const selected = parseLocalDate(selectedDate);
+        const fyStart = financialYearStartDate(selectedDate);
+
+        const mtdDays = selected
+            ? selected.getDate()
+            : 0;
+
+        const ytdDays = selected && fyStart
+            ? calendarDayCount(fyStart, selected)
+            : 0;
+
+        let totalDay = 0;
+        let totalMtd = 0;
+        let totalYtd = 0;
+
+        let html = '';
+
+        labels.forEach(label => {
+            const item = actuals[label] || {
+                day: 0,
+                mtd: 0,
+                ytd: 0
+            };
+
+            totalDay += Number(item.day || 0);
+            totalMtd += Number(item.mtd || 0);
+            totalYtd += Number(item.ytd || 0);
+
+            html += `
+                <tr>
+                    <td class="consumption-cargo">${escapeHtml(label)}</td>
+                    <td class="consumption-number consumption-day-cell">
+                        ${formatNumber(item.day)}
+                    </td>
+                    <td class="consumption-number">
+                        ${formatNumber(item.mtd)}
+                    </td>
+                    <td class="consumption-number">
+                        ${formatNumber(item.ytd)}
+                    </td>
+                </tr>
+            `;
+        });
+
+        const mtdAverage = mtdDays > 0
+            ? totalMtd / mtdDays
+            : 0;
+
+        const ytdAverage = ytdDays > 0
+            ? totalYtd / ytdDays
+            : 0;
+
+        html += `
+            <tr class="consumption-total">
+                <td class="consumption-cargo">Total</td>
+                <td class="consumption-number consumption-day-cell">
+                    ${formatNumber(totalDay)}
+                </td>
+                <td class="consumption-number">
+                    ${formatNumber(totalMtd)}
+                </td>
+                <td class="consumption-number">
+                    ${formatNumber(totalYtd)}
+                </td>
+            </tr>
+
+            <tr class="consumption-average">
+                <td class="consumption-cargo">Average</td>
+                <td class="consumption-number"></td>
+                <td class="consumption-number">
+                    ${formatNumber(mtdAverage)}
+                </td>
+                <td class="consumption-number">
+                    ${formatNumber(ytdAverage)}
+                </td>
+            </tr>
+        `;
+
+        consumptionBodyEl.innerHTML = html;
+    }
+
+    function renderReport(data) {
+        balanceDaysEl.textContent = formatNumber(data.balance_days);
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+
+        if (!rows.length) {
+            showError('No Cargo Statistics data found.');
+            return;
+        }
+
+        // Use the TOTAL row for the header targets.
+        // The TOTAL row is built from the same monthly financial targets
+        // that are used to calculate GAP, so Outlook and GAP stay identical.
+        const totalRow = rows.find(row => row.key === 'TOTAL');
+
+        const abpTarget = totalRow
+            ? totalRow.abp
+            : null;
+
+        const scmTarget = totalRow
+            ? totalRow.scm
+            : null;
+
+        // Outlook header = exactly the same target values used by GAP.
+        if (outlookAbpTargetEl) {
+            outlookAbpTargetEl.textContent =
+                abpTarget !== null ? `${formatNumber(abpTarget)} MT` : '-';
+        }
+
+        if (outlookScmTargetEl) {
+            outlookScmTargetEl.textContent =
+                scmTarget !== null ? `${formatNumber(scmTarget)} MT` : '-';
+        }
+
+        // GAP header uses the same target values.
+        if (gapAbpTargetEl) {
+            gapAbpTargetEl.textContent =
+                abpTarget !== null ? `${formatNumber(abpTarget)} MT` : '-';
+        }
+
+        if (gapScmTargetEl) {
+            gapScmTargetEl.textContent =
+                scmTarget !== null ? `${formatNumber(scmTarget)} MT` : '-';
+        }
+
+        cargoBodyEl.innerHTML = rows.map(renderRow).join('');
+
+        const selected = data.selected_date || datePicker.value;
+        const report = data.report_date || '';
+
+        selectedDateText.textContent = formatDateForDisplay(selected);
+        reportDateText.textContent = formatDateForDisplay(report);
+
+        const fyText = data.financial_year || '';
+        refreshNoteEl.textContent =
+            `Selected date: ${formatDateForDisplay(selected)} | ` +
+            `Report date: ${formatDateForDisplay(report)} | ` +
+            `FY: ${fyText}`;
+    }
+
+
+    function parseLocalDate(iso) {
+        if (!iso) return null;
+        const parts = String(iso).split('-').map(Number);
+        if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) {
+            return null;
+        }
+        return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+
+    function isoDateLocal(date) {
+        return [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+        ].join('-');
+    }
+
+    function getReportDate(selectedDate) {
+        const selected = parseLocalDate(selectedDate);
+        if (!selected) return null;
+
+        selected.setDate(selected.getDate() - 1);
+        return isoDateLocal(selected);
+    }
+
+    function consumptionValue(row, field) {
+        const value = row ? row[field] : 0;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : 0;
+    }
+
+    function getFinancialYearStart(selectedDate) {
+        const d = parseLocalDate(selectedDate);
+        if (!d) return null;
+
+        const fyYear = d.getMonth() >= 3
+            ? d.getFullYear()
+            : d.getFullYear() - 1;
+
+        return new Date(fyYear, 3, 1);
+    }
+
+    /*
+     * Read stats_cargo Consumption records and calculate:
+     *   actual_day = selected date
+     *   actual_mtd = month start through selected date
+     *   actual_ytd = 1-Apr through selected date
+     *
+     * stats_cargo fields:
+     *   ibrm, cbrm, fluxes, clinker_slag, fg_goods
+     */
+    function buildConsumptionActuals(rawRows, selectedDate) {
+        const selected = parseLocalDate(selectedDate);
+        if (!selected) {
+            throw new Error('Invalid selected date.');
+        }
+
+        const monthStart = new Date(
+            selected.getFullYear(),
+            selected.getMonth(),
+            1
+        );
+
+        const fyStart = getFinancialYearStart(selected);
+
+        const totals = {
+            IBRM: { day: 0, mtd: 0, ytd: 0 },
+            CBRM: { day: 0, mtd: 0, ytd: 0 },
+            Fluxes: { day: 0, mtd: 0, ytd: 0 },
+            'Clinker/ Slag': { day: 0, mtd: 0, ytd: 0 },
+            'FG Goods': { day: 0, mtd: 0, ytd: 0 }
+        };
+
+        const rows = Array.isArray(rawRows) ? rawRows : [];
+
+        rows.forEach(row => {
+            const rowDate = parseLocalDate(row.date);
+            if (!rowDate) return;
+
+            // Ignore records outside the selected FY.
+            if (rowDate < fyStart || rowDate > selected) return;
+
+            const isDay = isoDateLocal(rowDate) === selectedDate;
+            const isMtd = rowDate >= monthStart;
+
+            const values = {
+                IBRM: consumptionValue(row, 'ibrm'),
+                CBRM: consumptionValue(row, 'cbrm'),
+                Fluxes: consumptionValue(row, 'fluxes'),
+                'Clinker/ Slag': consumptionValue(row, 'clinker_slag'),
+                'FG Goods': consumptionValue(row, 'fg_goods')
+            };
+
+            Object.keys(values).forEach(label => {
+                if (isDay) {
+                    totals[label].day += values[label];
+                }
+
+                if (isMtd) {
+                    totals[label].mtd += values[label];
+                }
+
+                totals[label].ytd += values[label];
+            });
+        });
+
+        Object.keys(totals).forEach(label => {
+            totals[label].day = Number(totals[label].day.toFixed(2));
+            totals[label].mtd = Number(totals[label].mtd.toFixed(2));
+            totals[label].ytd = Number(totals[label].ytd.toFixed(2));
+        });
+
+        return totals;
+    }
+
+    function applyStatsCargoConsumption(data, consumptionRows, selectedDate) {
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        const actuals = buildConsumptionActuals(
+            consumptionRows,
+            selectedDate
+        );
+
+        const labelMap = {
+            'IBRM': 'IBRM',
+            'CBRM': 'CBRM',
+            'Fluxes': 'Fluxes',
+            'Clinker/ Slag': 'Clinker/ Slag',
+            'FG Goods': 'FG Goods'
+        };
+
+        // Keep the existing RP01 targets, but replace all Consumption
+        // actuals with values calculated from stats_cargo.
+        rows.forEach(row => {
+            const label = labelMap[row.cargo];
+            if (!label || !actuals[label]) return;
+
+            row.actual_day = actuals[label].day;
+            row.actual_mtd = actuals[label].mtd;
+            row.actual_ytd = actuals[label].ytd;
+
+            // Recalculate GAP and Asking Rate using the new MTD actual.
+            row.gap_abp = Math.max(
+                Number(row.abp || 0) - row.actual_mtd,
+                0
+            );
+
+            row.gap_scm = Math.max(
+                Number(row.scm || 0) - row.actual_mtd,
+                0
+            );
+
+            const balanceDays = Number(data.balance_days || 0);
+
+            row.asking_abp = balanceDays > 0
+                ? row.gap_abp / balanceDays
+                : 0;
+
+            row.asking_scm = balanceDays > 0
+                ? row.gap_scm / balanceDays
+                : 0;
+        });
+
+        // Rebuild the TOTAL row from the updated Consumption values.
+        const totalRow = rows.find(row => row.key === 'TOTAL');
+
+        if (totalRow) {
+            const detailRows = rows.filter(row => row.key !== 'TOTAL');
+
+            totalRow.actual_day = detailRows.reduce(
+                (sum, row) => sum + Number(row.actual_day || 0),
+                0
+            );
+
+            totalRow.actual_mtd = detailRows.reduce(
+                (sum, row) => sum + Number(row.actual_mtd || 0),
+                0
+            );
+
+            totalRow.actual_ytd = detailRows.reduce(
+                (sum, row) => sum + Number(row.actual_ytd || 0),
+                0
+            );
+
+            totalRow.gap_abp = detailRows.reduce(
+                (sum, row) => sum + Number(row.gap_abp || 0),
+                0
+            );
+
+            totalRow.gap_scm = detailRows.reduce(
+                (sum, row) => sum + Number(row.gap_scm || 0),
+                0
+            );
+
+            totalRow.asking_abp = detailRows.reduce(
+                (sum, row) => sum + Number(row.asking_abp || 0),
+                0
+            );
+
+            totalRow.asking_scm = detailRows.reduce(
+                (sum, row) => sum + Number(row.asking_scm || 0),
+                0
+            );
+        }
+
+        return data;
+    }
+
+
+    const PRODUCTION_UNITS = [
+        'BF-1',
+        'BF-2',
+        'PP-1',
+        'PP-2',
+        'SP-1',
+        'SP-2',
+        'CO-1 (PUSHINGS)',
+        'CO-2 (A&B) (PUSHINGS)',
+        'CO-2 (C&D) (PUSHINGS)'
+    ];
+
+    const PRODUCTION_ALIASES = {
+        'BF-1': ['BF-1', 'BF1'],
+        'BF-2': ['BF-2', 'BF2'],
+        'PP-1': ['PP-1', 'PP1'],
+        'PP-2': ['PP-2', 'PP2'],
+        'SP-1': ['SP-1', 'SP1'],
+        'SP-2': ['SP-2', 'SP2'],
+        'CO-1 (PUSHINGS)': ['CO-1 (PUSHINGS)', 'CO-1', 'CO1', 'CO-1 PUSHINGS'],
+        'CO-2 (A&B) (PUSHINGS)': [
+            'CO-2 (A&B) (PUSHINGS)',
+            'CO-2 (A&B)',
+            'CO2 (A&B)',
+            'CO-2 A&B'
+        ],
+        'CO-2 (C&D) (PUSHINGS)': [
+            'CO-2 (C&D) (PUSHINGS)',
+            'CO-2 (C&D)',
+            'CO2 (C&D)',
+            'CO-2 C&D'
+        ]
+    };
+
+    function productionField(row, fields) {
+        if (!row) return null;
+
+        for (const field of fields) {
+            if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
+                return row[field];
+            }
+        }
+
+        return null;
+    }
+
+    function productionUnitName(row) {
+        return productionField(row, [
+            'unit',
+            'name',
+            'unit_name',
+            'production_unit',
+            'plant',
+            'equipment'
+        ]);
+    }
+
+    function productionNumber(row, fields) {
+        const value = productionField(row, fields);
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function normalizeProductionRows(raw) {
+        if (Array.isArray(raw)) return raw;
+
+        if (raw && Array.isArray(raw.rows)) return raw.rows;
+        if (raw && Array.isArray(raw.data)) return raw.data;
+        if (raw && Array.isArray(raw.production)) return raw.production;
+        if (raw && Array.isArray(raw.records)) return raw.records;
+
+        return [];
+    }
+
+    function productionUnitMatches(row, unit) {
+        const actual = String(productionUnitName(row) || '')
+            .trim()
+            .toUpperCase();
+
+        return (PRODUCTION_ALIASES[unit] || [unit])
+            .some(alias => actual === String(alias).trim().toUpperCase());
+    }
+
+    function productionDate(row) {
+        return productionField(row, [
+            'date',
+            'entry_date',
+            'production_date',
+            'report_date'
+        ]);
+    }
+
+    function productionTarget(row) {
+        return productionNumber(row, [
+            'target_production',
+            'target',
+            'tpd_target',
+            'target_tpd',
+            'production_target'
+        ]);
+    }
+
+    function productionActualDay(row) {
+        return productionNumber(row, [
+            'actual_production',
+            'actual',
+            'production',
+            'actual_tpd',
+            'production_tpd',
+            'today',
+            'for_the_day'
+        ]);
+    }
+
+    function aggregateProduction(rawRows, selectedDate) {
+        const rows = normalizeProductionRows(rawRows);
+        const selected = parseLocalDate(selectedDate);
+
+        if (!selected) {
+            throw new Error('Invalid selected date for Production.');
+        }
+
+        const monthStart = new Date(
+            selected.getFullYear(),
+            selected.getMonth(),
+            1
+        );
+        const fyStart = getFinancialYearStart(selected);
+
+        const result = {};
+        PRODUCTION_UNITS.forEach(unit => {
+            result[unit] = {
+                target: 0,
+                day: 0,
+                mtd: 0,
+                ytd: 0,
+                avg_mtd: null,
+                avg_ytd: null
+            };
+        });
+
+        // The RP01 Production API returns NORMALIZED rows:
+        // { date, unit, actual_production, target_production }.
+        // Some older versions return WIDE rows, so both formats are supported.
+        const productionFieldMap = {
+            'BF-1': ['bf_1', 'bf1'],
+            'BF-2': ['bf_2', 'bf2'],
+            'PP-1': ['pp_1', 'pp1'],
+            'PP-2': ['pp_2', 'pp2'],
+            'SP-1': ['sp_1', 'sp1'],
+            'SP-2': ['sp_2', 'sp2'],
+            'CO-1 (PUSHINGS)': ['co1_pushings'],
+            'CO-2 (A&B) (PUSHINGS)': ['co2_ab_pushings', 'co2ab_pushings'],
+            'CO-2 (C&D) (PUSHINGS)': ['co2_cd_pushings', 'co2cd_pushings']
+        };
+
+        function wideProductionValue(row, fields) {
+            for (const field of fields) {
+                if (row && row[field] !== undefined && row[field] !== null && row[field] !== '') {
+                    const n = Number(row[field]);
+                    if (Number.isFinite(n)) return n;
+                }
+            }
+            return 0;
+        }
+
+        rows.forEach(row => {
+            if (!row || typeof row !== 'object') return;
+
+            const rowDate = parseLocalDate(productionDate(row));
+            if (!rowDate || rowDate > selected || rowDate < fyStart) return;
+
+            const rowIso = isoDateLocal(rowDate);
+            const selectedIso = isoDateLocal(selected);
+
+            // NORMALIZED response: use the row's unit and actual_production.
+            const normalizedUnit = productionUnitName(row);
+            const normalizedActualPresent =
+                row.actual_production !== undefined &&
+                row.actual_production !== null &&
+                row.actual_production !== '';
+
+            if (normalizedUnit && normalizedActualPresent) {
+                const matchedUnit = PRODUCTION_UNITS.find(unit =>
+                    productionUnitMatches(row, unit)
+                );
+
+                if (!matchedUnit) return;
+
+                const actual = productionActualDay(row);
+                const target = productionTarget(row);
+
+                result[matchedUnit].target = target || result[matchedUnit].target;
+
+                if (rowIso === selectedIso) result[matchedUnit].day += actual;
+                if (rowDate >= monthStart) result[matchedUnit].mtd += actual;
+                result[matchedUnit].ytd += actual;
+                return;
+            }
+
+            // WIDE response fallback.
+            PRODUCTION_UNITS.forEach(unit => {
+                const actual = wideProductionValue(row, productionFieldMap[unit] || []);
+                if (rowIso === selectedIso) result[unit].day += actual;
+                if (rowDate >= monthStart) result[unit].mtd += actual;
+                result[unit].ytd += actual;
+            });
+        });
+
+        const monthDays = selected.getDate();
+        const fyDays = Math.floor((selected - fyStart) / (24 * 60 * 60 * 1000)) + 1;
+
+        PRODUCTION_UNITS.forEach(unit => {
+            const item = result[unit];
+            item.day = Number(item.day.toFixed(2));
+            item.mtd = Number(item.mtd.toFixed(2));
+            item.ytd = Number(item.ytd.toFixed(2));
+            item.avg_mtd = monthDays > 0 ? Number((item.mtd / monthDays).toFixed(2)) : 0;
+            item.avg_ytd = fyDays > 0 ? Number((item.ytd / fyDays).toFixed(2)) : 0;
+        });
+
+        return result;
+    }
+
+    function renderProductionTable(rawRows, selectedDate) {
+        if (!productionBodyEl) return;
+
+        const data = aggregateProduction(rawRows, selectedDate);
+
+        let html = '';
+
+        PRODUCTION_UNITS.forEach(unit => {
+            const item = data[unit];
+
+            html += `
+                <tr>
+                    <td class="production-unit">
+                        ${escapeHtml(unit)}
+                    </td>
+                    <td class="production-number production-target">
+                        ${formatNumber(item.target)}
+                    </td>
+                    <td class="production-number production-actual">
+                        ${formatNumber(item.day)}
+                    </td>
+                    <td class="production-number">
+                        ${formatNumber(item.mtd)}
+                    </td>
+                    <td class="production-number">
+                        ${formatNumber(item.avg_mtd)}
+                    </td>
+                    <td class="production-number">
+                        ${formatNumber(item.ytd)}
+                    </td>
+                    <td class="production-number">
+                        ${formatNumber(item.avg_ytd)}
+                    </td>
+                </tr>
+            `;
+        });
+
+        productionBodyEl.innerHTML = html;
+    }
+
+
+    // ============================================================
+    // PNP : RECEIPT / SUPPLY OF RM
+    // Source: stats_cargo, section = pnp_receipt
+    // ============================================================
+
+    const PNP_RECEIPT_API_URL =
+        '/api/pnp_receipt';
+
+    const PNP_RECEIPT_CONFIG = [
+        {
+            group: 'Through Rake',
+            cargo: 'Jabalpur Fines',
+            source: 'M.P',
+            fields: ['rake_jabalpur_fines']
+        },
+        {
+            group: 'Through Rake',
+            cargo: 'MEL',
+            source: 'Karnataka',
+            fields: ['rake_mel']
+        },
+        {
+            group: 'Through Rake',
+            cargo: 'Surajgad Fines',
+            source: 'Vidharbha',
+            fields: ['rake_surajgad_fines']
+        },
+        {
+            group: 'Through Rake',
+            cargo: 'Corex Coal',
+            source: 'Vijaynagar',
+            fields: [
+                'rake_corex_coal',
+                'rake_corex',
+                'corex_coal',
+                'corex'
+            ]
+        },
+        {
+            group: 'Through Rake',
+            cargo: 'BMM Pellets',
+            source: '',
+            fields: [
+                'rake_bmm_pellets',
+                'rake_bmm',
+                'bmm_pellets',
+                'bmm'
+            ]
+        },
+        {
+            group: 'Through MV',
+            cargo: 'Limestone',
+            source: 'Norway Port',
+            fields: [
+                'mv_limestone',
+                'mv_lime_stone',
+                'limestone_mv',
+                'norway_limestone'
+            ]
+        }
+    ];
+
+    function pnpNumericValue(row, fields) {
+        for (const field of fields) {
+            if (
+                row &&
+                row[field] !== undefined &&
+                row[field] !== null &&
+                row[field] !== ''
+            ) {
+                const n = Number(row[field]);
+                if (Number.isFinite(n)) {
+                    return n;
+                }
+            }
+        }
+        return 0;
+    }
+
+    function pnpRowDate(row) {
+        return row?.date ||
+               row?.entry_date ||
+               row?.report_date ||
+               '';
+    }
+
+    function renderPnpReceiptTable(rows, selectedDate) {
+        const body = document.getElementById('pnpReceiptBody');
+        if (!body) return;
+
+        const selected = parseLocalDate(selectedDate);
+        if (!selected) {
+            body.innerHTML =
+                '<tr><td colspan="6">Invalid report date.</td></tr>';
+            return;
+        }
+
+        const monthStart = new Date(
+            selected.getFullYear(),
+            selected.getMonth(),
+            1
+        );
+        const fyStart = getFinancialYearStart(selected);
+        const selectedIso = isoDateLocal(selected);
+
+        const values = PNP_RECEIPT_CONFIG.map(item => ({
+            ...item,
+            day: 0,
+            mtd: 0,
+            ytd: 0
+        }));
+
+        /*
+         * /api/pnp_receipt returns one record per configured cargo:
+         * {
+         *   group, cargo, source, fields,
+         *   daily: [{date: 'YYYY-MM-DD', value: number}, ...]
+         * }
+         *
+         * The previous renderer expected the value fields directly on the
+         * top-level row, so every value was read as undefined and displayed 0.
+         * Read the daily array here and aggregate it into Day / MTD / YTD.
+         * Also retain support for the older flat-row response format.
+         */
+        const structuredRows = Array.isArray(rows)
+            ? rows.filter(row => Array.isArray(row?.daily))
+            : [];
+
+        if (structuredRows.length > 0) {
+            values.forEach(item => {
+                const apiRow = structuredRows.find(row =>
+                    String(row?.group || '') === String(item.group || '') &&
+                    String(row?.cargo || '') === String(item.cargo || '') &&
+                    String(row?.source || '') === String(item.source || '')
+                );
+
+                if (!apiRow) return;
+
+                apiRow.daily.forEach(entry => {
+                    const rowDate = parseLocalDate(entry?.date);
+                    if (!rowDate || rowDate > selected || rowDate < fyStart) {
+                        return;
+                    }
+
+                    const value = Number(entry?.value);
+                    if (!Number.isFinite(value)) return;
+
+                    const rowIso = isoDateLocal(rowDate);
+                    if (rowIso === selectedIso) {
+                        item.day += value;
+                    }
+                    if (rowDate >= monthStart) {
+                        item.mtd += value;
+                    }
+                    item.ytd += value;
+                });
+            });
+        } else {
+            // Compatibility with a flat response: one row per date with
+            // receipt fields directly on the row.
+            rows.forEach(row => {
+                const rowDate = parseLocalDate(pnpRowDate(row));
+                if (!rowDate || rowDate > selected || rowDate < fyStart) {
+                    return;
+                }
+
+                const rowIso = isoDateLocal(rowDate);
+                values.forEach(item => {
+                    const value = pnpNumericValue(row, item.fields);
+                    if (rowIso === selectedIso) item.day += value;
+                    if (rowDate >= monthStart) item.mtd += value;
+                    item.ytd += value;
+                });
+            });
+        }
+
+        let totalDay = 0;
+        let totalMtd = 0;
+        let totalYtd = 0;
+        let html = '';
+
+        values.forEach((item, index) => {
+            totalDay += item.day;
+            totalMtd += item.mtd;
+            totalYtd += item.ytd;
+
+            const showGroup =
+                index === 0 ||
+                values[index - 1].group !== item.group;
+
+            html += `
+                <tr>
+                    <td class="pnp-source-group">
+                        ${showGroup ? escapeHtml(item.group) : ''}
+                    </td>
+                    <td class="pnp-cargo">
+                        ${escapeHtml(item.cargo)}
+                    </td>
+                    <td class="pnp-source">
+                        ${escapeHtml(item.source || '')}
+                    </td>
+                    <td class="pnp-number pnp-day-cell">
+                        ${formatNumber(item.day)}
+                    </td>
+                    <td class="pnp-number">
+                        ${formatNumber(item.mtd)}
+                    </td>
+                    <td class="pnp-number">
+                        ${formatNumber(item.ytd)}
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+            <tr class="pnp-total">
+                <td></td>
+                <td></td>
+                <td class="pnp-source">Total</td>
+                <td class="pnp-number pnp-day-cell">
+                    ${formatNumber(totalDay)}
+                </td>
+                <td class="pnp-number">
+                    ${formatNumber(totalMtd)}
+                </td>
+                <td class="pnp-number">
+                    ${formatNumber(totalYtd)}
+                </td>
+            </tr>
+        `;
+
+        body.innerHTML = html;
+    }
+
+    // ============================================================
+    // DAILY PORT OPERATIONS
+    // ============================================================
+
+
+    let jettyMvDischargeChart = null;
+
+    function formatChartDate(value) {
+        if (!value) return '';
+        const parts = String(value).split('-');
+        if (parts.length !== 3) return value;
+        return `${Number(parts[2])}/${Number(parts[1])}/${parts[0]}`;
+    }
+
+    function renderJettyMvDischargeChart(rows) {
+        const canvas = document.getElementById('jettyMvDischargeChart');
+        const errorEl = document.getElementById('dischargeChartError');
+
+        if (!canvas) return;
+
+        if (errorEl) {
+            errorEl.style.display = 'none';
+            errorEl.textContent = '';
+        }
+
+        if (typeof Chart === 'undefined') {
+            if (errorEl) {
+                errorEl.textContent =
+                    'Unable to load the discharge chart library.';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
+
+        const cleanRows = Array.isArray(rows) ? rows : [];
+
+        if (!cleanRows.length) {
+            if (jettyMvDischargeChart) {
+                jettyMvDischargeChart.destroy();
+                jettyMvDischargeChart = null;
+            }
+
+            if (errorEl) {
+                errorEl.textContent = 'No discharge data found.';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
+
+        const labels = cleanRows.map(row => formatChartDate(row.date));
+
+        const steel = cleanRows.map(row =>
+            Number(row.steel_plant_discharge) || 0
+        );
+        const consumption = cleanRows.map(row =>
+            Number(row.daily_consumption) || 0
+        );
+        const mv = cleanRows.map(row =>
+            Number(row.mv_discharge) || 0
+        );
+        const mbc = cleanRows.map(row =>
+            Number(row.mbc_discharge) || 0
+        );
+
+        // Draw numeric labels above every non-zero bar, matching the
+        // reference graph style without requiring another plugin.
+        const valueLabelPlugin = {
+            id: 'rp01ValueLabels',
+            afterDatasetsDraw(chart) {
+                const {ctx} = chart;
+
+                ctx.save();
+                ctx.font = '9px Arial';
+                ctx.fillStyle = '#222';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+
+                chart.data.datasets.forEach((dataset, datasetIndex) => {
+                    const meta = chart.getDatasetMeta(datasetIndex);
+
+                    meta.data.forEach((bar, index) => {
+                        const value = Number(dataset.data[index]) || 0;
+                        if (value <= 0 || !bar || !bar.getProps) return;
+
+                        const props = bar.getProps(
+                            ['x', 'y'],
+                            true
+                        );
+
+                        ctx.save();
+                        ctx.translate(props.x, props.y - 3);
+                        ctx.rotate(-Math.PI / 2);
+                        ctx.fillText(
+                            value.toLocaleString('en-IN', {
+                                maximumFractionDigits: 0
+                            }),
+                            0,
+                            0
+                        );
+                        ctx.restore();
+                    });
+                });
+
+                ctx.restore();
+            }
+        };
+
+        if (jettyMvDischargeChart) {
+            jettyMvDischargeChart.destroy();
+        }
+
+        jettyMvDischargeChart = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            plugins: [valueLabelPlugin],
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Jetty Discharge (Steel Plant)-Avg',
+                        data: steel,
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'Daily Consumption-Avg',
+                        data: consumption,
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'MV Discharge-Avg',
+                        data: mv,
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'MBC Discharge-Avg',
+                        data: mbc,
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 18,
+                            font: {
+                                size: 12
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label(context) {
+                                const value =
+                                    Number(context.raw) || 0;
+
+                                return `${context.dataset.label}: ` +
+                                    `${value.toLocaleString('en-IN')} MT`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        stacked: false,
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            autoSkip: false,
+                            maxRotation: 55,
+                            minRotation: 55,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'MT'
+                        },
+                        ticks: {
+                            callback(value) {
+                                return Number(value).toLocaleString(
+                                    'en-IN'
+                                );
+                            }
+                        },
+                        grid: {
+                            color: '#d9d9d9'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    async function loadDischargeChart(selectedDate) {
+        if (!selectedDate) return;
+
+        try {
+            const response = await fetch(
+                `${DISCHARGE_CHART_API_URL}?date=${encodeURIComponent(selectedDate)}`,
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store'
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok || result.status !== 'ok') {
+                throw new Error(
+                    result?.error ||
+                    `Discharge chart returned HTTP ${response.status}`
+                );
+            }
+
+            renderJettyMvDischargeChart(result.rows);
+
+        } catch (error) {
+            console.error('Jetty & MV Discharge chart:', error);
+
+            const errorEl =
+                document.getElementById('dischargeChartError');
+
+            if (errorEl) {
+                errorEl.textContent =
+                    `Unable to load chart: ${error.message}`;
+                errorEl.style.display = 'flex';
+            }
+        }
+    }
+
+    function renderDailyOperationsTable(result) {
+        if (!dailyOperationsBodyEl) return;
+
+        const rows = Array.isArray(result?.rows)
+            ? result.rows
+            : [];
+
+        if (!rows.length) {
+            dailyOperationsBodyEl.innerHTML = `
+                <tr class="daily-error-row">
+                    <td colspan="7">
+                        No Daily Port Operations data found.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const avg = result.averages || {};
+
+        if (dailyJettyAvgEl) {
+            dailyJettyAvgEl.textContent =
+                formatNumber(avg.jetty_discharge);
+        }
+
+        if (dailySteelAvgEl) {
+            dailySteelAvgEl.textContent =
+                formatNumber(avg.steel_plant_discharge);
+        }
+
+        if (dailyCementAvgEl) {
+            dailyCementAvgEl.textContent =
+                formatNumber(avg.cement_plant_discharge);
+        }
+
+        if (dailyMbcAvgEl) {
+            dailyMbcAvgEl.textContent =
+                formatNumber(avg.mbc_discharge);
+        }
+
+        if (dailyMvAvgEl) {
+            dailyMvAvgEl.textContent =
+                formatNumber(avg.mv_discharge);
+        }
+
+        if (dailyConsumptionAvgEl) {
+            dailyConsumptionAvgEl.textContent =
+                formatNumber(avg.daily_consumption);
+        }
+
+        renderJettyMvDischargeChart(rows);
+
+        dailyOperationsBodyEl.innerHTML = rows.map(row => `
+            <tr>
+                <td class="daily-date">
+                    ${formatDateForDisplay(row.date)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.jetty_discharge)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.steel_plant_discharge)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.cement_plant_discharge)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.mbc_discharge)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.mv_discharge)}
+                </td>
+                <td class="daily-number">
+                    ${formatNumber(row.daily_consumption)}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+
+    async function loadDailyOperations(selectedDate) {
+        if (!dailyOperationsBodyEl || !selectedDate) return;
+
+        dailyOperationsBodyEl.innerHTML = `
+            <tr class="daily-loading-row">
+                <td colspan="7">
+                    Loading Daily Port Operations...
+                </td>
+            </tr>
+        `;
+
+        try {
+            const response = await fetch(
+                `${DAILY_OPERATIONS_API_URL}?date=${encodeURIComponent(selectedDate)}`,
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store'
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok || result.status !== 'ok') {
+                throw new Error(
+                    result?.error ||
+                    `Daily Operations returned HTTP ${response.status}`
+                );
+            }
+
+            renderDailyOperationsTable(result);
+
+        } catch (error) {
+            console.error('Daily Port Operations:', error);
+
+            dailyOperationsBodyEl.innerHTML = `
+                <tr class="daily-error-row">
+                    <td colspan="7">
+                        Unable to load Daily Port Operations:
+                        ${escapeHtml(error.message)}
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+
+    const ADDITIONAL_RECEIPT_CONFIG = {
+        karanja: {
+            api: '/module/CARGO_STATS/api/karanja_receipt',
+            bodyId: 'karanjaReceiptBody',
+            rows: [
+                {
+                    group: 'Through MV',
+                    cargo: 'OLIVINE',
+                    source: 'Norway Port',
+                    fields: ['olivine', 'mv_olivine', 'karanja_olivine']
+                },
+                {
+                    group: 'Receipt at Plant',
+                    cargo: '',
+                    source: 'By Road',
+                    fields: ['by_road', 'road', 'karanja_by_road']
+                },
+                {
+                    group: 'Receipt at Plant',
+                    cargo: '',
+                    source: 'By Barge',
+                    fields: ['by_barge', 'barge', 'karanja_by_barge']
+                }
+            ]
+        },
+
+        roha: {
+            api: '/module/CARGO_STATS/api/roha_receipt',
+            bodyId: 'rohaReceiptBody',
+            rows: [
+                {
+                    group: 'Through Rake',
+                    cargo: 'MEL',
+                    source: 'Karnataka',
+                    fields: ['mel', 'rake_mel', 'roha_mel']
+                }
+            ]
+        },
+
+        dolvi: {
+            api: '/module/CARGO_STATS/api/dolvi_receipt',
+            bodyId: 'dolviReceiptBody',
+            rows: [
+                {
+                    group: 'Through Rake',
+                    cargo: 'MEL',
+                    source: 'Karnataka',
+                    fields: ['mel', 'rake_mel']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'MMEC Vedanta Fines',
+                    source: 'Karnataka',
+                    fields: ['mmec_vedanta_fines', 'rake_mmec_vedanta_fines']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'BHQ Flux',
+                    source: 'Karnataka',
+                    fields: ['bhq_flux', 'rake_bhq_flux']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Jabalpur Fines',
+                    source: 'M.P',
+                    fields: ['jabalpur_fines', 'rake_jabalpur_fines']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Jamshedpur Coking Coal',
+                    source: 'Jharkhand',
+                    fields: ['jamshedpur_coking_coal', 'rake_jamshedpur_coking_coal']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Surajgad Fines',
+                    source: '-',
+                    fields: ['surajgad_fines', 'rake_surajgad_fines']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'ZTC',
+                    source: 'Karnataka',
+                    fields: ['ztc', 'rake_ztc']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Limestone',
+                    source: 'Rajasthan',
+                    fields: ['limestone', 'rake_limestone']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Dolomite',
+                    source: 'Rajasthan',
+                    fields: ['dolomite', 'rake_dolomite']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Pellets',
+                    source: 'Others',
+                    fields: ['pellets', 'rake_pellets']
+                },
+                {
+                    group: 'Through Rake',
+                    cargo: 'Orissa Fines',
+                    source: 'Orissa',
+                    fields: ['orissa_fines', 'rake_orissa_fines']
+                },
+                {
+                    group: 'Through Road',
+                    cargo: 'Dolomite',
+                    source: 'Rajasthan',
+                    fields: ['road_dolomite', 'dolomite_road']
+                },
+                {
+                    group: 'Through Road',
+                    cargo: "Limestone 40'80",
+                    source: 'Rajasthan',
+                    fields: ['road_limestone_40_80', 'limestone_40_80']
+                }
+            ]
+        }
+    };
+
+    function additionalReceiptNumber(row, fields) {
+        for (const field of fields) {
+            if (
+                row &&
+                row[field] !== undefined &&
+                row[field] !== null &&
+                row[field] !== ''
+            ) {
+                const value = Number(row[field]);
+                if (Number.isFinite(value)) return value;
+            }
+        }
+        return 0;
+    }
+
+    function additionalReceiptDate(row) {
+        return row?.date ||
+               row?.entry_date ||
+               row?.report_date ||
+               '';
+    }
+
+    function renderAdditionalReceipt(config, rows, selectedDate) {
+        const body = document.getElementById(config.bodyId);
+        if (!body) return;
+
+        const selected = parseLocalDate(selectedDate);
+        if (!selected) {
+            body.innerHTML =
+                '<tr><td colspan="6">Invalid selected date.</td></tr>';
+            return;
+        }
+
+        const monthStart = new Date(
+            selected.getFullYear(),
+            selected.getMonth(),
+            1
+        );
+
+        const fyStart = getFinancialYearStart(selected);
+        const selectedIso = isoDateLocal(selected);
+
+        const values = config.rows.map(item => ({
+            ...item,
+            day: 0,
+            mtd: 0,
+            ytd: 0
+        }));
+
+        rows.forEach(row => {
+            const rowDate = parseLocalDate(additionalReceiptDate(row));
+            if (!rowDate || rowDate > selected || rowDate < fyStart) {
+                return;
+            }
+
+            const rowIso = isoDateLocal(rowDate);
+
+            values.forEach(item => {
+                const value = additionalReceiptNumber(
+                    row,
+                    item.fields
+                );
+
+                if (rowIso === selectedIso) {
+                    item.day += value;
+                }
+
+                if (rowDate >= monthStart) {
+                    item.mtd += value;
+                }
+
+                item.ytd += value;
+            });
+        });
+
+        let totalDay = 0;
+        let totalMtd = 0;
+        let totalYtd = 0;
+        let html = '';
+
+        values.forEach((item, index) => {
+            totalDay += item.day;
+            totalMtd += item.mtd;
+            totalYtd += item.ytd;
+
+            const showGroup =
+                index === 0 ||
+                values[index - 1].group !== item.group;
+
+            html += `
+                <tr>
+                    <td class="receipt-group">
+                        ${showGroup ? escapeHtml(item.group) : ''}
+                    </td>
+                    <td class="receipt-cargo">
+                        ${escapeHtml(item.cargo)}
+                    </td>
+                    <td class="receipt-source">
+                        ${escapeHtml(item.source)}
+                    </td>
+                    <td class="receipt-number receipt-day">
+                        ${formatNumber(item.day)}
+                    </td>
+                    <td class="receipt-number">
+                        ${formatNumber(item.mtd)}
+                    </td>
+                    <td class="receipt-number">
+                        ${formatNumber(item.ytd)}
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+            <tr class="receipt-total">
+                <td></td>
+                <td></td>
+                <td class="receipt-source">Total</td>
+                <td class="receipt-number receipt-day">
+                    ${formatNumber(totalDay)}
+                </td>
+                <td class="receipt-number">
+                    ${formatNumber(totalMtd)}
+                </td>
+                <td class="receipt-number">
+                    ${formatNumber(totalYtd)}
+                </td>
+            </tr>
+        `;
+
+        body.innerHTML = html;
+    }
+
+    async function loadAdditionalReceipt(config, selectedDate) {
+        const body = document.getElementById(config.bodyId);
+        if (!body) return;
+
+        try {
+            body.innerHTML =
+                '<tr><td colspan="6" style="text-align:center;">Loading...</td></tr>';
+
+            const response = await fetch(
+                `${config.api}?date=${encodeURIComponent(selectedDate)}`,
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store'
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    result?.error ||
+                    `HTTP ${response.status}`
+                );
+            }
+
+            const rows = Array.isArray(result)
+                ? result
+                : Array.isArray(result?.rows)
+                    ? result.rows
+                    : Array.isArray(result?.data)
+                        ? result.data
+                        : [];
+
+            renderAdditionalReceipt(
+                config,
+                rows,
+                getReportDate(selectedDate)
+            );
+
+        } catch (error) {
+            console.error(config.api, error);
+
+            body.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align:center;">
+                        Unable to load data
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+    async function loadAdditionalReceiptTables(selectedDate) {
+        await Promise.all([
+            loadAdditionalReceipt(
+                ADDITIONAL_RECEIPT_CONFIG.karanja,
+                selectedDate
+            ),
+            loadAdditionalReceipt(
+                ADDITIONAL_RECEIPT_CONFIG.roha,
+                selectedDate
+            ),
+            loadAdditionalReceipt(
+                ADDITIONAL_RECEIPT_CONFIG.dolvi,
+                selectedDate
+            )
+        ]);
+    }
+
+
+    async function loadPnpReceipt(selectedDate) {
+        const body = document.getElementById('pnpReceiptBody');
+        if (!body) return;
+
+        try {
+            body.innerHTML =
+                '<tr><td colspan="6" style="text-align:center;">Loading...</td></tr>';
+
+            const response = await fetch(
+                `${PNP_RECEIPT_API_URL}?date=${encodeURIComponent(getReportDate(selectedDate))}`,
+                {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store'
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    result?.error ||
+                    `PNP Receipt returned HTTP ${response.status}`
+                );
+            }
+
+            // Generic CARGO_STATS section API returns an array.
+            // Also support {rows: [...]} / {data: [...]} for compatibility.
+            const rows = Array.isArray(result)
+                ? result
+                : Array.isArray(result?.rows)
+                    ? result.rows
+                    : Array.isArray(result?.data)
+                        ? result.data
+                        : [];
+
+            renderPnpReceiptTable(
+                rows,
+                getReportDate(selectedDate)
+            );
+
+        } catch (error) {
+            console.error('PNP Receipt:', error);
+
+            body.innerHTML = `
+                <tr>
+                    <td colspan="6">
+                        Unable to load PNP Receipt:
+                        ${escapeHtml(error.message)}
+                    </td>
+                </tr>
+            `;
+        }
+    }
+
+
+    async function loadCargoStatistics() {
+        const selectedDate = datePicker.value;
+
+        if (!selectedDate) {
+            showError('Please select a date.');
+            return;
+        }
+
+        cargoBodyEl.innerHTML = `
+            <tr class="loading-row">
+                <td colspan="12">Loading Cargo Statistics...</td>
+            </tr>
+        `;
+
+        if (consumptionBodyEl) {
+            consumptionBodyEl.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align:center;">
+                        Loading Consumption...
+                    </td>
+                </tr>
+            `;
+        }
+
+        if (productionBodyEl) {
+            productionBodyEl.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align:center;">
+                        Loading Production...
+                    </td>
+                </tr>
+            `;
+        }
+
+        try {
+            // IMPORTANT:
+            // If the user selects 02-Sep, every table must display
+            // 01-Sep data. Keep selectedDate for the API request, but
+            // use reportDate for all frontend calculations/rendering.
+            const reportDate = getReportDate(selectedDate);
+
+            if (!reportDate) {
+                throw new Error('Invalid selected date.');
+            }
+
+            const reportUrl =
+                `${API_URL}?date=${encodeURIComponent(selectedDate)}`;
+
+            const [reportResponse, consumptionResponse, productionResponse] =
+                await Promise.all([
+                    fetch(reportUrl, {
+                        method: 'GET',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Accept': 'application/json'
+                        },
+                        cache: 'no-store'
+                    }),
+
+                    fetch(CONSUMPTION_API_URL, {
+                        method: 'GET',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Accept': 'application/json'
+                        },
+                        cache: 'no-store'
+                    }),
+
+                    fetch(
+                        `${PRODUCTION_API_URL}?date=${encodeURIComponent(selectedDate)}`,
+                        {
+                            method: 'GET',
+                            credentials: 'same-origin',
+                            headers: {
+                                'Accept': 'application/json'
+                            },
+                            cache: 'no-store'
+                        }
+                    )
+                ]);
+
+            let data;
+            let consumptionData;
+            let productionData;
+
+            try {
+                data = await reportResponse.json();
+            } catch (jsonError) {
+                throw new Error(
+                    `Report server returned HTTP ${reportResponse.status}`
+                );
+            }
+
+            try {
+                consumptionData = await consumptionResponse.json();
+            } catch (jsonError) {
+                throw new Error(
+                    `Consumption server returned HTTP ${consumptionResponse.status}`
+                );
+            }
+
+            try {
+                productionData = await productionResponse.json();
+            } catch (jsonError) {
+                throw new Error(
+                    `Production server returned HTTP ${productionResponse.status}`
+                );
+            }
+
+            if (!reportResponse.ok || data.status !== 'ok') {
+                throw new Error(
+                    data.error ||
+                    `Unable to load report (HTTP ${reportResponse.status})`
+                );
+            }
+
+            if (!consumptionResponse.ok ||
+                !Array.isArray(consumptionData)) {
+                throw new Error(
+                    consumptionData.error ||
+                    `Unable to load stats_cargo Consumption ` +
+                    `(HTTP ${consumptionResponse.status})`
+                );
+            }
+
+            if (!productionResponse.ok) {
+                throw new Error(
+                    (productionData && productionData.error) ||
+                    `Unable to load stats_cargo Production ` +
+                    `(HTTP ${productionResponse.status})`
+                );
+            }
+
+            // RP01 Production API returns an object:
+            // { status: 'ok', production: [...], rows: [...] }
+            // Accept both the current RP01 response and a plain array for
+            // backward compatibility.
+            if (productionData && productionData.status === 'error') {
+                throw new Error(
+                    productionData.error ||
+                    'Unable to load Production data.'
+                );
+            }
+
+            if (productionData && !Array.isArray(productionData)) {
+                productionData =
+                    Array.isArray(productionData.rows)
+                        ? productionData.rows
+                        : Array.isArray(productionData.production)
+                            ? productionData.production
+                            : [];
+            }
+
+            if (!Array.isArray(productionData)) {
+                throw new Error('Production API returned no valid rows.');
+            }
+
+            // Replace RP01's Consumption actuals with direct stats_cargo
+            // Consumption values for the selected day, month and FY.
+            data = applyStatsCargoConsumption(
+                data,
+                consumptionData,
+                reportDate
+            );
+
+            renderConsumptionTable(
+                consumptionData,
+                reportDate
+            );
+
+            // Production API already converts selectedDate -> reportDate.
+            // Render using reportDate so the day/MTD/YTD calculations do
+            // not accidentally include the selected day's data.
+            renderProductionTable(
+                productionData,
+                reportDate
+            );
+
+            await loadDailyOperations(selectedDate);
+
+            await loadPnpReceipt(selectedDate);
+            await loadAdditionalReceiptTables(selectedDate);
+
+            renderReport(data);
+        } catch (error) {
+            console.error('Cargo Statistics:', error);
+            showError(`Unable to load Cargo Statistics: ${error.message}`);
+
+            if (consumptionBodyEl) {
+                consumptionBodyEl.innerHTML = `
+                    <tr class="error-row">
+                        <td colspan="4">
+                            ${escapeHtml(
+                                `Unable to load Consumption: ${error.message}`
+                            )}
+                        </td>
+                    </tr>
+                `;
+            }
+
+            if (productionBodyEl) {
+                productionBodyEl.innerHTML = `
+                    <tr class="error-row">
+                        <td colspan="7">
+                            ${escapeHtml(
+                                `Unable to load Production: ${error.message}`
+                            )}
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+
+    // ============================================================
+    // EXCEL EXPORT
+    // Recreates the reference workbook's cell-based layout.
+    //
+    // B:M  = Cargo Statistics
+    // O:R  = Consumption
+    // T:Z  = Production
+    // B:S  = Chart
+    // T:Y  = Receipt tables
+    // ============================================================
+
+    function excelCol(n) {
+        let s = '';
+        while (n > 0) {
+            const r = (n - 1) % 26;
+            s = String.fromCharCode(65 + r) + s;
+            n = Math.floor((n - 1) / 26);
+        }
+        return s;
+    }
+
+    function htmlTableMatrix(table) {
+        const grid = [];
+        const merges = [];
+
+        Array.from(table.rows).forEach((tr, r) => {
+            if (!grid[r]) grid[r] = [];
+
+            let c = 0;
+
+            Array.from(tr.cells).forEach(cell => {
+                while (grid[r][c] !== undefined) c++;
+
+                const rs = Math.max(1, cell.rowSpan || 1);
+                const cs = Math.max(1, cell.colSpan || 1);
+                const value = cell.innerText.trim();
+
+                for (let rr = 0; rr < rs; rr++) {
+                    if (!grid[r + rr]) grid[r + rr] = [];
+                    for (let cc = 0; cc < cs; cc++) {
+                        grid[r + rr][c + cc] =
+                            rr === 0 && cc === 0 ? value : null;
+                    }
+                }
+
+                if (rs > 1 || cs > 1) {
+                    merges.push({
+                        r1: r,
+                        c1: c,
+                        r2: r + rs - 1,
+                        c2: c + cs - 1
+                    });
+                }
+
+                c += cs;
+            });
+        });
+
+        return {
+            grid,
+            merges,
+            rows: grid.length,
+            cols: Math.max(0, ...grid.map(r => r.length))
+        };
+    }
+
+    function excelSetCell(ws, row, col, value, options = {}) {
+        const cell = ws.getCell(row, col);
+
+        cell.value = value === '' ? null : value;
+
+        cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+        };
+
+        cell.alignment = {
+            vertical: 'middle',
+            horizontal: options.horizontal || 'center',
+            wrapText: true
+        };
+
+        cell.font = {
+            name: 'Calibri',
+            size: options.size || 11,
+            bold: !!options.bold
+        };
+
+        if (options.fill) {
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: options.fill }
+            };
+        }
+
+        return cell;
+    }
+
+    function excelStyleRange(ws, r1, c1, r2, c2, options = {}) {
+        for (let r = r1; r <= r2; r++) {
+            for (let c = c1; c <= c2; c++) {
+                const cell = ws.getCell(r, c);
+
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' }
+                };
+
+                cell.alignment = {
+                    vertical: 'middle',
+                    horizontal: options.horizontal || 'center',
+                    wrapText: true
+                };
+
+                if (options.fill) {
+                    cell.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: options.fill }
+                    };
+                }
+
+                if (options.bold !== undefined) {
+                    cell.font = {
+                        name: 'Calibri',
+                        size: options.size || 11,
+                        bold: options.bold
+                    };
+                }
+            }
+        }
+    }
+
+    function writeHtmlTableToExcel(ws, selector, startRow, startCol, options = {}) {
+        const table = document.querySelector(selector);
+        if (!table) return null;
+
+        const parsed = htmlTableMatrix(table);
+
+        parsed.grid.forEach((row, r) => {
+            row.forEach((value, c) => {
+                const excelRow = startRow + r;
+                const excelCol = startCol + c;
+
+                excelSetCell(
+                    ws,
+                    excelRow,
+                    excelCol,
+                    value,
+                    {
+                        horizontal:
+                            c === 0 && options.leftFirstColumn
+                                ? 'left'
+                                : 'right',
+                        bold:
+                            options.totalRows &&
+                            options.totalRows.includes(r),
+                        fill:
+                            r < (options.headerRows || 0)
+                                ? 'FFF1F1F1'
+                                : (
+                                    options.stockCols &&
+                                    options.stockCols.includes(c)
+                                )
+                                    ? 'FFDCE3EA'
+                                    : (
+                                        options.averageRows &&
+                                        options.averageRows.includes(r)
+                                    )
+                                        ? 'FFF1F1F1'
+                                        : null
+                    }
+                );
+            });
+        });
+
+        parsed.merges.forEach(m => {
+            const r1 = startRow + m.r1;
+            const c1 = startCol + m.c1;
+            const r2 = startRow + m.r2;
+            const c2 = startCol + m.c2;
+
+            ws.mergeCells(
+                `${excelCol(c1)}${r1}:${excelCol(c2)}${r2}`
+            );
+
+            excelStyleRange(
+                ws,
+                r1,
+                c1,
+                r2,
+                c2,
+                {
+                    fill: m.r1 < (options.headerRows || 0)
+                        ? 'FFF1F1F1'
+                        : null
+                }
+            );
+        });
+
+        for (let r = 0; r < parsed.rows; r++) {
+            ws.getRow(startRow + r).height =
+                r < (options.headerRows || 0)
+                    ? (options.headerHeight || 30)
+                    : (options.bodyHeight || 30);
+        }
+
+        return parsed;
+    }
+
+    async function downloadExcelReport() {
+        if (typeof ExcelJS === 'undefined') {
+            alert(
+                'Excel export library could not be loaded. ' +
+                'Please refresh the page and try again.'
+            );
+            return;
+        }
+
+        if (downloadExcelBtn) {
+            downloadExcelBtn.disabled = true;
+            downloadExcelBtn.textContent = 'Preparing Excel...';
+        }
+
+        try {
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = 'Cargo Statistics';
+            workbook.created = new Date();
+
+            const ws = workbook.addWorksheet('Cargo Satistics', {
+                views: [{ showGridLines: false }]
+            });
+
+            // --------------------------------------------------------
+            // Reference-style heading and balance section.
+            // --------------------------------------------------------
+            ws.mergeCells('B2:U2');
+            excelSetCell(ws, 2, 2, 'Cargo Statistics', {
+                horizontal: 'center',
+                bold: true,
+                size: 14,
+                fill: 'FFF1F1F1'
+            });
+            excelStyleRange(ws, 2, 2, 2, 21, {
+                fill: 'FFF1F1F1',
+                bold: true,
+                size: 14
+            });
+            ws.getRow(2).height = 27;
+
+            ws.mergeCells('B3:E3');
+            excelSetCell(
+                ws, 3, 2,
+                'Doc. No: OPE/0100/F/09',
+                { horizontal: 'left' }
+            );
+            excelStyleRange(ws, 3, 2, 3, 5);
+
+            excelSetCell(ws, 3, 10, 'Balance Days', {
+                horizontal: 'left',
+                bold: true
+            });
+            const balanceDaysCell = excelSetCell(
+                ws, 3, 11,
+                balanceDaysEl ? balanceDaysEl.textContent.trim() : '-',
+                { horizontal: 'center', bold: true }
+            );
+            balanceDaysCell.font = {
+                name: 'Calibri',
+                size: 12,
+                bold: true,
+                color: { argb: 'FFFF0000' }
+            };
+
+            excelSetCell(ws, 4, 2, 'Rev. 02', {
+                horizontal: 'left'
+            });
+            excelSetCell(ws, 4, 3, 'Issue No. 02', {
+                horizontal: 'left'
+            });
+            ws.mergeCells('D4:E4');
+            excelSetCell(ws, 4, 4, 'Issue Date : 01.04.2022', {
+                horizontal: 'left'
+            });
+            excelStyleRange(ws, 4, 4, 4, 5);
+
+            const selectedDate =
+                datePicker && datePicker.value
+                    ? datePicker.value
+                    : '';
+
+            const selectedDisplay =
+                selectedDate
+                    ? formatDateForDisplay(selectedDate)
+                    : '-';
+
+            const reportDisplay =
+                reportDateText
+                    ? reportDateText.textContent.trim()
+                    : '-';
+
+            ws.mergeCells('F3:M3');
+            excelSetCell(
+                ws, 3, 6,
+                `Selected Date: ${selectedDisplay}`,
+                { horizontal: 'left' }
+            );
+            excelStyleRange(ws, 3, 6, 3, 13);
+
+            ws.mergeCells('F4:M4');
+            excelSetCell(
+                ws, 4, 6,
+                `Report Date: ${reportDisplay}`,
+                { horizontal: 'left' }
+            );
+            excelStyleRange(ws, 4, 6, 4, 13);
+
+            // --------------------------------------------------------
+            // TOP TABLES
+            //
+            // Cargo starts B5.
+            // Consumption starts O5 to reduce the blank space.
+            // Production starts T5.
+            // --------------------------------------------------------
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Cargo Statistics"]',
+                5,
+                2,
+                {
+                    headerRows: 3,
+                    headerHeight: 32,
+                    bodyHeight: 31,
+                    leftFirstColumn: true,
+                    totalRows: [8],
+                    stockCols: [10, 11]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Consumption"]',
+                5,
+                15,
+                {
+                    headerRows: 3,
+                    headerHeight: 32,
+                    bodyHeight: 31,
+                    leftFirstColumn: true,
+                    totalRows: [8],
+                    averageRows: [9]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Production"]',
+                5,
+                20,
+                {
+                    headerRows: 1,
+                    headerHeight: 39,
+                    bodyHeight: 31,
+                    leftFirstColumn: true
+                }
+            );
+
+            // --------------------------------------------------------
+            // LOWER TABLES
+            // --------------------------------------------------------
+            // Reference Excel: Daily Port Operations = AF8:AL40.
+            // Keep all 7 visible columns (DATE + 6 metrics) and its
+            // title/header rows in the same cell positions.
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Daily Port Operations"]',
+                8,
+                32,
+                {
+                    headerRows: 3,
+                    headerHeight: 31,
+                    bodyHeight: 27,
+                    leftFirstColumn: true,
+                    totalRows: [],
+                    averageRows: [32]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="PNP : Receipt / Supply of RM"]',
+                16,
+                24,
+                {
+                    headerRows: 3,
+                    headerHeight: 28,
+                    bodyHeight: 27,
+                    leftFirstColumn: true,
+                    totalRows: [9]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Karanja Receipt Supply of RM"]',
+                27,
+                24,
+                {
+                    headerRows: 3,
+                    headerHeight: 28,
+                    bodyHeight: 27,
+                    leftFirstColumn: true,
+                    totalRows: [6]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Roha Receipt Supply of RM"]',
+                35,
+                24,
+                {
+                    headerRows: 3,
+                    headerHeight: 28,
+                    bodyHeight: 27,
+                    leftFirstColumn: true,
+                    totalRows: [4]
+                }
+            );
+
+            writeHtmlTableToExcel(
+                ws,
+                'table[aria-label="Dolvi Receipt Supply of RM"]',
+                41,
+                24,
+                {
+                    headerRows: 3,
+                    headerHeight: 28,
+                    bodyHeight: 27,
+                    leftFirstColumn: true,
+                    totalRows: [16]
+                }
+            );
+
+            // --------------------------------------------------------
+            // Column widths based on the reference workbook, with the
+            // Consumption block moved left to O:R.
+            // --------------------------------------------------------
+            const widths = {
+                A: 2.3,
+                B: 15,
+                C: 20.1,
+                D: 19,
+                E: 19.5,
+                F: 17.9,
+                G: 18,
+                H: 15.1,
+                I: 15.1,
+                J: 16.3,
+                K: 16.3,
+                L: 14.7,
+                M: 14.7,
+                N: 3,
+                O: 15.1,
+                P: 16,
+                Q: 14,
+                R: 14,
+                S: 3,
+                T: 12,
+                U: 12,
+                V: 12,
+                W: 12,
+                X: 16.7,
+                Y: 23,
+                Z: 12.1,
+                AA: 11.6,
+                AB: 11.6,
+                AC: 13.1,
+                AD: 11.3
+            };
+
+            Object.keys(widths).forEach(col => {
+                ws.getColumn(col).width = widths[col];
+            });
+
+            // --------------------------------------------------------
+            // Copy the web chart into the workbook as an image.
+            // Reference chart position: B15:W38.
+            // --------------------------------------------------------
+            const chartCanvas =
+                document.getElementById('jettyMvDischargeChart');
+
+            if (
+                chartCanvas &&
+                typeof chartCanvas.toDataURL === 'function'
+            ) {
+                try {
+                    // Export the actual rendered chart, not the HTML
+                    // container. Reference Excel chart area = B15:W38.
+                    const imageData =
+                        chartCanvas.toDataURL('image/png', 1.0);
+
+                    const imageId =
+                        workbook.addImage({
+                            base64: imageData,
+                            extension: 'png'
+                        });
+
+                    ws.addImage(imageId, {
+                        tl: { col: 1, row: 14 },
+                        br: { col: 22, row: 38 }
+                    });
+                } catch (chartError) {
+                    console.warn(
+                        'Could not embed discharge chart:',
+                        chartError
+                    );
+                }
+            }
+
+            ws.freezePanes = 'B5';
+
+            ws.pageSetup.orientation = 'landscape';
+            ws.pageSetup.fitToPage = true;
+            ws.pageSetup.fitToWidth = 1;
+            ws.pageSetup.fitToHeight = 0;
+
+            ws.pageMargins = {
+                left: 0.25,
+                right: 0.25,
+                top: 0.4,
+                bottom: 0.4,
+                header: 0.2,
+                footer: 0.2
+            };
+
+            const fileDate =
+                selectedDate || new Date().toISOString().slice(0, 10);
+
+            const buffer = await workbook.xlsx.writeBuffer();
+
+            const blob = new Blob(
+                [buffer],
+                {
+                    type:
+                        'application/vnd.openxmlformats-officedocument.' +
+                        'spreadsheetml.sheet'
+                }
+            );
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+
+            link.href = url;
+            link.download =
+                `Cargo_Statistics_${fileDate}.xlsx`;
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            window.setTimeout(
+                () => URL.revokeObjectURL(url),
+                1000
+            );
+        } catch (error) {
+            console.error('Excel export:', error);
+            alert(
+                `Unable to create Excel file: ${error.message}`
+            );
+        } finally {
+            if (downloadExcelBtn) {
+                downloadExcelBtn.disabled = false;
+                downloadExcelBtn.textContent = 'Download Excel';
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // DATA CUTOFF
+    // Source data starts from 01-Sep-2026.
+    // Therefore:
+    //   Select 01-Sep-2026 -> show 31-Aug-2026 report data.
+    //   Select 02-Sep-2026 -> show 01-Sep-2026 report data.
+    // If the user tries to select 31-Aug-2026 (or any earlier date),
+    // show a popup and reset the selection to 01-Sep-2026.
+    // --------------------------------------------------------------------
+    const DATA_CUTOFF_DATE = '2026-09-01';
+
+    function setDefaultDate() {
+        if (!datePicker.value) {
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            datePicker.value = `${yyyy}-${mm}-${dd}`;
+        }
+
+        // Do not use the HTML min attribute here because we want to show
+        // a popup if the user manually selects/types 31-Aug-2026.
+        datePicker.removeAttribute('min');
+
+        // Tomorrow is not a valid selection.
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        datePicker.max = `${yyyy}-${mm}-${dd}`;
+    }
+
+    datePicker.addEventListener('change', function () {
+        const selectedDate = datePicker.value;
+
+        if (selectedDate && selectedDate < DATA_CUTOFF_DATE) {
+            alert(
+                'Data is not available before 01-Sep-2026.\n\n' +
+                'Please select 01-Sep-2026 or a later date.'
+            );
+
+            // 01-Sep-2026 is the first selectable report date.
+            // Its report date is 31-Aug-2026.
+            datePicker.value = DATA_CUTOFF_DATE;
+        }
+
+        loadCargoStatistics();
+    });
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadCargoStatistics);
+    }
+
+    if (downloadExcelBtn) {
+        downloadExcelBtn.addEventListener(
+            'click',
+            downloadExcelReport
+        );
+    }
+
+    setDefaultDate();
+    loadCargoStatistics();
+
+    // Keep the selected date fixed, but refresh the data every 5 minutes.
+    window.setInterval(loadCargoStatistics, 5 * 60 * 1000);
+})();
+
+</script>
+
+{% endblock %}
