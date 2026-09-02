@@ -50,6 +50,17 @@ VALID_SECTIONS = {
     "production",
     "stock_rmhs",
     "stock_pnp",
+    "pnp_receipt",
+    "karanja_receipt",
+    "roha_receipt",
+    "dolvi_receipt",
+}
+
+RECEIPT_SECTIONS = {
+    "pnp_receipt",
+    "karanja_receipt",
+    "roha_receipt",
+    "dolvi_receipt",
 }
 
 
@@ -194,31 +205,31 @@ def insert_entry(
     try:
 
         # ----------------------------------------------------
-        # Do not allow duplicate date + section
+        # Original daily sections allow only one row per date.
+        # Receipt sections can contain multiple rows on the same day.
         # ----------------------------------------------------
-
-        cur.execute(
-            f"""
-            SELECT id
-            FROM {TABLE_NAME}
-            WHERE entry_date = %s
-              AND section = %s
-            LIMIT 1;
-            """,
-            (
-                entry_date,
-                section
+        if section not in RECEIPT_SECTIONS:
+            cur.execute(
+                f"""
+                SELECT id
+                FROM {TABLE_NAME}
+                WHERE entry_date = %s
+                  AND section = %s
+                LIMIT 1;
+                """,
+                (
+                    entry_date,
+                    section
+                )
             )
-        )
 
-        existing = cur.fetchone()
+            existing = cur.fetchone()
 
-        if existing:
-
-            raise ValueError(
-                f"A {section} record already "
-                f"exists for {entry_date}."
-            )
+            if existing:
+                raise ValueError(
+                    f"A {section} record already "
+                    f"exists for {entry_date}."
+                )
 
 
         # ----------------------------------------------------
@@ -610,17 +621,18 @@ def api_upsert(section):
     # Validate date
     # --------------------------------------------------------
 
-    if not entry_date_str:
+    # Receipt tables do not display a Date column.
+    # Their database date is automatically set to today when omitted.
+    if not entry_date_str and section in RECEIPT_SECTIONS:
+        entry_date_str = date.today().isoformat()
 
+    if not entry_date_str:
         return jsonify({
             "error": "Date is required."
         }), 400
 
     try:
-
-        entry_date = date.fromisoformat(
-            entry_date_str
-        )
+        entry_date = date.fromisoformat(entry_date_str)
 
     except ValueError:
 
