@@ -4360,91 +4360,63 @@ ${seriesXml}
 }
 
 function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
-        const domRows = Array.isArray(dailyRowsToWrite)
-            ? dailyRowsToWrite
-            : [];
-        const apiRows = Array.isArray(preferredRows) && preferredRows.length
-            ? preferredRows
-            : [];
+        const domRows = Array.isArray(dailyRowsToWrite) ? dailyRowsToWrite : [];
+        const apiRows = Array.isArray(preferredRows) ? preferredRows : [];
 
-        // Build a DOM fallback map by date. This fills only missing API fields,
-        // so a legitimate zero from the API is never replaced.
-        const domByDate = new Map();
-        domRows.forEach(tr => {
-            const cells = tr?.cells || [];
-            const dateText = cells[0] ? cells[0].innerText : '';
-            const serial = excelDateSerialFromDisplay(dateText);
-            if (serial === null) return;
-            domByDate.set(String(serial), {
-                jetty: chartNumber(cells[1] ? cells[1].innerText : 0),
-                steel: chartNumber(cells[2] ? cells[2].innerText : 0),
-                cement: chartNumber(cells[3] ? cells[3].innerText : 0),
-                mbc: chartNumber(cells[4] ? cells[4].innerText : 0),
-                mv: chartNumber(cells[5] ? cells[5].innerText : 0),
-                consumption: chartNumber(cells[6] ? cells[6].innerText : 0)
-            });
+        // IMPORTANT: The Daily Port Operations table is the authoritative source
+        // for the Excel chart. The chart must show exactly what is displayed in
+        // that table, including MBC and MV on the final date. The API is used
+        // only when a table cell is genuinely blank/missing.
+        const apiByDate = new Map();
+        apiRows.forEach(row => {
+            if (!row || row.date === undefined || row.date === null) return;
+            const dateText = String(row.date).slice(0, 10);
+            const m = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!m) return;
+            const dateSerial = excelDateSerialFromDisplay(`${m[3]}.${m[2]}.${m[1]}`);
+            if (dateSerial === null) return;
+            apiByDate.set(String(dateSerial), row);
         });
 
-        const sourceRows = apiRows.length ? apiRows : domRows;
+        const fieldMap = [
+            ['jetty', 'jetty_discharge', 1],
+            ['steel', 'steel_plant_discharge', 2],
+            ['cement', 'cement_plant_discharge', 3],
+            ['mbc', 'mbc_discharge', 4],
+            ['mv', 'mv_discharge', 5],
+            ['consumption', 'daily_consumption', 6]
+        ];
 
-        return sourceRows.slice(0, 34).map(row => {
-            let dateSerial = null;
-            let values = {};
+        return domRows.slice(0, 34).map(tr => {
+            const cells = tr?.cells || [];
+            const dateText = cells[0] ? cells[0].innerText.trim() : '';
+            const dateSerial = excelDateSerialFromDisplay(dateText);
+            if (dateSerial === null) return null;
 
-            if (row && !row.cells && row.date !== undefined) {
-                const dateText = String(row.date || '').slice(0, 10);
-                const m = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-                dateSerial = m
-                    ? excelDateSerialFromDisplay(`${m[3]}.${m[2]}.${m[1]}`)
-                    : null;
+            const apiRow = apiByDate.get(String(dateSerial));
+            const values = {};
 
-                values = {
-                    jetty: chartNumber(row.jetty_discharge),
-                    steel: chartNumber(row.steel_plant_discharge),
-                    cement: chartNumber(row.cement_plant_discharge),
-                    mbc: chartNumber(row.mbc_discharge),
-                    mv: chartNumber(row.mv_discharge),
-                    consumption: chartNumber(row.daily_consumption)
-                };
+            fieldMap.forEach(([key, apiKey, cellIndex]) => {
+                const domText = cells[cellIndex]
+                    ? String(cells[cellIndex].innerText || '').trim()
+                    : '';
 
-                // If API has null/blank for MBC or MV on the final day, use the
-                // corresponding rendered table value for that same date.
-                const fallback = domByDate.get(String(dateSerial));
-                if (fallback) {
-                    ['jetty', 'steel', 'cement', 'mbc', 'mv', 'consumption'].forEach(key => {
-                        const raw = row[
-                            key === 'jetty' ? 'jetty_discharge' :
-                            key === 'steel' ? 'steel_plant_discharge' :
-                            key === 'cement' ? 'cement_plant_discharge' :
-                            key === 'mbc' ? 'mbc_discharge' :
-                            key === 'mv' ? 'mv_discharge' :
-                            'daily_consumption'
-                        ];
-                        if (raw === null || raw === undefined || String(raw).trim() === '') {
-                            values[key] = fallback[key];
-                        }
-                    });
+                // A displayed numeric value (including explicit 0) always wins.
+                // Only blank / '-' table cells are allowed to fall back to API.
+                if (domText !== '' && domText !== '-') {
+                    values[key] = chartNumber(domText);
+                } else if (apiRow) {
+                    values[key] = chartNumber(apiRow[apiKey]);
+                } else {
+                    values[key] = 0;
                 }
-            } else {
-                const cells = row?.cells || [];
-                dateSerial = excelDateSerialFromDisplay(
-                    cells[0] ? cells[0].innerText : ''
-                );
-                values = {
-                    jetty: chartNumber(cells[1] ? cells[1].innerText : 0),
-                    steel: chartNumber(cells[2] ? cells[2].innerText : 0),
-                    cement: chartNumber(cells[3] ? cells[3].innerText : 0),
-                    mbc: chartNumber(cells[4] ? cells[4].innerText : 0),
-                    mv: chartNumber(cells[5] ? cells[5].innerText : 0),
-                    consumption: chartNumber(cells[6] ? cells[6].innerText : 0)
-                };
-            }
+            });
 
             return {
                 dateSerial,
                 ...values
             };
-        }).filter(r => r.dateSerial !== null);
+        }).filter(Boolean);
     }
 
     async function injectReferenceNativeChart(xlsxBuffer, chartRows) {
@@ -4496,8 +4468,8 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             }
         });
 
-        // Create a clean native Excel chart using the visible
-        // Daily Port Operations cells AB:AH.
+        // Create a clean native Excel chart using the dedicated numeric
+        // source block AZ:BF populated during export.
         zip.file(chartPath, buildNativeExcelChartXml(chartRows));
 
         // Create the drawing at the same location as the requested graph:
