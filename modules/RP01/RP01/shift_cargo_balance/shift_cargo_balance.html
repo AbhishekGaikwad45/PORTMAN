@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}Shift wise cargo Balance (SMS) — RP01{% endblock %}
+
+{% block head %}
+<style>
+    /* ── Breadcrumb ─────────────────────────────────────────────── */
+    .breadcrumb {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-bottom: 14px;
+    }
+
+    .breadcrumb a {
+        color: #4a90d9;
+        text-decoration: none;
+    }
+
+    .breadcrumb a:hover {
+        text-decoration: underline;
+    }
+
+    /* ── FILTER BAR (MATCHING SHIFT REPORT EXACTLY) ─────────────── */
+    .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-end;
+        margin-bottom: 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 12px 16px;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .filter-group label {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .filter-group input,
+    .filter-group select {
+        padding: 5px 9px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 12px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        height: 30px;
+    }
+
+    .filter-group input:focus,
+    .filter-group select:focus {
+        outline: none;
+        border-color: #4a90d9;
+    }
+
+    .filter-btn {
+        padding: 0 18px;
+        height: 30px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        align-self: flex-end;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.15s ease;
+    }
+
+    .filter-btn.primary {
+        background: #107c41; /* Excel green accent */
+        color: #fff;
+    }
+
+    .filter-btn.primary:hover {
+        background: #0b6a35;
+    }
+
+    .filter-btn.secondary {
+        background: #4a90d9;
+        color: #fff;
+    }
+
+    .filter-btn.secondary:hover {
+        background: #357abd;
+    }
+
+    .filter-btn:disabled {
+        background: #aaa;
+        cursor: not-allowed;
+    }
+
+    /* ── REPORT CONTAINER & EXCEL SHEET CARD ────────────────────── */
+    .report-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 18px 22px;
+        margin-bottom: 24px;
+    }
+
+    .report-title-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+    }
+
+    .report-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.2px;
+    }
+
+    /* ── AUTHENTIC EXCEL TABLE DESIGN ───────────────────────────── */
+    .excel-table-wrapper {
+        display: inline-block;
+        max-width: 100%;
+        border-radius: 4px;
+        overflow: hidden;
+        border: 1px solid #bfc5cc;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .dark-theme .excel-table-wrapper {
+        border-color: #475569;
+        box-shadow: none;
+    }
+
+    .excel-table {
+        width: 100%;
+        min-width: 520px;
+        max-width: 620px;
+        border-collapse: collapse;
+        font-size: 13px;
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Calibri, Roboto, sans-serif;
+        background: #ffffff;
+    }
+
+    .dark-theme .excel-table {
+        background: #0f172a;
+    }
+
+    /* Excel Column Header Styling */
+    .excel-table thead th {
+        background: linear-gradient(180deg, #fbfbfb 0%, #eceff2 100%);
+        color: #1f2937;
+        font-weight: 700;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 8px 14px;
+        border: 1px solid #c2c8cf;
+        border-bottom: 2px solid #8c97a5;
+        text-align: left;
+        user-select: none;
+        position: relative;
+    }
+
+    .dark-theme .excel-table thead th {
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+        color: #e2e8f0;
+        border-color: #475569;
+        border-bottom-color: #64748b;
+    }
+
+    .col-berth {
+        width: 130px;
+    }
+
+    .col-cargo {
+        width: 290px;
+    }
+
+    .col-balance {
+        width: 140px;
+        text-align: right;
+    }
+
+    .excel-table thead th.col-balance {
+        text-align: right;
+    }
+
+    /* Excel Data Cells */
+    .excel-table tbody td {
+        border: 1px solid #d4d8dd;
+        padding: 7px 14px;
+        color: var(--text-primary);
+        line-height: 1.35;
+        vertical-align: middle;
+    }
+
+    .dark-theme .excel-table tbody td {
+        border-color: #334155;
+    }
+
+    .excel-table tbody tr:hover td {
+        background-color: #f1f6fd; /* Excel cell hover selection tint */
+    }
+
+    .dark-theme .excel-table tbody tr:hover td {
+        background-color: #1e293b;
+    }
+
+    /* Cell specifics */
+    .cell-berth {
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .cell-cargo {
+        color: var(--text-primary);
+    }
+
+    .cell-balance {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+
+    .berth-badge-special {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 700;
+        color: #b45309;
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+    }
+
+    .dark-theme .berth-badge-special {
+        color: #fef08a;
+        background: #78350f;
+        border-color: #92400e;
+    }
+
+    /* Excel Classic Accounting Total Row */
+    .excel-table tfoot tr.total-row td {
+        background: #f8fafc;
+        font-weight: 700;
+        border-top: 1.5px solid #1e293b;
+        border-bottom: 3px double #1e293b; /* Classic Excel accounting double-underline */
+        padding: 8px 14px;
+    }
+
+    .dark-theme .excel-table tfoot tr.total-row td {
+        background: #1e293b;
+        border-top-color: #94a3b8;
+        border-bottom: 3px double #94a3b8;
+    }
+
+    .excel-table tfoot td.col-balance {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .note-text {
+        font-size: 11px;
+        font-style: italic;
+        color: var(--text-secondary);
+        margin-top: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+    <a href="/module/RP01/">Reports</a> &rsaquo; <span>Shift wise cargo Balance (SMS)</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     FILTER BAR (ENTRY DATE & SHIFT)
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="entry_date">ENTRY DATE</label>
+        <input type="date" id="entry_date" value="{{ default_date }}">
+    </div>
+
+    <div class="filter-group">
+        <label for="shift">SHIFT</label>
+        <select id="shift">
+            <option value="">-- Select --</option>
+            <option value="A" {% if default_shift == 'A' %}selected{% endif %}>A</option>
+            <option value="B" {% if default_shift == 'B' %}selected{% endif %}>B</option>
+            <option value="C" {% if default_shift == 'C' %}selected{% endif %}>C</option>
+        </select>
+    </div>
+
+    <button type="button" class="filter-btn secondary" id="btn-preview" onclick="loadBalanceReport()">
+        Preview
+    </button>
+
+    <button type="button" class="filter-btn primary" id="btn-download" onclick="downloadExcel()">
+        💾 Download Excel
+    </button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     EXCEL SHEET CARD & TABLE
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="report-card" id="report-output-panel">
+    <div class="report-title-bar">
+        <div class="report-title" id="report-table-title">
+            Cargo Balance at Jetty for shift {{ default_shift }}
+        </div>
+    </div>
+
+    <div class="excel-table-wrapper">
+        <table class="excel-table" id="cargo-balance-table">
+            <thead>
+                <tr>
+                    <th class="col-berth">BERTH</th>
+                    <th class="col-cargo">CARGO</th>
+                    <th class="col-balance">BALANCE</th>
+                </tr>
+            </thead>
+            <tbody id="table-tbody">
+                <tr>
+                    <td colspan="3" style="text-align: center; padding: 16px; color: var(--text-secondary);">
+                        Loading balance data...
+                    </td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr class="total-row">
+                    <td class="col-berth">Total</td>
+                    <td class="col-cargo"></td>
+                    <td class="col-balance" id="table-total-val">0</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+
+
+</div>
+
+<script>
+    function loadBalanceReport() {
+        const entryDate = document.getElementById('entry_date').value;
+        const shiftVal = document.getElementById('shift').value;
+
+        if (!entryDate) {
+            alert('Please select an Entry Date.');
+            return;
+        }
+        if (!shiftVal) {
+            alert('Please select a Shift.');
+            return;
+        }
+
+        const tbody = document.getElementById('table-tbody');
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:var(--text-secondary);">Loading...</td></tr>`;
+
+        const url = `/api/module/RP01/shift-cargo-balance/preview?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shiftVal)}`;
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('report-table-title').textContent = data.title || `Cargo Balance at Jetty for shift ${shiftVal}`;
+
+                tbody.innerHTML = '';
+                const items = data.items || [];
+
+                if (items.length > 0) {
+                    items.forEach(it => {
+                        const tr = document.createElement('tr');
+                        const specialBadge = it.is_special ? `<span class="berth-badge-special">${escapeHtml(it.berth_note || it.berth)}</span>` : '';
+                        tr.innerHTML = `
+                            <td class="cell-berth">${escapeHtml(it.berth)}${specialBadge}</td>
+                            <td class="cell-cargo">${escapeHtml(it.cargo)}</td>
+                            <td class="cell-balance">${Number(it.balance).toLocaleString('en-IN')}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:var(--text-secondary);">No cargo balance recorded at jetty for this shift.</td></tr>`;
+                }
+
+                document.getElementById('table-total-val').textContent = Number(data.total_qty || 0).toLocaleString('en-IN');
+            })
+            .catch(err => {
+                console.error('Error:', err);
+                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:red;">Failed to load data.</td></tr>`;
+            });
+    }
+
+    function downloadExcel() {
+        const entryDate = document.getElementById('entry_date').value;
+        const shiftVal = document.getElementById('shift').value;
+
+        if (!entryDate || !shiftVal) {
+            alert('Please select both Entry Date and Shift.');
+            return;
+        }
+
+        window.location.href = `/api/module/RP01/shift-cargo-balance/download?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shiftVal)}`;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadBalanceReport();
+    });
+</script>
+{% endblock %}
