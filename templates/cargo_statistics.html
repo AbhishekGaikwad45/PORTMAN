@@ -4283,6 +4283,16 @@
         return xml.replace(oldText, newText);
     }
 
+    function formatExcelChartDateLabel(serial) {
+        const n = Number(serial);
+        if (!Number.isFinite(n)) return '';
+        const utc = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+        const dd = String(utc.getUTCDate()).padStart(2, '0');
+        const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+        const yyyy = utc.getUTCFullYear();
+        return `${dd}-${mm}-${yyyy}`;
+    }
+
     function buildNativeExcelChartXml(chartRows) {
         const rows = Array.isArray(chartRows) ? chartRows : [];
         const chartNs = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
@@ -4337,7 +4347,7 @@
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 <c:spPr><a:solidFill><a:schemeClr val="${cfg.color}"/></a:solidFill><a:ln><a:schemeClr val="${cfg.color}"/></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
-<c:cat><c:numRef><c:f>'Cargo Satistics'!$BF$7:$BF$${lastRow}</c:f>${cache(categories, 'dd-mm-yyyy')}</c:numRef></c:cat>
+<c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$7:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${rows.length}"/>${rows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$7:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
 </c:ser>`).join('');
 
@@ -4349,8 +4359,8 @@
 <c:plotArea><c:layout/>
 <c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>
 ${seriesXml}
-<c:gapWidth val="45"/><c:overlap val="0"/><c:axId val="100001"/><c:axId val="100002"/></c:barChart>
-<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="dd-mm-yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx>
+<c:gapWidth val="30"/><c:overlap val="0"/><c:axId val="100001"/><c:axId val="100002"/></c:barChart>
+<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="dd-mm-yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:tickLblSkip val="1"/></c:catAx>
 <c:valAx><c:axId val="100002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:title><c:tx><c:rich><a:bodyPr rot="-5400000"/><a:lstStyle/><a:p><a:r><a:t>MT</a:t></a:r></a:p></c:rich></c:tx></c:title><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100001"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/><c:majorGridlines/></c:valAx>
 </c:plotArea>
 <c:plotVisOnly val="0"/><c:dispBlanksAs val="zero"/>
@@ -4864,7 +4874,7 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             // The five hidden columns below contain real numeric Excel
             // values, which is what makes the native chart render in Excel.
             // --------------------------------------------------------
-            const chartSourceCols = ['AZ', 'BA', 'BB', 'BC', 'BD', 'BE', 'BF'];
+            const chartSourceCols = ['AZ', 'BA', 'BB', 'BC', 'BD', 'BE', 'BF', 'BG'];
             chartSourceCols.forEach(col => {
                 try {
                     ws.getColumn(col).hidden = true;
@@ -4879,7 +4889,8 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 BC: 'MBC Discharge-Avg',
                 BD: 'MV Discharge-Avg',
                 BE: 'Daily Consumption-Avg',
-                BF: 'DATE'
+                BF: 'DATE',
+                BG: 'DATE LABEL'
             };
 
             Object.entries(chartSourceHeaders).forEach(([col, value]) => {
@@ -4905,6 +4916,9 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 ws.getCell(`BD${r}`).value = item.mv;
                 ws.getCell(`BE${r}`).value = item.consumption;
                 ws.getCell(`BF${r}`).value = item.dateSerial;
+                    ws.getCell(`BG${r}`).value = item.dateSerial !== null
+                        ? formatExcelChartDateLabel(item.dateSerial)
+                        : '';
 
                 ['AZ', 'BA', 'BB', 'BC', 'BD', 'BE'].forEach(col => {
                     ws.getCell(`${col}${r}`).numFmt = '#,##0';
