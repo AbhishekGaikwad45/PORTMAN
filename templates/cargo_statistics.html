@@ -4297,15 +4297,32 @@
         }
 
         const lastRow = 6 + rows.length;
-        const categories = rows.map(r => r.dateSerial);
+        const categories = rows.map(r => {
+            const serial = Number(r.dateSerial);
+            if (!Number.isFinite(serial)) return '';
+            const d = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+            const dd = String(d.getUTCDate()).padStart(2, '0');
+            const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const yyyy = d.getUTCFullYear();
+            return `${dd}-${mm}-${yyyy}`;
+        });
+        // Show labels only for meaningful bars. This prevents dozens of tiny
+        // values from being drawn on top of each other near the zero axis.
+        const allChartValues = rows.flatMap(r => [r.jetty, r.steel, r.cement, r.mbc, r.mv, r.consumption])
+            .map(Number)
+            .filter(v => Number.isFinite(v) && v > 0);
+        const chartMaxValue = allChartValues.length ? Math.max(...allChartValues) : 0;
+        // Keep labels such as 300 when the chart maximum is 10,510, while
+        // suppressing very small values that would overlap at the baseline.
+        const labelThreshold = chartMaxValue > 0 ? chartMaxValue * 0.02 : 0;
 
         const series = [
-            { col: 'AC', title: 'Jetty Discharge-Avg', color: 'accent1', values: rows.map(r => r.jetty) },
-            { col: 'AD', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'accent2', values: rows.map(r => r.steel) },
-            { col: 'AE', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'accent3', values: rows.map(r => r.cement) },
-            { col: 'AF', title: 'MBC Discharge-Avg', color: 'accent4', values: rows.map(r => r.mbc) },
-            { col: 'AG', title: 'MV Discharge-Avg', color: 'accent5', values: rows.map(r => r.mv) },
-            { col: 'AH', title: 'Daily Consumption-Avg', color: 'accent6', values: rows.map(r => r.consumption) }
+            { col: 'AZ', title: 'Jetty Discharge-Avg', color: 'accent1', values: rows.map(r => r.jetty) },
+            { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'accent2', values: rows.map(r => r.steel) },
+            { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'accent3', values: rows.map(r => r.cement) },
+            { col: 'BC', title: 'MBC Discharge-Avg', color: 'accent4', values: rows.map(r => r.mbc) },
+            { col: 'BD', title: 'MV Discharge-Avg', color: 'accent5', values: rows.map(r => r.mv) },
+            { col: 'BE', title: 'Daily Consumption-Avg', color: 'accent6', values: rows.map(r => r.consumption) }
         ];
 
         const seriesXml = series.map((cfg, index) => `
@@ -4314,8 +4331,8 @@
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 <c:spPr><a:solidFill><a:schemeClr val="${cfg.color}"/></a:solidFill><a:ln><a:schemeClr val="${cfg.color}"/></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
-<c:dLbls><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/></c:dLbls>
-<c:cat><c:numRef><c:f>'Cargo Satistics'!$AB$7:$AB$${lastRow}</c:f>${cache(categories, 'm/d/yyyy')}</c:numRef></c:cat>
+<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/><c:dLblPos val="outEnd"/>${cfg.values.map((v, i) => { const n = Number(v); return Number.isFinite(n) && n > 0 && n >= labelThreshold ? `<c:dLbl><c:idx val="${i}"/><c:showVal val="1"/></c:dLbl>` : ''; }).join('')}</c:dLbls>
+<c:cat><c:strRef><c:f>'Cargo Satistics'!$BF$7:$BF$${lastRow}</c:f><c:strCache><c:ptCount val="${categories.length}"/>${categories.map((v, i) => `<c:pt idx="${i}"><c:v>${esc(v)}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$7:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
 </c:ser>`).join('');
 
@@ -4328,10 +4345,10 @@
 <c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>
 ${seriesXml}
 <c:gapWidth val="150"/><c:overlap val="0"/><c:axId val="100001"/><c:axId val="100002"/></c:barChart>
-<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="d/m/yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx>
+<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="dd-mm-yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx>
 <c:valAx><c:axId val="100002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:title><c:tx><c:rich><a:bodyPr rot="-5400000"/><a:lstStyle/><a:p><a:r><a:t>MT</a:t></a:r></a:p></c:rich></c:tx></c:title><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100001"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/><c:majorGridlines/></c:valAx>
 </c:plotArea>
-<c:plotVisOnly val="1"/><c:dispBlanksAs val="zero"/>
+<c:plotVisOnly val="0"/><c:dispBlanksAs val="zero"/>
 <c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>
 </c:chart>
 </c:chartSpace>`;
