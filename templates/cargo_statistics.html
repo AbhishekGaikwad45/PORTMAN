@@ -4320,25 +4320,26 @@
                 `</c:numCache>`;
         }
 
-        const lastRow = 6 + rows.length;
-        const categories = rows.map(r => Number(r.dateSerial));
-        // Show labels only for meaningful bars. This prevents dozens of tiny
-        // values from being drawn on top of each other near the zero axis.
-        const allChartValues = rows.flatMap(r => [r.jetty, r.steel, r.cement, r.mbc, r.mv, r.consumption])
-            .map(Number)
-            .filter(v => Number.isFinite(v) && v > 0);
-        const chartMaxValue = allChartValues.length ? Math.max(...allChartValues) : 0;
-        // Keep labels such as 300 when the chart maximum is 10,510, while
-        // suppressing very small values that would overlap at the baseline.
-        const labelThreshold = chartMaxValue > 0 ? chartMaxValue * 0.02 : 0;
+        // Add one empty category before and after the real dates.  In a native
+        // clustered column chart Excel centers a category on its tick position.
+        // Without these two padding categories, the first and last 6-bar groups
+        // are clipped at the plot edges.
+        const plotRows = [
+            { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 },
+            ...rows,
+            { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 }
+        ];
+        const sourceStartRow = 7;
+        const lastRow = sourceStartRow + plotRows.length - 1;
+        const categories = plotRows.map(r => r.dateSerial);
 
         const series = [
-            { col: 'AZ', title: 'Jetty Discharge-Avg', color: 'accent1', values: rows.map(r => r.jetty) },
-            { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'accent2', values: rows.map(r => r.steel) },
-            { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'accent3', values: rows.map(r => r.cement) },
-            { col: 'BC', title: 'MBC Discharge-Avg', color: 'accent4', values: rows.map(r => r.mbc) },
-            { col: 'BD', title: 'MV Discharge-Avg', color: 'accent5', values: rows.map(r => r.mv) },
-            { col: 'BE', title: 'Daily Consumption-Avg', color: 'accent6', values: rows.map(r => r.consumption) }
+            { col: 'AZ', title: 'Jetty Discharge-Avg', color: 'accent1', values: plotRows.map(r => r.jetty) },
+            { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'accent2', values: plotRows.map(r => r.steel) },
+            { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'accent3', values: plotRows.map(r => r.cement) },
+            { col: 'BC', title: 'MBC Discharge-Avg', color: 'accent4', values: plotRows.map(r => r.mbc) },
+            { col: 'BD', title: 'MV Discharge-Avg', color: 'accent5', values: plotRows.map(r => r.mv) },
+            { col: 'BE', title: 'Daily Consumption-Avg', color: 'accent6', values: plotRows.map(r => r.consumption) }
         ];
 
         const seriesXml = series.map((cfg, index) => `
@@ -4347,8 +4348,8 @@
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 <c:spPr><a:solidFill><a:schemeClr val="${cfg.color}"/></a:solidFill><a:ln><a:schemeClr val="${cfg.color}"/></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
-<c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$7:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${rows.length}"/>${rows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
-<c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$7:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
+<c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$${sourceStartRow}:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${plotRows.length}"/>${plotRows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(r.dateSerial === null ? '' : formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
+<c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$${sourceStartRow}:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
 </c:ser>`).join('');
 
         return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -4360,7 +4361,7 @@
 <c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>
 ${seriesXml}
 <c:gapWidth val="30"/><c:overlap val="0"/><c:axId val="100001"/><c:axId val="100002"/></c:barChart>
-<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="dd-mm-yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:tickLblSkip val="1"/></c:catAx>
+<c:catAx><c:axId val="100001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="dd-mm-yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx>
 <c:valAx><c:axId val="100002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:title><c:tx><c:rich><a:bodyPr rot="-5400000"/><a:lstStyle/><a:p><a:r><a:t>MT</a:t></a:r></a:p></c:rich></c:tx></c:title><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:crossAx val="100001"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/><c:majorGridlines/></c:valAx>
 </c:plotArea>
 <c:plotVisOnly val="0"/><c:dispBlanksAs val="zero"/>
@@ -4721,7 +4722,7 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             // This is deliberately the complete AB7:AH40 data area so that
             // no dates/data left in the reference Excel can survive the
             // export after the report date.
-            for (let r = 7; r <= 40; r++) {
+            for (let r = 7; r <= 42; r++) {
                 for (let c = 28; c <= 34; c++) {
                     try {
                         const cell = ws.getCell(r, c);
@@ -4907,7 +4908,16 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 });
             }
 
-            chartRows.forEach((item, index) => {
+            // One blank row at each end prevents the first/last six-bar group
+            // from being clipped by the plot boundary. The real table rows remain
+            // untouched; these are only hidden chart-source padding rows.
+            const paddedChartRows = [
+                { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 },
+                ...chartRows,
+                { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 }
+            ];
+
+            paddedChartRows.forEach((item, index) => {
                 const r = 7 + index;
                 ws.getCell(`AZ${r}`).value = item.jetty;
                 ws.getCell(`BA${r}`).value = item.steel;
@@ -4916,9 +4926,9 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 ws.getCell(`BD${r}`).value = item.mv;
                 ws.getCell(`BE${r}`).value = item.consumption;
                 ws.getCell(`BF${r}`).value = item.dateSerial;
-                    ws.getCell(`BG${r}`).value = item.dateSerial !== null
-                        ? formatExcelChartDateLabel(item.dateSerial)
-                        : '';
+                ws.getCell(`BG${r}`).value = item.dateSerial !== null
+                    ? formatExcelChartDateLabel(item.dateSerial)
+                    : '';
 
                 ['AZ', 'BA', 'BB', 'BC', 'BD', 'BE'].forEach(col => {
                     ws.getCell(`${col}${r}`).numFmt = '#,##0';
