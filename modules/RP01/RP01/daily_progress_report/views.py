@@ -5946,12 +5946,12 @@ LEFT JOIN ldud_vessel_operations lco
             WHERE
                 mh.id <> 374
                 AND
-                NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
+                NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
                 AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
-                AND DATE(NULLIF(TRIM(dpl.reached_load_port), '')::timestamp)
+                AND DATE(NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp)
                     BETWEEN (%s::date - INTERVAL '1 day') AND %s::date
             ORDER BY
-                NULLIF(TRIM(dpl.reached_load_port), '')::timestamp
+                NULLIF(TRIM(lpl.cast_off_load_port), '')::timestamp
         """, (report_date, report_date))
 
         mbc_expected_rows = [{
