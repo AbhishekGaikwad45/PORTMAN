@@ -4398,7 +4398,7 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             ['consumption', 'daily_consumption', 6]
         ];
 
-        return domRows.slice(0, 34).map(tr => {
+                return domRows.slice(0, 34).map(tr => {
             const cells = tr?.cells || [];
             const dateText = cells[0] ? cells[0].innerText.trim() : '';
             const dateSerial = excelDateSerialFromDisplay(dateText);
@@ -4412,8 +4412,6 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                     ? String(cells[cellIndex].innerText || '').trim()
                     : '';
 
-                // A displayed numeric value (including explicit 0) always wins.
-                // Only blank / '-' table cells are allowed to fall back to API.
                 if (domText !== '' && domText !== '-') {
                     values[key] = chartNumber(domText);
                 } else if (apiRow) {
@@ -4427,7 +4425,15 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 dateSerial,
                 ...values
             };
-        }).filter(Boolean);
+        })
+        .filter(Boolean)
+        // Drop dates where nothing has been entered yet — mirrors the
+        // web chart's cleanRows filter so Excel doesn't show empty
+        // bar groups for future/unfilled dates.
+        .filter(item =>
+            item.jetty || item.steel || item.cement ||
+            item.mbc || item.mv || item.consumption
+        );
     }
 
     async function injectReferenceNativeChart(xlsxBuffer, chartRows) {
