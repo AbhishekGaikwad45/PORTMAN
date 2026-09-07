@@ -4334,19 +4334,19 @@
         const categories = plotRows.map(r => r.dateSerial);
 
         const series = [
-            { col: 'AZ', title: 'Jetty Discharge-Avg', color: 'accent1', values: plotRows.map(r => r.jetty) },
-            { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'accent2', values: plotRows.map(r => r.steel) },
-            { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'accent3', values: plotRows.map(r => r.cement) },
-            { col: 'BC', title: 'MBC Discharge-Avg', color: 'accent4', values: plotRows.map(r => r.mbc) },
-            { col: 'BD', title: 'MV Discharge-Avg', color: 'accent5', values: plotRows.map(r => r.mv) },
-            { col: 'BE', title: 'Daily Consumption-Avg', color: 'accent6', values: plotRows.map(r => r.consumption) }
-        ];
+    { col: 'AZ', title: 'Jetty Discharge-Avg', color: '4A90D9', values: plotRows.map(r => r.jetty) },
+    { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'ED7D31', values: plotRows.map(r => r.steel) },
+    { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'A5A5A5', values: plotRows.map(r => r.cement) },
+    { col: 'BC', title: 'MBC Discharge-Avg', color: 'FFC000', values: plotRows.map(r => r.mbc) },
+    { col: 'BD', title: 'MV Discharge-Avg', color: '264478', values: plotRows.map(r => r.mv) },
+    { col: 'BE', title: 'Daily Consumption-Avg', color: '70AD47', values: plotRows.map(r => r.consumption) }
+];
 
         const seriesXml = series.map((cfg, index) => `
 <c:ser>
 <c:idx val="${index}"/><c:order val="${index}"/>
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
-<c:spPr><a:solidFill><a:schemeClr val="${cfg.color}"/></a:solidFill><a:ln><a:schemeClr val="${cfg.color}"/></a:ln></c:spPr>
+<c:spPr><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
 <c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$${sourceStartRow}:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${plotRows.length}"/>${plotRows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(r.dateSerial === null ? ' ' : formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$${sourceStartRow}:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
