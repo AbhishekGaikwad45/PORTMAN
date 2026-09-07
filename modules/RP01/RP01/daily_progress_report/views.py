@@ -2034,17 +2034,21 @@ def mbc_report():
             ON dpl.mbc_id = mh.id
 
         WHERE
-        (
-            NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
-            AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
-            AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
-        )
-        OR
-        (
-            NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
-            AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
-            AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
-        )
+            mh.id <> 374
+            AND
+            (
+                (
+                    NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                )
+                OR
+                (
+                    NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                )
+            )
 
     
         ORDER BY
@@ -2383,6 +2387,8 @@ def mbc_arrived_report():
             ON dpl.mbc_id = mh.id
 
         WHERE
+            mh.id <> 374
+            AND
 
             NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
 
@@ -2822,6 +2828,8 @@ def mbc_expected_report():
             ON lpl.mbc_id = mh.id
 
         WHERE
+            mh.id <> 374
+            AND
 
             -- Cast off from load port
             NULLIF(TRIM(lpl.cast_off_load_port), '') IS NOT NULL
@@ -5727,16 +5735,20 @@ LEFT JOIN ldud_vessel_operations lco
             FROM mbc_header mh
             LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
             WHERE
+                mh.id <> 374
+                AND
                 (
-                    NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
-                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
-                    AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
-                )
-                OR
-                (
-                    NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
-                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
-                    AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                    (
+                        NULLIF(TRIM(dpl.unloading_completed), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_completed), '')::timestamp < %s
+                    )
+                    OR
+                    (
+                        NULLIF(TRIM(dpl.unloading_commenced), '') IS NOT NULL
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp >= %s
+                        AND NULLIF(TRIM(dpl.unloading_commenced), '')::timestamp < %s
+                    )
                 )
             ORDER BY NULLIF(TRIM(dpl.unloading_completed), '')::timestamp
         """, (window_start, window_end, window_start, window_end))
@@ -5838,6 +5850,8 @@ LEFT JOIN ldud_vessel_operations lco
             FROM mbc_header mh
             LEFT JOIN mbc_discharge_port_lines dpl ON dpl.mbc_id = mh.id
             WHERE
+                mh.id <> 374
+                AND
                 NULLIF(TRIM(dpl.vessel_arrival_port), '') IS NOT NULL
 
                 -- Discharge must NOT have started yet — once
@@ -5930,6 +5944,8 @@ LEFT JOIN ldud_vessel_operations lco
             LEFT JOIN mbc_load_port_lines lpl
                 ON lpl.mbc_id = mh.id
             WHERE
+                mh.id <> 374
+                AND
                 NULLIF(TRIM(dpl.reached_load_port), '') IS NOT NULL
                 AND NULLIF(TRIM(dpl.arrival_gull_island), '') IS NULL
                 AND DATE(NULLIF(TRIM(dpl.reached_load_port), '')::timestamp)
