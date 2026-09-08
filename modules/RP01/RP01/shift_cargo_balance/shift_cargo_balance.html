@@ -20,17 +20,18 @@
         text-decoration: underline;
     }
 
-    /* ── FILTER BAR (MATCHING SHIFT REPORT EXACTLY) ─────────────── */
+    /* ── FILTER BAR ─────────────────────────────────────────────── */
     .filter-bar {
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
         align-items: flex-end;
-        margin-bottom: 16px;
+        margin-bottom: 18px;
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: 6px;
         padding: 12px 16px;
+        max-width: 660px;
     }
 
     .filter-group {
@@ -102,179 +103,78 @@
         cursor: not-allowed;
     }
 
-    /* ── REPORT CONTAINER & EXCEL SHEET CARD ────────────────────── */
-    .report-card {
+    /* ── WHATSAPP / MESSAGE DIRECT BOX ─────────────────────────── */
+    .whatsapp-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 18px 22px;
         margin-bottom: 24px;
+        max-width: 660px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
     }
 
-    .report-title-bar {
+    .whatsapp-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border-color);
     }
 
-    .report-title {
-        font-size: 15px;
+    .whatsapp-title-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
         font-weight: 700;
         color: var(--text-primary);
-        letter-spacing: -0.2px;
     }
 
-    /* ── AUTHENTIC EXCEL TABLE DESIGN ───────────────────────────── */
-    .excel-table-wrapper {
-        display: inline-block;
-        max-width: 100%;
-        border-radius: 4px;
-        overflow: hidden;
-        border: 1px solid #bfc5cc;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    .whatsapp-icon {
+        width: 20px;
+        height: 20px;
+        fill: #25d366;
     }
 
-    .dark-theme .excel-table-wrapper {
-        border-color: #475569;
-        box-shadow: none;
-    }
-
-    .excel-table {
-        width: 100%;
-        min-width: 520px;
-        max-width: 620px;
-        border-collapse: collapse;
-        font-size: 13px;
-        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Calibri, Roboto, sans-serif;
-        background: #ffffff;
-    }
-
-    .dark-theme .excel-table {
-        background: #0f172a;
-    }
-
-    /* Excel Column Header Styling */
-    .excel-table thead th {
-        background: linear-gradient(180deg, #fbfbfb 0%, #eceff2 100%);
-        color: #1f2937;
-        font-weight: 700;
+    .btn-copy-wa {
+        background: #25d366;
+        color: #ffffff;
         font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 8px 14px;
-        border: 1px solid #c2c8cf;
-        border-bottom: 2px solid #8c97a5;
-        text-align: left;
-        user-select: none;
-        position: relative;
-    }
-
-    .dark-theme .excel-table thead th {
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-        color: #e2e8f0;
-        border-color: #475569;
-        border-bottom-color: #64748b;
-    }
-
-    .col-berth {
-        width: 130px;
-    }
-
-    .col-cargo {
-        width: 290px;
-    }
-
-    .col-balance {
-        width: 140px;
-        text-align: right;
-    }
-
-    .excel-table thead th.col-balance {
-        text-align: right;
-    }
-
-    /* Excel Data Cells */
-    .excel-table tbody td {
-        border: 1px solid #d4d8dd;
-        padding: 7px 14px;
-        color: var(--text-primary);
-        line-height: 1.35;
-        vertical-align: middle;
-    }
-
-    .dark-theme .excel-table tbody td {
-        border-color: #334155;
-    }
-
-    .excel-table tbody tr:hover td {
-        background-color: #f1f6fd; /* Excel cell hover selection tint */
-    }
-
-    .dark-theme .excel-table tbody tr:hover td {
-        background-color: #1e293b;
-    }
-
-    /* Cell specifics */
-    .cell-berth {
-        font-weight: 600;
-        color: var(--text-primary);
-    }
-
-    .cell-cargo {
-        color: var(--text-primary);
-    }
-
-    .cell-balance {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        font-weight: 500;
-        color: var(--text-primary);
-    }
-
-    .berth-badge-special {
-        display: inline-block;
-        font-size: 10px;
         font-weight: 700;
-        color: #b45309;
-        background: #fef3c7;
-        border: 1px solid #fde68a;
-        padding: 1px 5px;
-        border-radius: 3px;
-        margin-left: 6px;
+        padding: 6px 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.15s ease;
+        box-shadow: 0 1px 3px rgba(37, 211, 102, 0.25);
     }
 
-    .dark-theme .berth-badge-special {
-        color: #fef08a;
-        background: #78350f;
-        border-color: #92400e;
+    .btn-copy-wa:hover {
+        background: #1ebc57;
+        transform: translateY(-1px);
     }
 
-    /* Excel Classic Accounting Total Row */
-    .excel-table tfoot tr.total-row td {
-        background: #f8fafc;
-        font-weight: 700;
-        border-top: 1.5px solid #1e293b;
-        border-bottom: 3px double #1e293b; /* Classic Excel accounting double-underline */
-        padding: 8px 14px;
+    .btn-copy-wa.copied {
+        background: #107c41;
     }
 
-    .dark-theme .excel-table tfoot tr.total-row td {
-        background: #1e293b;
-        border-top-color: #94a3b8;
-        border-bottom: 3px double #94a3b8;
-    }
-
-    .excel-table tfoot td.col-balance {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-    }
-
-    .note-text {
-        font-size: 11px;
-        font-style: italic;
-        color: var(--text-secondary);
-        margin-top: 10px;
+    .whatsapp-bubble {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 18px 20px;
+        font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
+        font-size: 13.5px;
+        line-height: 1.6;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        user-select: all;
     }
 </style>
 {% endblock %}
@@ -297,7 +197,6 @@
     <div class="filter-group">
         <label for="shift">SHIFT</label>
         <select id="shift">
-            <option value="">-- Select --</option>
             <option value="A" {% if default_shift == 'A' %}selected{% endif %}>A</option>
             <option value="B" {% if default_shift == 'B' %}selected{% endif %}>B</option>
             <option value="C" {% if default_shift == 'C' %}selected{% endif %}>C</option>
@@ -314,45 +213,26 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════
-     EXCEL SHEET CARD & TABLE
+     WHATSAPP / SMS DIRECT COPY BLOCK (NO TABLE)
      ══════════════════════════════════════════════════════════════════ -->
-<div class="report-card" id="report-output-panel">
-    <div class="report-title-bar">
-        <div class="report-title" id="report-table-title">
-            Cargo Balance at Jetty for shift {{ default_shift }}
+<div class="whatsapp-card" id="whatsapp-card-panel">
+    <div class="whatsapp-header">
+        <div class="whatsapp-title-badge">
+            <svg class="whatsapp-icon" viewBox="0 0 24 24">
+                <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.099-.51-1.795-.745-2.951-2.586-3.04-2.705-.089-.12-1.026-1.365-1.026-2.604 0-1.239.645-1.849.873-2.099.228-.25.497-.312.663-.312.166 0 .332.002.477.01.155.008.363-.058.568.435.213.51.726 1.77.79 1.9.064.13.107.283.021.455-.085.172-.128.28-.255.426-.128.147-.268.328-.383.441-.128.125-.262.261-.112.518.15.257.669 1.103 1.436 1.785.986.877 1.817 1.15 2.074 1.277.257.127.408.106.56-.069.153-.175.654-.761.828-1.023.174-.262.348-.219.584-.131.236.088 1.499.707 1.757.836.257.129.429.193.493.3.064.108.064.624-.08 1.029zM12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.173L2 22l4.981-1.306C8.423 21.536 10.154 22 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2z"/>
+            </svg>
+            <span id="card-header-title">Cargo Balance at Jetty</span>
         </div>
+        <button type="button" class="btn-copy-wa" id="btn-copy-wa" onclick="copyWhatsAppText()">
+            📋 Copy to WhatsApp
+        </button>
     </div>
-
-    <div class="excel-table-wrapper">
-        <table class="excel-table" id="cargo-balance-table">
-            <thead>
-                <tr>
-                    <th class="col-berth">BERTH</th>
-                    <th class="col-cargo">CARGO</th>
-                    <th class="col-balance">BALANCE</th>
-                </tr>
-            </thead>
-            <tbody id="table-tbody">
-                <tr>
-                    <td colspan="3" style="text-align: center; padding: 16px; color: var(--text-secondary);">
-                        Loading balance data...
-                    </td>
-                </tr>
-            </tbody>
-            <tfoot>
-                <tr class="total-row">
-                    <td class="col-berth">Total</td>
-                    <td class="col-cargo"></td>
-                    <td class="col-balance" id="table-total-val">0</td>
-                </tr>
-            </tfoot>
-        </table>
-    </div>
-
-
+    <div class="whatsapp-bubble" id="whatsapp-message-box">Loading balance summary...</div>
 </div>
 
 <script>
+    let currentSmsText = '';
+
     function loadBalanceReport() {
         const entryDate = document.getElementById('entry_date').value;
         const shiftVal = document.getElementById('shift').value;
@@ -366,40 +246,67 @@
             return;
         }
 
-        const tbody = document.getElementById('table-tbody');
-        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:var(--text-secondary);">Loading...</td></tr>`;
+        document.getElementById('whatsapp-message-box').textContent = 'Loading balance summary...';
 
         const url = `/api/module/RP01/shift-cargo-balance/preview?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shiftVal)}`;
 
         fetch(url)
             .then(res => res.json())
             .then(data => {
-                document.getElementById('report-table-title').textContent = data.title || `Cargo Balance at Jetty for shift ${shiftVal}`;
+                const shiftTitle = data.title || `Cargo Balance at Jetty for ${shiftVal} Shift`;
+                document.getElementById('card-header-title').textContent = shiftTitle;
 
-                tbody.innerHTML = '';
-                const items = data.items || [];
-
-                if (items.length > 0) {
-                    items.forEach(it => {
-                        const tr = document.createElement('tr');
-                        const specialBadge = it.is_special ? `<span class="berth-badge-special">${escapeHtml(it.berth_note || it.berth)}</span>` : '';
-                        tr.innerHTML = `
-                            <td class="cell-berth">${escapeHtml(it.berth)}${specialBadge}</td>
-                            <td class="cell-cargo">${escapeHtml(it.cargo)}</td>
-                            <td class="cell-balance">${Number(it.balance).toLocaleString('en-IN')}</td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:var(--text-secondary);">No cargo balance recorded at jetty for this shift.</td></tr>`;
-                }
-
-                document.getElementById('table-total-val').textContent = Number(data.total_qty || 0).toLocaleString('en-IN');
+                currentSmsText = data.sms_text || '';
+                document.getElementById('whatsapp-message-box').textContent = currentSmsText || 'No cargo balance recorded for this shift.';
             })
             .catch(err => {
                 console.error('Error:', err);
-                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:16px; color:red;">Failed to load data.</td></tr>`;
+                document.getElementById('whatsapp-message-box').textContent = 'Failed to load balance summary.';
             });
+    }
+
+    function copyWhatsAppText() {
+        if (!currentSmsText) {
+            alert('No message content to copy.');
+            return;
+        }
+
+        const btn = document.getElementById('btn-copy-wa');
+        const showCopiedFeedback = () => {
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '✓ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+                btn.classList.remove('copied');
+            }, 2200);
+        };
+
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(currentSmsText)
+                .then(showCopiedFeedback)
+                .catch(() => fallbackCopy(showCopiedFeedback));
+        } else {
+            fallbackCopy(showCopiedFeedback);
+        }
+    }
+
+    function fallbackCopy(callback) {
+        const textArea = document.createElement('textarea');
+        textArea.value = currentSmsText;
+        textArea.style.position = 'fixed';
+        textArea.style.top = '-9999px';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            callback();
+        } catch (e) {
+            alert('Could not copy automatically. Please select the text and copy manually.');
+        }
+        document.body.removeChild(textArea);
     }
 
     function downloadExcel() {
@@ -412,16 +319,6 @@
         }
 
         window.location.href = `/api/module/RP01/shift-cargo-balance/download?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shiftVal)}`;
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return String(str)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
     }
 
     document.addEventListener('DOMContentLoaded', () => {
