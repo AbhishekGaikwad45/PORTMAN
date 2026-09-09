@@ -1461,9 +1461,9 @@
                 <tr>
                     <th class="unit-head">(MT)</th>
                     <th class="unit-head">(MT)</th>
-                    <th class="unit-head">(Lacs MT)</th>
-                    <th class="unit-head">(Lacs MT)</th>
-                    <th class="unit-head">(Lacs MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
+                    <th class="unit-head">(MT)</th>
                     <th class="unit-head">(MT)</th>
                     <th class="unit-head">(MT)</th>
                     <th class="unit-head">(MT)</th>
@@ -1832,6 +1832,8 @@
     const downloadExcelBtn = document.getElementById('downloadExcelBtn');
     const gapAbpTargetEl = document.getElementById('gapAbpTarget');
     const gapScmTargetEl = document.getElementById('gapScmTarget');
+    const askingAbpTargetEl = document.getElementById('askingAbpTarget');
+    const askingScmTargetEl = document.getElementById('askingScmTarget');
     const outlookAbpTargetEl = document.getElementById('outlookAbpTarget');
     const outlookScmTargetEl = document.getElementById('outlookScmTarget');
 
@@ -1848,7 +1850,7 @@
             return String(value);
         }
 
-        return `${(number / 100000).toFixed(2)} lacs MT`;
+        return `${(number / 100000).toFixed(2)}  MT`;
     }
 
     function formatNumber(value) {
@@ -2036,7 +2038,16 @@
     }
 
     function renderReport(data) {
-        balanceDaysEl.textContent = formatNumber(data.balance_days);
+        // Balance Days must count only the days AFTER the Report Date.
+        // Example: if Selected Date = 09.09.2026, Report Date = 08.09.2026,
+        // 08.09.2026 itself must NOT be counted as a remaining day.
+        const rawBalanceDays = Number(data.balance_days);
+        const balanceDays = Number.isFinite(rawBalanceDays)
+            ? Math.max(0, rawBalanceDays - 1)
+            : null;
+
+        balanceDaysEl.textContent =
+            balanceDays === null ? '-' : formatNumber(balanceDays);
 
         const rows = Array.isArray(data.rows) ? data.rows : [];
 
@@ -2069,16 +2080,36 @@
                 scmTarget !== null ? `${formatNumber(scmTarget)} MT` : '-';
         }
 
-        // GAP header uses the same target values.
+        // GAP header must show the GAP amount in Lacs MT.
+        // The underlying gap_abp / gap_scm values remain in MT.
+        // Example: 1,929,250 MT -> 19.29 lacs MT.
+        const totalGapAbp = totalRow && totalRow.gap_abp !== undefined
+            ? totalRow.gap_abp
+            : null;
+        const totalGapScm = totalRow && totalRow.gap_scm !== undefined
+            ? totalRow.gap_scm
+            : null;
+
         if (gapAbpTargetEl) {
-            gapAbpTargetEl.textContent =
-                abpTarget !== null ? `${formatNumber(abpTarget)} MT` : '-';
+            gapAbpTargetEl.textContent = formatTargetLacs(totalGapAbp);
         }
 
         if (gapScmTargetEl) {
-            gapScmTargetEl.textContent =
-                scmTarget !== null ? `${formatNumber(scmTarget)} MT` : '-';
+            gapScmTargetEl.textContent = formatTargetLacs(totalGapScm);
         }
+
+        // Asking Rate must show the SAME GAP amounts, also in Lacs MT.
+        // Example: 1,929,250 MT -> 19.29 lacs MT.
+        if (askingAbpTargetEl) {
+            askingAbpTargetEl.textContent = formatTargetLacs(totalGapAbp);
+        }
+
+        if (askingScmTargetEl) {
+            askingScmTargetEl.textContent = formatTargetLacs(totalGapScm);
+        }
+
+        // NOTE: GAP/Asking Rate body rows continue to use the API's original MT values.
+        // Only the header summary amounts above are converted to Lacs MT.
 
         cargoBodyEl.innerHTML = rows.map(renderRow).join('');
 
@@ -4658,6 +4689,61 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 'K3',
                 balanceDaysEl ? balanceDaysEl.textContent.trim() : '-'
             );
+
+            // --------------------------------------------------------
+            // GAP / ASKING RATE HEADER VALUES - SYNC EXACTLY WITH UI
+            // --------------------------------------------------------
+            // IMPORTANT: Do NOT hard-code any GAP or Asking Rate amount here.
+            // The browser UI is the single source of truth. Whatever amount
+            // is currently displayed in the report header is copied verbatim
+            // into the Excel header. This keeps Excel and UI identical for
+            // every selected date/cargo dataset.
+            const getUiText = (el) => {
+                if (!el) return '-';
+                const text = el.textContent.trim();
+                return text || '-';
+            };
+
+            // B:M mapping in the approved template:
+            // C/D = Outlook ABP/SCM
+            // H/I = GAP ABP/SCM
+            // J/K = Asking Rate ABP/SCM
+            // IMPORTANT: Outlook is also copied directly from the UI so the
+            // Excel download never falls back to the reference-template values.
+            const excelOutlookAbp = getUiText(outlookAbpTargetEl);
+            const excelOutlookScm = getUiText(outlookScmTargetEl);
+            const excelGapAbp = getUiText(gapAbpTargetEl);
+            const excelGapScm = getUiText(gapScmTargetEl);
+            const excelAskingAbp = getUiText(askingAbpTargetEl);
+            const excelAskingScm = getUiText(askingScmTargetEl);
+
+            // Copy the exact values currently visible on the UI.
+            // This overwrites the reference workbook's Outlook values.
+            setTemplateCell(ws, 'C6', excelOutlookAbp);
+            setTemplateCell(ws, 'D6', excelOutlookScm);
+            setTemplateCell(ws, 'H6', excelGapAbp);
+            setTemplateCell(ws, 'I6', excelGapScm);
+            setTemplateCell(ws, 'J6', excelAskingAbp);
+            setTemplateCell(ws, 'K6', excelAskingScm);
+
+            // Copy the exact unit text shown by the UI rather than hard-coding
+            // the unit. The four unit cells correspond to GAP ABP/SCM and
+            // Asking Rate ABP/SCM respectively.
+            const unitCells = Array.from(
+                document.querySelectorAll('table[aria-label="Cargo Statistics"] .unit-head')
+            );
+
+            if (unitCells.length >= 10) {
+                // Header columns are B:M. unit-head indexes 1..2 are
+                // Outlook ABP/SCM, while indexes 6..9 are GAP/Asking Rate.
+                // Copy all four groups' unit labels from the UI.
+                setTemplateCell(ws, 'C7', getUiText(unitCells[1]));
+                setTemplateCell(ws, 'D7', getUiText(unitCells[2]));
+                setTemplateCell(ws, 'H7', getUiText(unitCells[6]));
+                setTemplateCell(ws, 'I7', getUiText(unitCells[7]));
+                setTemplateCell(ws, 'J7', getUiText(unitCells[8]));
+                setTemplateCell(ws, 'K7', getUiText(unitCells[9]));
+            }
 
             // --------------------------------------------------------
             // IMPORTANT:
