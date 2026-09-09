@@ -13,8 +13,8 @@ from .. import bp
 from database import get_db, get_cursor
 from ..Barge_Position_Report.views import _fetch_all_barges
 
-REPORT_CUTOFF_DATE = date(2026, 6, 1)
-REPORT_CUTOFF_DT = datetime(2026, 6, 1, 0, 0, 0)
+REPORT_CUTOFF_DATE = date(2026, 7, 1)
+REPORT_CUTOFF_DT = datetime(2026, 7, 1, 0, 0, 0)
 
 
 def login_required(f):
@@ -131,7 +131,7 @@ def _is_upcoming_shift(target_date, shift_key, now=None):
 def _fetch_shift_cargo_balance(report_date_str, shift_key):
     """
     Dynamically computes the cargo balance at the jetty for the given date and shift:
-    - Cutoff Date: 01-06-2026. Dates before this are blocked.
+    - Cutoff Date: 01-07-2026. Dates before this are blocked.
     - Upcoming shift data is blocked and not shown.
     - Previous and current shift data are accurately fetched date-wise and shift-wise.
     - If viewing the current shift, real-time balances are synced live.
@@ -150,7 +150,7 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         target_date = datetime.now().date()
     target_date_str = target_date.strftime('%Y-%m-%d')
 
-    # Cutoff date validation (01-06-2026)
+    # Cutoff date validation (01-07-2026)
     if target_date < REPORT_CUTOFF_DATE:
         return {
             'entry_date': target_date_str,
@@ -163,7 +163,7 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
             'is_cutoff': True,
             'sms_text': (
                 f"Cargo Balance at Jetty for {shift_key} Shift\n\n"
-                "Cutoff Date: 01-06-2026.\n"
+                "Cutoff Date: 01-07-2026.\n"
                 "Reports before this date are not available.\n\n"
                 "Total: 0 MT.\n\n"
                 "Regards"
