@@ -210,29 +210,38 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
     except Exception:
         pass
 
+    cutoff_date_str = REPORT_CUTOFF_DATE.strftime('%Y-%m-%d')
+
     # 1. Fetch exact or carried BPR (strictly on or before requested date and shift, not before cutoff date)
     cur.execute("""
         SELECT berth_layout, shift, report_date
         FROM barge_position_report
-        WHERE report_date = %s::date AND shift = %s
+        WHERE report_date = %s::date
+          AND report_date >= %s::date
+          AND shift = %s
         ORDER BY updated_at DESC
         LIMIT 1
-    """, (target_date_str, shift_key))
+    """, (target_date_str, cutoff_date_str, shift_key))
     bpr_row = cur.fetchone()
 
     if not bpr_row:
         cur.execute("""
             SELECT berth_layout, shift, report_date
             FROM barge_position_report
-            WHERE (report_date < %s::date AND report_date >= %s::date)
-               OR (report_date = %s::date AND (
-                   CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END <= %s
-               ))
+            WHERE report_date >= %s::date
+              AND (
+                  report_date < %s::date
+                  OR (
+                      report_date = %s::date AND (
+                          CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END <= %s
+                      )
+                  )
+              )
             ORDER BY report_date DESC,
                      CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END DESC,
                      updated_at DESC
             LIMIT 1
-        """, (target_date_str, REPORT_CUTOFF_DATE.strftime('%Y-%m-%d'), target_date_str, SHIFT_RANK.get(shift_key, 3)))
+        """, (cutoff_date_str, target_date_str, target_date_str, SHIFT_RANK.get(shift_key, 3)))
         bpr_row = cur.fetchone()
 
     bpr_items = []
@@ -276,7 +285,7 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
                 return m
         return matches[0]
 
-    # 3. Lookup latest berth assignments from lueu_lines for fallback
+    # 3. Lookup latest berth assignments from lueu_lines for fallback (strictly on or after cutoff)
     lueu_berths = {}
     if is_current:
         cur.execute("""
@@ -286,8 +295,9 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
             FROM lueu_lines
             WHERE berth_name IS NOT NULL AND TRIM(berth_name) <> ''
               AND is_deleted IS NOT TRUE
+              AND (entry_date >= %s OR entry_date IS NULL)
             ORDER BY TRIM(UPPER(barge_name)), id DESC
-        """)
+        """, (cutoff_date_str,))
         lueu_berths = {r['bname']: r['berth_name'] for r in cur.fetchall()}
 
     cur.close()
