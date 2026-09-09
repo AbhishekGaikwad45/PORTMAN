@@ -3,6 +3,7 @@
 {% block title %}Shift wise cargo Balance (SMS) — RP01{% endblock %}
 
 {% block head %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <style>
     /* ── Breadcrumb ─────────────────────────────────────────────── */
     .breadcrumb {
@@ -190,8 +191,8 @@
      ══════════════════════════════════════════════════════════════════ -->
 <div class="filter-bar">
     <div class="filter-group">
-        <label for="entry_date">ENTRY DATE</label>
-        <input type="date" id="entry_date" value="{{ default_date }}">
+        <label for="entry_date">ENTRY DATE <span style="font-size:9px;color:var(--text-secondary);text-transform:none;font-weight:normal;">(Cutoff: 01-Jun-2026)</span></label>
+        <input type="date" id="entry_date" min="2026-06-01" value="{{ default_date }}">
     </div>
 
     <div class="filter-group">
@@ -231,7 +232,25 @@
 </div>
 
 <script>
+    const CUTOFF_DATE = '2026-06-01';
     let currentSmsText = '';
+
+    function checkCutoffDate(entryDate) {
+        if (!entryDate) return true;
+        if (entryDate < CUTOFF_DATE) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Report Not Available',
+                html: `
+                    <b>Cutoff Date:</b> 01-Jun-2026<br><br>
+                    Reports before this date are not available.
+                `,
+                confirmButtonColor: '#4a90d9'
+            });
+            return false;
+        }
+        return true;
+    }
 
     function loadBalanceReport() {
         const entryDate = document.getElementById('entry_date').value;
@@ -243,6 +262,12 @@
         }
         if (!shiftVal) {
             alert('Please select a Shift.');
+            return;
+        }
+
+        if (!checkCutoffDate(entryDate)) {
+            currentSmsText = `Cargo Balance at Jetty for ${shiftVal} Shift\n\nCutoff Date: 01-06-2026.\nReports before this date are not available.\n\nTotal: 0 MT.\n\nRegards`;
+            document.getElementById('whatsapp-message-box').textContent = currentSmsText;
             return;
         }
 
@@ -318,11 +343,92 @@
             return;
         }
 
+        if (!checkCutoffDate(entryDate)) {
+            return;
+        }
+
         window.location.href = `/api/module/RP01/shift-cargo-balance/download?entry_date=${encodeURIComponent(entryDate)}&shift=${encodeURIComponent(shiftVal)}`;
     }
 
+    function getCurrentShift() {
+        const now = new Date();
+        const hour = now.getHours();
+        if (hour >= 6 && hour < 14) return 'A';
+        if (hour >= 14 && hour < 22) return 'B';
+        return 'C';
+    }
+
+    function getOperationalDate() {
+        const now = new Date();
+        if (now.getHours() < 6) {
+            now.setDate(now.getDate() - 1);
+        }
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const dtStr = `${y}-${m}-${d}`;
+        return dtStr < CUTOFF_DATE ? CUTOFF_DATE : dtStr;
+    }
+
+    function updateShiftOptions() {
+        const dateInput = document.getElementById('entry_date');
+        const shiftSelect = document.getElementById('shift');
+        const opDate = getOperationalDate();
+        const curShift = getCurrentShift();
+        const shiftRank = { 'A': 1, 'B': 2, 'C': 3 };
+
+        // Ensure minimum date is cutoff date
+        dateInput.min = CUTOFF_DATE;
+
+        // Prevent selecting future calendar dates
+        dateInput.max = opDate;
+
+        if (dateInput.value && dateInput.value < CUTOFF_DATE) {
+            dateInput.value = CUTOFF_DATE;
+        }
+
+        const isToday = (dateInput.value === opDate);
+
+        Array.from(shiftSelect.options).forEach(opt => {
+            const val = opt.value;
+            const isUpcoming = isToday && (shiftRank[val] > shiftRank[curShift]);
+            if (isUpcoming) {
+                opt.disabled = true;
+                opt.text = `${val} (Upcoming)`;
+            } else {
+                opt.disabled = false;
+                opt.text = val;
+            }
+        });
+
+        // If the selected option is now disabled, fallback to current or latest available shift
+        if (shiftSelect.selectedOptions[0] && shiftSelect.selectedOptions[0].disabled) {
+            shiftSelect.value = curShift;
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        const shiftSelect = document.getElementById('shift');
+        const dateInput = document.getElementById('entry_date');
+
+        if (!dateInput.value || dateInput.value < CUTOFF_DATE) {
+            dateInput.value = getOperationalDate();
+        }
+        if (!shiftSelect.value) {
+            shiftSelect.value = getCurrentShift();
+        }
+
+        updateShiftOptions();
         loadBalanceReport();
+
+        dateInput.addEventListener('change', () => {
+            updateShiftOptions();
+            loadBalanceReport();
+        });
+
+        shiftSelect.addEventListener('change', () => {
+            loadBalanceReport();
+        });
     });
 </script>
 {% endblock %}

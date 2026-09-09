@@ -13,7 +13,8 @@ from .. import bp
 from database import get_db, get_cursor
 from ..Barge_Position_Report.views import _fetch_all_barges
 
-REPORT_CUTOFF_DATE = datetime(2026, 5, 1, 0, 0, 0)
+REPORT_CUTOFF_DATE = date(2026, 6, 1)
+REPORT_CUTOFF_DT = datetime(2026, 6, 1, 0, 0, 0)
 
 
 def login_required(f):
@@ -80,7 +81,7 @@ def _is_wr19(berth_str):
     u = str(berth_str).strip().upper()
     if '-' in u and ('T' in u or ':' in u):
         return False
-    return ('WR' in u and '19' in u) or u in ('WR 19', 'WR19', 'R19')
+    return ('WR' in u and '19' in u) or u in ('WR 19', 'WR19', 'R19', 'R-19', 'WR-19', 'WT @ R19', 'WT R19')
 
 
 def _is_berth_10_to_12(berth_str):
@@ -97,15 +98,47 @@ def _is_berth_10_to_12(berth_str):
     return False, ''
 
 
+def _is_mbc_vessel(item, live=None, mbc_names_set=None):
+    """
+    Identifies whether a vessel record is an MBC (Multi-Bulk Carrier) vs a Barge.
+    Checks explicit 'type', name prefix, and known MBC master/header records.
+    """
+    itype = str((item.get('type') or (live.get('type') if live else '')) or '').strip().upper()
+    if itype == 'MBC':
+        return True
+    name = (item.get('name') or (live.get('name') if live else '') or '').strip().upper()
+    if name.startswith('MBC ') or name.startswith('MBC-') or name.startswith('M.B.C.'):
+        return True
+    if mbc_names_set and name in mbc_names_set:
+        return True
+    return False
+
+
+SHIFT_RANK = {'A': 1, 'B': 2, 'C': 3}
+
+
+def _is_upcoming_shift(target_date, shift_key, now=None):
+    now = now or datetime.now()
+    cur_op_date = _operational_date(now)
+    cur_shift = _current_shift_code(now)
+    if target_date > cur_op_date:
+        return True
+    if target_date == cur_op_date:
+        return SHIFT_RANK.get(shift_key, 0) > SHIFT_RANK.get(cur_shift, 0)
+    return False
+
+
 def _fetch_shift_cargo_balance(report_date_str, shift_key):
     """
     Dynamically computes the cargo balance at the jetty for the given date and shift:
-    - Backend berth check ensures if both cargos exist on different barges at the same berth,
-      both cargos and their balances are accurately included.
-    - If any barge is in WR 19, cargo is shown separately as Cargo (WR 19).
-    - If any cargo is at Berth 10, 11, or 12, it is shown separately as Cargo (Berth No.X).
-    - Standard Jetty cargos (Berths 1-9 / Jetty) are aggregated by cargo name.
-    - Output format directly matches WhatsApp / SMS copy-paste format without notes.
+    - Cutoff Date: 01-06-2026. Dates before this are blocked.
+    - Upcoming shift data is blocked and not shown.
+    - Previous and current shift data are accurately fetched date-wise and shift-wise.
+    - If viewing the current shift, real-time balances are synced live.
+    - If viewing previous shifts, saved historical records for that shift/date are preserved.
+    - WR 19: If available at that time, shown separately as Cargo : Balance MT. (WR 19).
+    - Berth 10, 11, and 12: Show ONLY MBC cargo balance (not barges), as Cargo : Balance MT. (Berth No.X).
+    - Other berths (Berths 1-9 / Jetty): Show all barges or MBC cargo balance aggregated by cargo name.
     """
     shift_key = (shift_key or 'C').strip().upper()
     if shift_key not in ('A', 'B', 'C'):
@@ -117,10 +150,67 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         target_date = datetime.now().date()
     target_date_str = target_date.strftime('%Y-%m-%d')
 
+    # Cutoff date validation (01-06-2026)
+    if target_date < REPORT_CUTOFF_DATE:
+        return {
+            'entry_date': target_date_str,
+            'shift': shift_key,
+            'shift_display': f"{shift_key} Shift",
+            'title': f"Cargo Balance at Jetty for {shift_key} Shift",
+            'items': [],
+            'total_qty': 0,
+            'total_balance': 0,
+            'is_cutoff': True,
+            'sms_text': (
+                f"Cargo Balance at Jetty for {shift_key} Shift\n\n"
+                "Cutoff Date: 01-06-2026.\n"
+                "Reports before this date are not available.\n\n"
+                "Total: 0 MT.\n\n"
+                "Regards"
+            )
+        }
+
+    now = datetime.now()
+    cur_op_date = _operational_date(now)
+    cur_shift = _current_shift_code(now)
+
+    is_upcoming = _is_upcoming_shift(target_date, shift_key, now)
+    is_current = (target_date == cur_op_date and shift_key == cur_shift)
+
+    # If shift is in the future, do not show any upcoming data
+    if is_upcoming:
+        return {
+            'entry_date': target_date_str,
+            'shift': shift_key,
+            'shift_display': f"{shift_key} Shift",
+            'title': f"Cargo Balance at Jetty for {shift_key} Shift",
+            'items': [],
+            'total_qty': 0,
+            'total_balance': 0,
+            'sms_text': (
+                f"Cargo Balance at Jetty for {shift_key} Shift\n\n"
+                "No balance data for upcoming shift.\n\n"
+                "Total: 0 MT.\n\n"
+                "Regards"
+            )
+        }
+
     conn = get_db()
     cur = get_cursor(conn)
 
-    # 1. Fetch exact or carried BPR (Barge Position Report)
+    # Fetch known MBC names from mbc_header and mbc_master for 100% accurate MBC identification
+    mbc_names_set = set()
+    try:
+        cur.execute("""
+            SELECT DISTINCT UPPER(TRIM(mbc_name)) AS name FROM mbc_header WHERE mbc_name IS NOT NULL
+            UNION
+            SELECT DISTINCT UPPER(TRIM(mbc_name)) AS name FROM mbc_master WHERE mbc_name IS NOT NULL
+        """)
+        mbc_names_set = {r['name'] for r in cur.fetchall() if r.get('name')}
+    except Exception:
+        pass
+
+    # 1. Fetch exact or carried BPR (strictly on or before requested date and shift, not before cutoff date)
     cur.execute("""
         SELECT berth_layout, shift, report_date
         FROM barge_position_report
@@ -134,12 +224,15 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         cur.execute("""
             SELECT berth_layout, shift, report_date
             FROM barge_position_report
-            WHERE report_date <= %s::date
+            WHERE (report_date < %s::date AND report_date >= %s::date)
+               OR (report_date = %s::date AND (
+                   CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END <= %s
+               ))
             ORDER BY report_date DESC,
                      CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END DESC,
                      updated_at DESC
             LIMIT 1
-        """, (target_date_str,))
+        """, (target_date_str, REPORT_CUTOFF_DATE.strftime('%Y-%m-%d'), target_date_str, SHIFT_RANK.get(shift_key, 3)))
         bpr_row = cur.fetchone()
 
     bpr_items = []
@@ -153,8 +246,13 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         if isinstance(layout, list):
             bpr_items = layout
 
-    # 2. Live barges & MBCs to sync latest balance quantities
-    live_barges, _ = _fetch_all_barges()
+    # 2. Live barges & MBCs (used to sync real-time balances for the current ongoing shift)
+    live_barges = []
+    if is_current:
+        try:
+            live_barges, _ = _fetch_all_barges()
+        except Exception:
+            live_barges = []
 
     def find_live(item):
         i_id = str(item.get('id') or '').strip()
@@ -179,16 +277,18 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         return matches[0]
 
     # 3. Lookup latest berth assignments from lueu_lines for fallback
-    cur.execute("""
-        SELECT DISTINCT ON (TRIM(UPPER(barge_name)))
-            TRIM(UPPER(barge_name)) AS bname,
-            berth_name
-        FROM lueu_lines
-        WHERE berth_name IS NOT NULL AND TRIM(berth_name) <> ''
-          AND is_deleted IS NOT TRUE
-        ORDER BY TRIM(UPPER(barge_name)), id DESC
-    """)
-    lueu_berths = {r['bname']: r['berth_name'] for r in cur.fetchall()}
+    lueu_berths = {}
+    if is_current:
+        cur.execute("""
+            SELECT DISTINCT ON (TRIM(UPPER(barge_name)))
+                TRIM(UPPER(barge_name)) AS bname,
+                berth_name
+            FROM lueu_lines
+            WHERE berth_name IS NOT NULL AND TRIM(berth_name) <> ''
+              AND is_deleted IS NOT TRUE
+            ORDER BY TRIM(UPPER(barge_name)), id DESC
+        """)
+        lueu_berths = {r['bname']: r['berth_name'] for r in cur.fetchall()}
 
     cur.close()
     conn.close()
@@ -210,8 +310,9 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         bal = float(it.get('balance') or it.get('balance_qty') or 0)
         cargo = _clean_cargo_name(it.get('cargo'))
 
-        live = find_live(it)
-        if live:
+        live = find_live(it) if is_current else None
+        # Only sync with live data if currently viewing the active ongoing shift
+        if is_current and live:
             bal = float(live.get('balance_qty') or 0)
             if live.get('cargo'):
                 cargo = _clean_cargo_name(live.get('cargo'))
@@ -219,53 +320,58 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         if bal <= 0.01:
             continue
 
+        is_mbc = _is_mbc_vessel(it, live=live, mbc_names_set=mbc_names_set)
+
         candidates.append({
             'id': str(it.get('id') or ''),
             'name': name,
             'cargo': cargo,
             'berth': berth_raw,
-            'balance': bal
+            'balance': bal,
+            'is_mbc': is_mbc
         })
         if it.get('id'):
             seen_ids.add(str(it.get('id')))
         seen_names.add(name.upper())
 
-    # Check live vessels not placed in BPR that are actively at berths
-    for b in live_barges:
-        b_id = str(b.get('id') or '')
-        b_name_u = (b.get('name') or '').strip().upper()
-        if (b_id and b_id in seen_ids) or (b_name_u in seen_names):
-            continue
+    # For current shift: check live vessels not in BPR that are actively at berths
+    if is_current:
+        for b in live_barges:
+            b_id = str(b.get('id') or '')
+            b_name_u = (b.get('name') or '').strip().upper()
+            if (b_id and b_id in seen_ids) or (b_name_u in seen_names):
+                continue
 
-        bal = float(b.get('balance_qty') or 0)
-        if bal <= 0.01:
-            continue
+            bal = float(b.get('balance_qty') or 0)
+            if bal <= 0.01:
+                continue
 
-        # Look up berth from lueu_lines or vessel data
-        assigned_berth = lueu_berths.get(b_name_u) or b.get('berth') or ''
-        berth_raw = str(assigned_berth).strip().upper()
-        if '-' in berth_raw and ('T' in berth_raw or ':' in berth_raw):
-            berth_raw = 'Jetty'
+            assigned_berth = lueu_berths.get(b_name_u) or b.get('berth') or ''
+            berth_raw = str(assigned_berth).strip().upper()
+            if '-' in berth_raw and ('T' in berth_raw or ':' in berth_raw):
+                berth_raw = 'Jetty'
 
-        if not berth_raw or berth_raw in ('WAITING', 'NONE', 'NULL', '—', '-', 'EMPTY'):
-            continue
+            if not berth_raw or berth_raw in ('WAITING', 'NONE', 'NULL', '—', '-', 'EMPTY'):
+                continue
 
-        cargo = _clean_cargo_name(b.get('cargo'))
-        candidates.append({
-            'id': b_id,
-            'name': b.get('name', ''),
-            'cargo': cargo,
-            'berth': berth_raw,
-            'balance': bal
-        })
-        if b_id:
-            seen_ids.add(b_id)
-        seen_names.add(b_name_u)
+            cargo = _clean_cargo_name(b.get('cargo'))
+            is_mbc = _is_mbc_vessel(b, mbc_names_set=mbc_names_set)
+            candidates.append({
+                'id': b_id,
+                'name': b.get('name', ''),
+                'cargo': cargo,
+                'berth': berth_raw,
+                'balance': bal,
+                'is_mbc': is_mbc
+            })
+            if b_id:
+                seen_ids.add(b_id)
+            seen_names.add(b_name_u)
 
     # 4. Grouping:
-    #    - WR 19 -> shown separately with (WR 19)
-    #    - Berth 10-12 -> shown separately with (Berth No.X)
-    #    - Standard Jetty (Berths 1-9 / Jetty) -> aggregated by cargo name
+    #    - WR 19: If available at that time, shown separately with (WR 19)
+    #    - Berth 10-12: Show ONLY MBC (not barges), shown separately with (Berth No.X)
+    #    - Other berths (Berths 1-9 / Jetty): Show all barges or MBC cargo balance aggregated by cargo
     jetty_cargo_map = {}
     special_map = {}
 
@@ -273,8 +379,9 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         b_raw = c['berth']
         bal = c['balance']
         cargo = c['cargo']
+        is_mbc = c.get('is_mbc', False)
 
-        # Check WR 19
+        # Check WR 19: if available at that time, show with (WR 19)
         if _is_wr19(b_raw):
             key = ('WR 19', cargo)
             if key not in special_map:
@@ -288,9 +395,12 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
             special_map[key]['balance'] += bal
             continue
 
-        # Check Berth 10 to 12
+        # Check Berth 10 to 12: show ONLY MBC, not barges
         is_10_12, b_num = _is_berth_10_to_12(b_raw)
         if is_10_12:
+            if not is_mbc:
+                # 10, 11, and 12 berth show ONLY MBC, not barges
+                continue
             key = (f"BERTH {b_num}", cargo)
             if key not in special_map:
                 special_map[key] = {
@@ -303,7 +413,7 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
             special_map[key]['balance'] += bal
             continue
 
-        # Standard Jetty: aggregate by cargo
+        # Other berths (Berths 1-9 / Jetty): show all barges or MBC cargo balance aggregated by cargo
         if cargo not in jetty_cargo_map:
             jetty_cargo_map[cargo] = 0.0
         jetty_cargo_map[cargo] += bal
@@ -372,17 +482,40 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
     }
 
 
+def _current_shift_code(now=None):
+    now = now or datetime.now()
+    hour = now.hour
+    if 6 <= hour < 14:
+        return 'A'
+    if 14 <= hour < 22:
+        return 'B'
+    return 'C'
+
+
+def _operational_date(now=None):
+    now = now or datetime.now()
+    d = now.date()
+    if now.hour < 6:
+        d -= timedelta(days=1)
+    return d
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @bp.route('/module/RP01/shift-cargo-balance/')
 @login_required
 def shift_cargo_balance_index():
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now()
+    cur_op = _operational_date(now)
+    if cur_op < REPORT_CUTOFF_DATE:
+        cur_op = REPORT_CUTOFF_DATE
+    today_str = cur_op.strftime('%Y-%m-%d')
+    cur_shift = _current_shift_code(now)
     return render_template(
         'shift_cargo_balance/shift_cargo_balance.html',
         username=session.get('username'),
         default_date=today_str,
-        default_shift='C'
+        default_shift=cur_shift
     )
 
 
@@ -390,13 +523,14 @@ def shift_cargo_balance_index():
 @bp.route('/api/module/RP01/shift-cargo-balance/data')
 @login_required
 def shift_cargo_balance_data():
+    now = datetime.now()
     entry_date = (request.args.get('entry_date') or request.args.get('date') or '').strip()
     shift = (request.args.get('shift') or '').strip().upper()
 
     if not entry_date:
-        entry_date = datetime.now().strftime('%Y-%m-%d')
+        entry_date = _operational_date(now).strftime('%Y-%m-%d')
     if shift not in ('A', 'B', 'C'):
-        shift = 'C'
+        shift = _current_shift_code(now)
 
     data = _fetch_shift_cargo_balance(entry_date, shift)
     return jsonify(data)
@@ -405,13 +539,14 @@ def shift_cargo_balance_data():
 @bp.route('/api/module/RP01/shift-cargo-balance/download')
 @login_required
 def shift_cargo_balance_download():
+    now = datetime.now()
     entry_date = (request.args.get('entry_date') or request.args.get('date') or '').strip()
     shift = (request.args.get('shift') or '').strip().upper()
 
     if not entry_date:
-        entry_date = datetime.now().strftime('%Y-%m-%d')
+        entry_date = _operational_date(now).strftime('%Y-%m-%d')
     if shift not in ('A', 'B', 'C'):
-        shift = 'C'
+        shift = _current_shift_code(now)
 
     data = _fetch_shift_cargo_balance(entry_date, shift)
 
