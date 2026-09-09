@@ -4717,14 +4717,79 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             const excelAskingAbp = getUiText(askingAbpTargetEl);
             const excelAskingScm = getUiText(askingScmTargetEl);
 
-            // Copy the exact values currently visible on the UI.
-            // This overwrites the reference workbook's Outlook values.
-            setTemplateCell(ws, 'C6', excelOutlookAbp);
-            setTemplateCell(ws, 'D6', excelOutlookScm);
-            setTemplateCell(ws, 'H6', excelGapAbp);
-            setTemplateCell(ws, 'I6', excelGapScm);
-            setTemplateCell(ws, 'J6', excelAskingAbp);
-            setTemplateCell(ws, 'K6', excelAskingScm);
+            // --------------------------------------------------------
+            // EXACT UI HEADER STRUCTURE FOR OUTLOOK / GAP / ASKING RATE
+            // --------------------------------------------------------
+            // The UI uses:
+            //
+            //   As per ABP
+            //   70 MT
+            //
+            //   As per SCM
+            //   70 MT
+            //
+            // The label is normal weight and the value is bold. Use ExcelJS
+            // richText so Excel renders the same two-line structure instead
+            // of treating the whole cell as one plain string.
+            // --------------------------------------------------------
+            function setUiSubHeaderCell(ws, address, label, value) {
+                const cell = ws.getCell(address);
+                if (cell.constructor && cell.constructor.name === 'MergedCell') {
+                    return;
+                }
+
+                const safeValue =
+                    value === null || value === undefined || String(value).trim() === ''
+                        ? '-'
+                        : String(value).trim();
+
+                cell.value = {
+                    richText: [
+                        {
+                            text: label,
+                            font: {
+                                name: 'Calibri',
+                                size: 13,
+                                bold: false
+                            }
+                        },
+                        {
+                            text: '\n'
+                        },
+                        {
+                            text: safeValue,
+                            font: {
+                                name: 'Calibri',
+                                size: 13,
+                                bold: true
+                            }
+                        }
+                    ]
+                };
+
+                cell.alignment = {
+                    horizontal: 'center',
+                    vertical: 'middle',
+                    wrapText: true
+                };
+            }
+
+            // Outlook — exactly as UI
+            setUiSubHeaderCell(ws, 'C6', 'As per ABP', excelOutlookAbp);
+            setUiSubHeaderCell(ws, 'D6', 'As per SCM', excelOutlookScm);
+
+            // GAP — same ABP/SCM values as Outlook.
+            // The UI shows the Outlook target (for example 70 MT), so
+            // Excel must show the same value instead of the calculated
+            // GAP amount such as 0.00 MT.
+            setUiSubHeaderCell(ws, 'H6', 'As per ABP', excelOutlookAbp);
+            setUiSubHeaderCell(ws, 'I6', 'As per SCM', excelOutlookScm);
+
+            // Asking Rate — same ABP/SCM values as Outlook.
+            // For example, if Outlook is 70 MT / 70 MT, Excel must show
+            // 70 MT / 70 MT here as well.
+            setUiSubHeaderCell(ws, 'J6', 'As per ABP', excelOutlookAbp);
+            setUiSubHeaderCell(ws, 'K6', 'As per SCM', excelOutlookScm);
 
             // Copy the exact unit text shown by the UI rather than hard-coding
             // the unit. The four unit cells correspond to GAP ABP/SCM and
@@ -5110,102 +5175,64 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
                 });
             });
 
-            // Keep the reference workbook's exact widths and row heights.
-            // These are deliberately not recalculated from the web tables.
             // --------------------------------------------------------
-            const widths = {
-                A: 2.28515625,
-                B: 15.0,
-                C: 20.140625,
-                D: 19.0,
-                E: 19.42578125,
-                F: 17.85546875,
-                G: 18.0,
-                H: 15.140625,
-                J: 16.28515625,
-                L: 14.7109375,
-                N: 3.0,
-                O: 15.140625,
-                P: 16.0,
-                Q: 14.0,
-                S: 3.0,
-                T: 15.28515625,
-                V: 12.0,
-                W: 12.5703125,
-                AA: 4.42578125,
-                AB: 11.5703125,
-                AC: 16.28515625,
-                AD: 13.0,
-                AE: 13.0,
-                AF: 13.0,
-                AG: 13.0,
-                AH: 13.0
+            // CARGO STATISTICS EXCEL DIMENSIONS
+            // --------------------------------------------------------
+            // Match the Cargo Statistics Excel table to the UI.
+            // UI column widths:
+            // B  Cargo       108px
+            // C  Outlook ABP 132px
+            // D  Outlook SCM 132px
+            // E  Actual Day  138px
+            // F  MTD         112px
+            // G  YTD         112px
+            // H  GAP ABP     122px
+            // I  GAP SCM     122px
+            // J  Asking ABP  122px
+            // K  Asking SCM  122px
+            // L  JSW Stock   115px
+            // M  PNP Stock   115px
+            //
+            // Excel column width is approximately pixels / 7.
+            // --------------------------------------------------------
+            const cargoUiWidths = {
+                B: 15.43,
+                C: 18.86,
+                D: 18.86,
+                E: 19.71,
+                F: 16.00,
+                G: 16.00,
+                H: 17.43,
+                I: 17.43,
+                J: 17.43,
+                K: 17.43,
+                L: 16.43,
+                M: 16.43
             };
 
-            Object.keys(widths).forEach(col => {
-                ws.getColumn(col).width = widths[col];
-            });
-
-            const exactRowHeights = {
-                2: 27.0,
-                3: 15.75,
-                4: 43.5,
-                5: 27.75,
-                6: 27.75,
-                7: 27.75,
-                8: 27.75,
-                9: 27.75,
-                10: 27.75,
-                11: 27.75,
-                12: 27.75,
-                13: 27.75,
-                14: 21.75,
-                15: 19.5,
-                16: 19.5,
-                17: 19.5,
-                18: 19.5,
-                19: 19.5,
-                20: 19.5,
-                21: 19.5,
-                22: 19.5,
-                23: 19.5,
-                24: 19.5,
-                26: 19.5,
-                27: 19.5,
-                28: 19.5,
-                29: 19.5,
-                30: 19.5,
-                31: 19.5,
-                32: 19.5,
-                34: 19.5,
-                35: 19.5,
-                36: 19.5,
-                37: 19.5,
-                38: 19.5,
-                40: 19.5,
-                41: 19.5,
-                42: 19.5,
-                43: 19.5,
-                44: 30.0,
-                45: 19.5,
-                46: 19.5,
-                47: 30.0,
-                48: 19.5,
-                49: 19.5,
-                50: 19.5,
-                51: 19.5,
-                52: 19.5,
-                53: 19.5,
-                54: 19.5,
-                55: 19.5,
-                56: 19.5
-            };
-
-            Object.keys(exactRowHeights).forEach(row => {
-                ws.getRow(Number(row)).height = exactRowHeights[row];
+            Object.entries(cargoUiWidths).forEach(([col, width]) => {
+                ws.getColumn(col).width = width;
             });
 
             // --------------------------------------------------------
+            // MATCH CARGO HEADER/BODY HEIGHTS WITH THE UI
+            // --------------------------------------------------------
+            // UI CSS heights:
+            // .group-head = 52px
+            // .sub-head   = 75px
+            // .unit-head  = 32px
+            // body td     = 41px
+            //
+            // Excel row height is in points; approximately 0.75pt per px.
+            // --------------------------------------------------------
+            ws.getRow(5).height = 39.00;   // 52px
+            ws.getRow(6).height = 56.25;   // 75px
+            ws.getRow(7).height = 24.00;   // 32px
+
+            for (let r = 8; r <= 13; r++) {
+                ws.getRow(r).height = 30.75;  // 41px
+            }
+
             // Native Excel chart is injected into the final XLSX package
             // after ExcelJS writes the workbook.  Do NOT export the Chart.js
             // canvas as an image.
@@ -5228,13 +5255,8 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             const fileDate =
                 selectedDate || new Date().toISOString().slice(0, 10);
 
-            // Remove the standalone template value "28" that appears
-            // directly below the Cargo Statistics title. This cell is not
-            // part of the requested report and must remain blank.
-            try {
-                ws.getCell('F3').value = null;
-            } catch (e) {}
-
+            // Keep F3 because it contains the selected date
+            // written into the Excel report header above.
             let buffer = await workbook.xlsx.writeBuffer();
 
             // Build the native chart source from the exact Daily Port
