@@ -4324,11 +4324,13 @@
         // clustered column chart Excel centers a category on its tick position.
         // Without these two padding categories, the first and last 6-bar groups
         // are clipped at the plot edges.
-        const plotRows = [
-            { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 },
-            ...rows,
-            { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 }
-        ];
+        // Use ONLY the actual data dates.
+        // Do not add blank/padding categories before or after the data.
+        const plotRows = rows.filter(row =>
+            row &&
+            row.dateSerial !== null &&
+            row.dateSerial !== undefined
+        );
         const sourceStartRow = 7;
         const lastRow = sourceStartRow + plotRows.length - 1;
         const categories = plotRows.map(r => r.dateSerial);
@@ -4348,6 +4350,7 @@
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 <c:spPr><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
+<c:dLbls><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/><c:numFmt formatCode="#,##0" sourceLinked="0"/></c:dLbls>
 <c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$${sourceStartRow}:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${plotRows.length}"/>${plotRows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(r.dateSerial === null ? ' ' : formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$${sourceStartRow}:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
 </c:ser>`).join('');
@@ -4917,11 +4920,13 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             // One blank row at each end prevents the first/last six-bar group
             // from being clipped by the plot boundary. The real table rows remain
             // untouched; these are only hidden chart-source padding rows.
-            const paddedChartRows = [
-                { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 },
-                ...chartRows,
-                { dateSerial: null, jetty: 0, steel: 0, cement: 0, mbc: 0, mv: 0, consumption: 0 }
-            ];
+            // Use ONLY actual chart rows.
+            // Do NOT add blank rows before the first date or after the last date.
+            const paddedChartRows = chartRows.filter(item =>
+                item &&
+                item.dateSerial !== null &&
+                item.dateSerial !== undefined
+            );
 
             paddedChartRows.forEach((item, index) => {
                 const r = 7 + index;
