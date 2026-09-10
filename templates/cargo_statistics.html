@@ -2080,36 +2080,59 @@
                 scmTarget !== null ? `${formatNumber(scmTarget)} MT` : '-';
         }
 
-        // GAP header must show the GAP amount in Lacs MT.
-        // The underlying gap_abp / gap_scm values remain in MT.
-        // Example: 1,929,250 MT -> 19.29 lacs MT.
-        const totalGapAbp = totalRow && totalRow.gap_abp !== undefined
-            ? totalRow.gap_abp
-            : null;
-        const totalGapScm = totalRow && totalRow.gap_scm !== undefined
-            ? totalRow.gap_scm
-            : null;
+        // --------------------------------------------------------
+        // GAP / ASKING RATE HEADER VALUES
+        // --------------------------------------------------------
+        // GAP and Asking Rate headers must show the SAME target
+        // values as Outlook.
+        //
+        // Example:
+        // Outlook ABP = 70 MT
+        // Outlook SCM = 70 MT
+        // GAP ABP     = 70 MT
+        // GAP SCM     = 70 MT
+        // Asking ABP  = 70 MT
+        // Asking SCM  = 70 MT
+        //
+        // Do NOT use gap_abp / gap_scm for these header values.
+        // Those fields are calculated body-row GAP values and can be
+        // 0, which was causing the header to display 0.00 MT.
+        // --------------------------------------------------------
+        const gapAbpValue = abpTarget;
+        const gapScmValue = scmTarget;
 
         if (gapAbpTargetEl) {
-            gapAbpTargetEl.textContent = formatTargetLacs(totalGapAbp);
+            gapAbpTargetEl.textContent =
+                gapAbpValue !== null && gapAbpValue !== undefined
+                    ? `${formatNumber(gapAbpValue)} MT`
+                    : '-';
         }
 
         if (gapScmTargetEl) {
-            gapScmTargetEl.textContent = formatTargetLacs(totalGapScm);
+            gapScmTargetEl.textContent =
+                gapScmValue !== null && gapScmValue !== undefined
+                    ? `${formatNumber(gapScmValue)} MT`
+                    : '-';
         }
 
-        // Asking Rate must show the SAME GAP amounts, also in Lacs MT.
-        // Example: 1,929,250 MT -> 19.29 lacs MT.
+        // Asking Rate = same values as Outlook / GAP.
         if (askingAbpTargetEl) {
-            askingAbpTargetEl.textContent = formatTargetLacs(totalGapAbp);
+            askingAbpTargetEl.textContent =
+                gapAbpValue !== null && gapAbpValue !== undefined
+                    ? `${formatNumber(gapAbpValue)} MT`
+                    : '-';
         }
 
         if (askingScmTargetEl) {
-            askingScmTargetEl.textContent = formatTargetLacs(totalGapScm);
+            askingScmTargetEl.textContent =
+                gapScmValue !== null && gapScmValue !== undefined
+                    ? `${formatNumber(gapScmValue)} MT`
+                    : '-';
         }
 
-        // NOTE: GAP/Asking Rate body rows continue to use the API's original MT values.
-        // Only the header summary amounts above are converted to Lacs MT.
+        // NOTE: GAP/Asking Rate body rows continue to use the API's
+        // original MT values. Only the header summary values above
+        // are synchronized with Outlook.
 
         cargoBodyEl.innerHTML = rows.map(renderRow).join('');
 
@@ -2835,202 +2858,245 @@
     }
 
     function renderJettyMvDischargeChart(rows) {
-    const canvas = document.getElementById('jettyMvDischargeChart');
-    const errorEl = document.getElementById('dischargeChartError');
+        const canvas = document.getElementById('jettyMvDischargeChart');
+        const errorEl = document.getElementById('dischargeChartError');
 
-    if (!canvas) return;
+        if (!canvas) return;
 
-    if (errorEl) {
-        errorEl.style.display = 'none';
-        errorEl.textContent = '';
-    }
-
-    if (typeof Chart === 'undefined') {
         if (errorEl) {
-            errorEl.textContent =
-                'Unable to load the discharge chart library.';
-            errorEl.style.display = 'flex';
+            errorEl.style.display = 'none';
+            errorEl.textContent = '';
         }
-        return;
-    }
 
-    // Only plot days that actually have data. Boundary rows where every
-    // metric is 0 (e.g. today's row before entries are made) create
-    // broken/partial bar groups — drop them instead of rendering them.
-    const cleanRows = (Array.isArray(rows) ? rows : []).filter(row => {
-        const jetty = Number(row.jetty_discharge) || 0;
-        const steel = Number(row.steel_plant_discharge) || 0;
-        const mbc = Number(row.mbc_discharge) || 0;
-        const mv = Number(row.mv_discharge) || 0;
-        const consumption = Number(row.daily_consumption) || 0;
-        return jetty || steel || mbc || mv || consumption;
-    });
+        if (typeof Chart === 'undefined') {
+            if (errorEl) {
+                errorEl.textContent =
+                    'Unable to load the discharge chart library.';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
 
-    if (!cleanRows.length) {
+        /*
+         * UI CHART — EXACTLY 4 METRICS
+         * 1. Jetty Discharge (Steel)
+         * 2. MBC Discharge
+         * 3. MV Discharge
+         * 4. Daily Consumption
+         *
+         * IMPORTANT:
+         * Do NOT create a dataset for:
+         * - Jetty Discharge-Avg (overall)
+         * - Jetty Discharge (Cement Plant)-Avg
+         */
+        const cleanRows = (Array.isArray(rows) ? rows : []).filter(row => {
+            const steel = Number(row.steel_plant_discharge) || 0;
+            const mbc = Number(row.mbc_discharge) || 0;
+            const mv = Number(row.mv_discharge) || 0;
+            const consumption = Number(row.daily_consumption) || 0;
+
+            return steel || mbc || mv || consumption;
+        });
+
+        if (!cleanRows.length) {
+            if (jettyMvDischargeChart) {
+                jettyMvDischargeChart.destroy();
+                jettyMvDischargeChart = null;
+            }
+
+            if (errorEl) {
+                errorEl.textContent = 'No discharge data found.';
+                errorEl.style.display = 'flex';
+            }
+            return;
+        }
+
+        const labels = cleanRows.map(row => formatChartDate(row.date));
+
+        const steel = cleanRows.map(
+            row => Number(row.steel_plant_discharge) || 0
+        );
+        const mbc = cleanRows.map(
+            row => Number(row.mbc_discharge) || 0
+        );
+        const mv = cleanRows.map(
+            row => Number(row.mv_discharge) || 0
+        );
+        const consumption = cleanRows.map(
+            row => Number(row.daily_consumption) || 0
+        );
+
+        /*
+         * Draw value labels vertically above each bar.
+         */
+        const valueLabelPlugin = {
+            id: 'rp01ValueLabels',
+            afterDatasetsDraw(chart) {
+                const { ctx } = chart;
+
+                ctx.save();
+                ctx.font = '9px Arial';
+                ctx.fillStyle = '#222';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+
+                chart.data.datasets.forEach((dataset, datasetIndex) => {
+                    const meta = chart.getDatasetMeta(datasetIndex);
+
+                    meta.data.forEach((bar, index) => {
+                        const value = Number(dataset.data[index]) || 0;
+
+                        if (value <= 0 || !bar || !bar.getProps) return;
+
+                        const props = bar.getProps(['x', 'y'], true);
+
+                        ctx.save();
+                        ctx.translate(props.x, props.y - 3);
+                        ctx.rotate(-Math.PI / 2);
+
+                        ctx.fillText(
+                            value.toLocaleString('en-IN', {
+                                maximumFractionDigits: 0
+                            }),
+                            0,
+                            0
+                        );
+
+                        ctx.restore();
+                    });
+                });
+
+                ctx.restore();
+            }
+        };
+
         if (jettyMvDischargeChart) {
             jettyMvDischargeChart.destroy();
             jettyMvDischargeChart = null;
         }
 
-        if (errorEl) {
-            errorEl.textContent = 'No discharge data found.';
-            errorEl.style.display = 'flex';
-        }
-        return;
-    }
+        jettyMvDischargeChart = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            plugins: [valueLabelPlugin],
 
-    const labels = cleanRows.map(row => formatChartDate(row.date));
+            data: {
+                labels,
 
-    const jetty = cleanRows.map(row => Number(row.jetty_discharge) || 0);
-    const steel = cleanRows.map(row => Number(row.steel_plant_discharge) || 0);
-    const mbc = cleanRows.map(row => Number(row.mbc_discharge) || 0);
-    const mv = cleanRows.map(row => Number(row.mv_discharge) || 0);
-    const consumption = cleanRows.map(row => Number(row.daily_consumption) || 0);
-
-    const valueLabelPlugin = {
-        id: 'rp01ValueLabels',
-        afterDatasetsDraw(chart) {
-            const {ctx} = chart;
-
-            ctx.save();
-            ctx.font = '9px Arial';
-            ctx.fillStyle = '#222';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-
-            chart.data.datasets.forEach((dataset, datasetIndex) => {
-                const meta = chart.getDatasetMeta(datasetIndex);
-
-                meta.data.forEach((bar, index) => {
-                    const value = Number(dataset.data[index]) || 0;
-                    if (value <= 0 || !bar || !bar.getProps) return;
-
-                    const props = bar.getProps(['x', 'y'], true);
-
-                    ctx.save();
-                    ctx.translate(props.x, props.y - 3);
-                    ctx.rotate(-Math.PI / 2);
-                    ctx.fillText(
-                        value.toLocaleString('en-IN', {
-                            maximumFractionDigits: 0
-                        }),
-                        0,
-                        0
-                    );
-                    ctx.restore();
-                });
-            });
-
-            ctx.restore();
-        }
-    };
-
-    if (jettyMvDischargeChart) {
-        jettyMvDischargeChart.destroy();
-    }
-
-    jettyMvDischargeChart = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
-        plugins: [valueLabelPlugin],
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: 'Jetty Discharge-Avg',
-                    data: jetty,
-                    backgroundColor: '#4a90d9',
-                    borderWidth: 1,
-                    categoryPercentage: 0.72,
-                    barPercentage: 0.88
-                },
-                {
-                    label: 'Jetty Discharge (Steel Plant)-Avg',
-                    data: steel,
-                    backgroundColor: '#ed7d31',
-                    borderWidth: 1,
-                    categoryPercentage: 0.72,
-                    barPercentage: 0.88
-                },
-                {
-                    label: 'MBC Discharge-Avg',
-                    data: mbc,
-                    backgroundColor: '#ffc000',
-                    borderWidth: 1,
-                    categoryPercentage: 0.72,
-                    barPercentage: 0.88
-                },
-                {
-                    label: 'MV Discharge-Avg',
-                    data: mv,
-                    backgroundColor: '#264478',
-                    borderWidth: 1,
-                    categoryPercentage: 0.72,
-                    barPercentage: 0.88
-                },
-                {
-                    label: 'Daily Consumption-Avg',
-                    data: consumption,
-                    backgroundColor: '#70ad47',
-                    borderWidth: 1,
-                    categoryPercentage: 0.72,
-                    barPercentage: 0.88
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
+                /*
+                 * IMPORTANT:
+                 * This array intentionally contains ONLY 4 datasets.
+                 */
+                datasets: [
+                    {
+                        label: 'Jetty Discharge (Steel)',
+                        data: steel,
+                        backgroundColor: '#b7c9e2',
+                        borderColor: '#8fa8c4',
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'MBC Discharge',
+                        data: mbc,
+                        backgroundColor: '#f6d98b',
+                        borderColor: '#d9bd68',
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'MV Discharge',
+                        data: mv,
+                        backgroundColor: '#aebbd1',
+                        borderColor: '#8797b1',
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    },
+                    {
+                        label: 'Daily Consumption',
+                        data: consumption,
+                        backgroundColor: '#b9d9a7',
+                        borderColor: '#94ba7f',
+                        borderWidth: 1,
+                        categoryPercentage: 0.72,
+                        barPercentage: 0.88
+                    }
+                ]
             },
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        boxWidth: 10,
-                        boxHeight: 10,
-                        padding: 10,
-                        font: { size: 10 }
-                    }
+
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+
+                interaction: {
+                    mode: 'index',
+                    intersect: false
                 },
-                tooltip: {
-                    callbacks: {
-                        label(context) {
-                            const value = Number(context.raw) || 0;
-                            return `${context.dataset.label}: ` +
-                                `${value.toLocaleString('en-IN')} MT`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    stacked: false,
-                    grid: { display: false },
-                    ticks: {
-                        autoSkip: false,
-                        maxRotation: 35,
-                        minRotation: 35,
-                        padding: 4,
-                        font: { size: 9 }
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: { display: true, text: 'MT' },
-                    ticks: {
-                        callback(value) {
-                            return Number(value).toLocaleString('en-IN');
+
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            padding: 10,
+                            font: {
+                                size: 10
+                            }
                         }
                     },
-                    grid: { color: '#d9d9d9' }
+
+                    tooltip: {
+                        callbacks: {
+                            label(context) {
+                                const value = Number(context.raw) || 0;
+
+                                return `${context.dataset.label}: ` +
+                                    `${value.toLocaleString('en-IN')} MT`;
+                            }
+                        }
+                    }
+                },
+
+                scales: {
+                    x: {
+                        stacked: false,
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            autoSkip: false,
+                            maxRotation: 35,
+                            minRotation: 35,
+                            padding: 4,
+                            font: {
+                                size: 9
+                            }
+                        }
+                    },
+
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'MT'
+                        },
+                        ticks: {
+                            callback(value) {
+                                return Number(value).toLocaleString('en-IN');
+                            }
+                        },
+                        grid: {
+                            color: '#d9d9d9'
+                        }
+                    }
                 }
             }
-        }
-    });
-}
+        });
+    }
 
     async function loadDischargeChart(selectedDate) {
         if (!selectedDate) return;
@@ -4366,13 +4432,12 @@
         const lastRow = sourceStartRow + plotRows.length - 1;
         const categories = plotRows.map(r => r.dateSerial);
 
+        // Excel chart matches the UI: ONLY Steel Jetty, MBC, MV and Daily Consumption.
         const series = [
-    { col: 'AZ', title: 'Jetty Discharge-Avg', color: '4A90D9', values: plotRows.map(r => r.jetty) },
-    { col: 'BA', title: 'Jetty Discharge (Steel Plant)-Avg', color: 'ED7D31', values: plotRows.map(r => r.steel) },
-    { col: 'BB', title: 'Jetty Discharge (Cement Plant)-Avg', color: 'A5A5A5', values: plotRows.map(r => r.cement) },
-    { col: 'BC', title: 'MBC Discharge-Avg', color: 'FFC000', values: plotRows.map(r => r.mbc) },
-    { col: 'BD', title: 'MV Discharge-Avg', color: '264478', values: plotRows.map(r => r.mv) },
-    { col: 'BE', title: 'Daily Consumption-Avg', color: '70AD47', values: plotRows.map(r => r.consumption) }
+    { col: 'AZ', title: 'Jetty Discharge (Steel)', color: 'B7C9E2', values: plotRows.map(r => r.steel) },
+    { col: 'BA', title: 'MBC Discharge', color: 'F6D98B', values: plotRows.map(r => r.mbc) },
+    { col: 'BB', title: 'MV Discharge', color: 'AEBBD1', values: plotRows.map(r => r.mv) },
+    { col: 'BC', title: 'Daily Consumption', color: 'B9D9A7', values: plotRows.map(r => r.consumption) }
 ];
 
         const seriesXml = series.map((cfg, index) => `
@@ -4381,7 +4446,7 @@
 <c:tx><c:strRef><c:f>'Cargo Satistics'!$${cfg.col}$5</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(cfg.title)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 <c:spPr><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${cfg.color}"/></a:solidFill></a:ln></c:spPr>
 <c:invertIfNegative val="0"/>
-<c:dLbls><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/><c:numFmt formatCode="#,##0" sourceLinked="0"/></c:dLbls>
+<c:dLbls><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showLeaderLines val="0"/><c:numFmt formatCode="#,##0" sourceLinked="0"/><c:txPr><a:bodyPr rot="-5400000"/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr></a:p></c:txPr></c:dLbls>
 <c:cat><c:strRef><c:f>'Cargo Satistics'!$BG$${sourceStartRow}:$BG$${lastRow}</c:f><c:strCache><c:ptCount val="${plotRows.length}"/>${plotRows.map((r, i) => `<c:pt idx="${i}"><c:v>${esc(r.dateSerial === null ? ' ' : formatExcelChartDateLabel(r.dateSerial))}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>'Cargo Satistics'!$${cfg.col}$${sourceStartRow}:$${cfg.col}$${lastRow}</c:f>${cache(cfg.values, '#,##0')}</c:numRef></c:val>
 </c:ser>`).join('');
@@ -4679,16 +4744,13 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
             setTemplateCell(ws, 'D4', 'Issue Date : 01.04.2022');
             setTemplateCell(ws, 'F3', `Selected Date: ${selectedDisplay}`);
             setTemplateCell(ws, 'F4', `Report Date: ${reportDisplay}`);
-            setTemplateCell(
-                ws,
-                'J3',
-                'Balance Days'
-            );
-            setTemplateCell(
-                ws,
-                'K3',
-                balanceDaysEl ? balanceDaysEl.textContent.trim() : '-'
-            );
+            // --------------------------------------------------------
+            // REMOVE BALANCE / REMAINING DAYS FROM EXCEL HEADER
+            // --------------------------------------------------------
+            // The UI may still display Balance Days, but the Excel
+            // export must not show the value (for example, 22).
+            setTemplateCell(ws, 'J3', '');
+            setTemplateCell(ws, 'K3', '');
 
             // --------------------------------------------------------
             // GAP / ASKING RATE HEADER VALUES - SYNC EXACTLY WITH UI
@@ -5044,12 +5106,12 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
 
             const chartRows = buildChartRowsFromDailyTable(dailyRowsToWrite, latestDischargeChartRows);
             const chartSourceHeaders = {
-                AZ: 'Jetty Discharge-Avg',
-                BA: 'Jetty Discharge (Steel Plant)-Avg',
-                BB: 'Jetty Discharge (Cement Plant)-Avg',
-                BC: 'MBC Discharge-Avg',
-                BD: 'MV Discharge-Avg',
-                BE: 'Daily Consumption-Avg',
+                AZ: 'Jetty Discharge (Steel)',
+                BA: 'MBC Discharge',
+                BB: 'MV Discharge',
+                BC: 'Daily Consumption',
+                BD: 'UNUSED',
+                BE: 'UNUSED',
                 BF: 'DATE',
                 BG: 'DATE LABEL'
             };
@@ -5081,18 +5143,19 @@ function buildChartRowsFromDailyTable(dailyRowsToWrite, preferredRows) {
 
             paddedChartRows.forEach((item, index) => {
                 const r = 7 + index;
-                ws.getCell(`AZ${r}`).value = item.jetty;
-                ws.getCell(`BA${r}`).value = item.steel;
-                ws.getCell(`BB${r}`).value = item.cement;
-                ws.getCell(`BC${r}`).value = item.mbc;
-                ws.getCell(`BD${r}`).value = item.mv;
-                ws.getCell(`BE${r}`).value = item.consumption;
+                // Write only the four chart metrics.
+                ws.getCell(`AZ${r}`).value = item.steel;
+                ws.getCell(`BA${r}`).value = item.mbc;
+                ws.getCell(`BB${r}`).value = item.mv;
+                ws.getCell(`BC${r}`).value = item.consumption;
+                ws.getCell(`BD${r}`).value = null;
+                ws.getCell(`BE${r}`).value = null;
                 ws.getCell(`BF${r}`).value = item.dateSerial;
                 ws.getCell(`BG${r}`).value = item.dateSerial !== null
                     ? formatExcelChartDateLabel(item.dateSerial)
                     : ' ';
 
-                ['AZ', 'BA', 'BB', 'BC', 'BD', 'BE'].forEach(col => {
+                ['AZ', 'BA', 'BB', 'BC'].forEach(col => {
                     ws.getCell(`${col}${r}`).numFmt = '#,##0';
                 });
                 ws.getCell(`BF${r}`).numFmt = 'dd/mm/yyyy';
