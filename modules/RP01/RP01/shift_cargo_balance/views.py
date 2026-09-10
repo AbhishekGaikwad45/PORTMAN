@@ -13,8 +13,8 @@ from .. import bp
 from database import get_db, get_cursor
 from ..Barge_Position_Report.views import _fetch_all_barges
 
-REPORT_CUTOFF_DATE = date(2026, 7, 1)
-REPORT_CUTOFF_DT = datetime(2026, 7, 1, 0, 0, 0)
+REPORT_CUTOFF_DATE = date(2026, 9, 1)
+REPORT_CUTOFF_DT = datetime(2026, 9, 1, 0, 0, 0)
 
 
 def login_required(f):
