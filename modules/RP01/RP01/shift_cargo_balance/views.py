@@ -1,6 +1,7 @@
 from flask import render_template, request, jsonify, session, redirect, url_for, Response
 from functools import wraps
 from datetime import date, datetime, timedelta
+from collections import defaultdict
 import io
 import json
 import re
@@ -12,8 +13,8 @@ from openpyxl.utils import get_column_letter
 from .. import bp
 from database import get_db, get_cursor
 
-REPORT_CUTOFF_DATE = date(2026, 9, 1)
-REPORT_CUTOFF_DT = datetime(2026, 9, 1, 0, 0, 0)
+REPORT_CUTOFF_DATE = date(2026, 5, 1)
+REPORT_CUTOFF_DT = datetime(2026, 5, 1, 0, 0, 0)
 
 
 def login_required(f):
@@ -179,21 +180,23 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
 
     conn = get_db()
     cur = get_cursor(conn)
+    if shift_key == 'A':
+        to_dt = datetime.combine(target_date, datetime.min.time()).replace(hour=14, minute=0, second=0)
+    elif shift_key == 'B':
+        to_dt = datetime.combine(target_date, datetime.min.time()).replace(hour=22, minute=0, second=0)
+    else:  # Shift C ends 06:00 next day
+        to_dt = datetime.combine(target_date + timedelta(days=1), datetime.min.time()).replace(hour=6, minute=0, second=0)
 
-    sql_query = r"""
+    # 1. Fetch saved layout from BPR or carried BPR (for berth assignments like WR 19, Berth 10-12, etc.)
+    cur.execute(r"""
         WITH params AS (
             SELECT
                 %s::date AS report_date,
                 %s::text AS report_shift,
                 %s::date AS cutoff_date
         ),
-
         bpr AS (
-            SELECT
-                bpr.berth_layout,
-                bpr.shift,
-                bpr.report_date,
-                bpr.updated_at
+            SELECT bpr.berth_layout, bpr.waiting_area, bpr.shift, bpr.report_date, bpr.updated_at
             FROM barge_position_report bpr
             CROSS JOIN params p
             WHERE bpr.report_date = p.report_date
@@ -202,196 +205,255 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
             ORDER BY bpr.updated_at DESC
             LIMIT 1
         ),
-
         carried_bpr AS (
-            SELECT
-                bpr.berth_layout,
-                bpr.shift,
-                bpr.report_date,
-                bpr.updated_at
+            SELECT bpr.berth_layout, bpr.waiting_area, bpr.shift, bpr.report_date, bpr.updated_at
             FROM barge_position_report bpr
             CROSS JOIN params p
-            WHERE NOT EXISTS (
-                SELECT 1 FROM bpr
-            )
+            WHERE NOT EXISTS (SELECT 1 FROM bpr)
               AND bpr.report_date >= p.cutoff_date
               AND (
                     bpr.report_date < p.report_date
                     OR (
                         bpr.report_date = p.report_date
-                        AND CASE bpr.shift
-                            WHEN 'C' THEN 3
-                            WHEN 'B' THEN 2
-                            WHEN 'A' THEN 1
-                            ELSE 0
-                        END
-                        <=
-                        CASE p.report_shift
-                            WHEN 'C' THEN 3
-                            WHEN 'B' THEN 2
-                            WHEN 'A' THEN 1
-                            ELSE 0
-                        END
+                        AND CASE bpr.shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
+                            <= CASE p.report_shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
                     )
-                  )
-            ORDER BY
-                bpr.report_date DESC,
-                CASE bpr.shift
-                    WHEN 'C' THEN 3
-                    WHEN 'B' THEN 2
-                    WHEN 'A' THEN 1
-                    ELSE 0
-                END DESC,
-                bpr.updated_at DESC
+              )
+            ORDER BY bpr.report_date DESC,
+                     CASE bpr.shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END DESC,
+                     bpr.updated_at DESC
             LIMIT 1
-        ),
-
-        selected_bpr AS (
-            SELECT * FROM bpr
-
-            UNION ALL
-
-            SELECT * FROM carried_bpr
-        ),
-
-        items AS (
-            SELECT
-                x.item
-            FROM selected_bpr s
-            CROSS JOIN LATERAL jsonb_array_elements(
-                CASE
-                    WHEN jsonb_typeof(s.berth_layout::jsonb) = 'array'
-                    THEN s.berth_layout::jsonb
-                    ELSE '[]'::jsonb
-                END
-            ) x(item)
-        ),
-
-        candidate AS (
-            SELECT
-                item->>'id' AS id,
-                TRIM(item->>'name') AS name,
-                TRIM(item->>'cargo') AS cargo,
-                UPPER(TRIM(item->>'berth')) AS berth,
-                COALESCE(
-                    NULLIF(item->>'balance', '')::numeric,
-                    NULLIF(item->>'balance_qty', '')::numeric,
-                    0
-                ) AS balance
-            FROM items
-            WHERE COALESCE(TRIM(item->>'name'), '') <> ''
-              AND UPPER(TRIM(item->>'berth')) NOT IN
-                  ('WAITING', 'NONE', 'NULL', '—', '-', 'EMPTY', '')
-        ),
-
-        positive AS (
-            SELECT *
-            FROM candidate
-            WHERE balance > 0.01
-        ),
-
-        final_report AS (
-
-            SELECT
-                'JETTY' AS berth,
-                cargo,
-                ROUND(SUM(balance))::numeric AS balance
-            FROM positive
-            WHERE NOT (
-                berth ~ '\m(BERTH[ ]*NO[.]?[ ]*|B[ ]*-?)(10|11|12)\M'
-                OR berth IN ('10','11','12')
-            )
-            AND NOT (
-                berth ~ '\m(WR[ ]*19|WR-19|R-?19)\M'
-                OR berth LIKE '%%WR%%19%%'
-            )
-            GROUP BY cargo
-
-            UNION ALL
-
-            SELECT
-                berth,
-                cargo,
-                ROUND(SUM(balance))::numeric AS balance
-            FROM positive
-            WHERE (
-                berth ~ '\m(BERTH[ ]*NO[.]?[ ]*|B[ ]*-?)(10|11|12)\M'
-                OR berth IN ('10','11','12')
-            )
-            GROUP BY berth, cargo
-
-            UNION ALL
-
-            SELECT
-                'WR 19' AS berth,
-                cargo,
-                ROUND(SUM(balance))::numeric AS balance
-            FROM positive
-            WHERE (
-                berth ~ '\m(WR[ ]*19|WR-19|R-?19)\M'
-                OR berth LIKE '%%WR%%19%%'
-            )
-            GROUP BY cargo
         )
+        SELECT * FROM bpr
+        UNION ALL
+        SELECT * FROM carried_bpr;
+    """, (target_date_str, shift_key, cutoff_date_str))
+    bpr_row = cur.fetchone()
+    layout_items = []
+    if bpr_row:
+        for arr in (bpr_row.get('berth_layout') or [], bpr_row.get('waiting_area') or []):
+            if isinstance(arr, list):
+                layout_items.extend(arr)
 
+    # 2. Directly fetch all active barges where alongside time (along_side_berth) exists
+    cur.execute(r"""
+        WITH discharge_sums AS (
+            SELECT
+                TRIM(UPPER(ll.barge_name)) AS barge_name,
+                ll.source_id,
+                SUM(COALESCE(ll.quantity,0)) AS discharged_qty
+            FROM lueu_lines ll
+            WHERE ll.is_deleted IS NOT TRUE
+              AND ll.source_type = 'VCN'
+              AND (
+                  ll.entry_date < %s
+                  OR (
+                      ll.entry_date = %s
+                      AND CASE ll.shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
+                          <= CASE %s WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
+                  )
+              )
+            GROUP BY TRIM(UPPER(ll.barge_name)), ll.source_id
+        )
         SELECT
-            berth,
-            cargo,
-            balance
-        FROM final_report
-        WHERE balance > 0
-        ORDER BY
-            CASE
-                WHEN berth LIKE '%%10%%' THEN 10
-                WHEN berth LIKE '%%11%%' THEN 11
-                WHEN berth LIKE '%%12%%' THEN 12
-                WHEN berth LIKE '%%19%%' OR berth = 'WR 19' THEN 19
-                WHEN berth = 'JETTY' THEN 100
-                ELSE 99
-            END,
-            cargo;
-    """
+            l.id,
+            TRIM(UPPER(l.barge_name)) AS name,
+            l.cargo_name AS cargo,
+            l.along_side_berth,
+            l.cast_off_port,
+            l.cast_off_berth,
+            l.completed_discharge_berth,
+            (COALESCE(l.discharge_quantity,0) - COALESCE(ds.discharged_qty,0)) AS balance
+        FROM ldud_barge_lines l
+        LEFT JOIN ldud_header h ON h.id = l.ldud_id
+        LEFT JOIN discharge_sums ds ON ds.barge_name = TRIM(UPPER(CONCAT(l.barge_name, ' / ', COALESCE(l.trip_number::text,'1'))))
+                                   AND ds.source_id = h.vcn_id
+        WHERE l.along_side_berth IS NOT NULL
+          AND TRIM(l.along_side_berth) <> ''
+    """, (target_date_str, target_date_str, shift_key))
+    alongside_vessels = []
+    for r in cur.fetchall():
+        r = dict(r)
+        bal = float(r.get('balance') or 0)
+        if bal <= 0.01:
+            continue
+        al_dt = safe_dt(r.get('along_side_berth'))
+        if not al_dt or al_dt.date() < REPORT_CUTOFF_DATE or al_dt > to_dt:
+            continue
+        co_dt = safe_dt(r.get('cast_off_berth') or r.get('cast_off_port'))
+        if co_dt and co_dt <= to_dt:
+            continue
+        comp_dt = safe_dt(r.get('completed_discharge_berth'))
+        if comp_dt and comp_dt <= to_dt:
+            continue
+        alongside_vessels.append({
+            'id': r['id'],
+            'name': r['name'],
+            'type': 'BARGE',
+            'cargo': r['cargo'],
+            'berth': '',
+            'balance': bal
+        })
 
-    cur.execute(sql_query, (target_date_str, shift_key, cutoff_date_str))
-    rows = cur.fetchall()
+    # 3. Directly fetch all active MBCs where arrival / alongside time (vessel_arrival_port) exists
+    cur.execute(r"""
+        WITH actual AS (
+            SELECT source_id, SUM(COALESCE(quantity,0)) AS actual_qty
+            FROM lueu_lines
+            WHERE source_type = 'MBC'
+              AND is_deleted IS NOT TRUE
+              AND (
+                  entry_date < %s
+                  OR (
+                      entry_date = %s
+                      AND CASE shift WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
+                          <= CASE %s WHEN 'C' THEN 3 WHEN 'B' THEN 2 WHEN 'A' THEN 1 ELSE 0 END
+                  )
+              )
+            GROUP BY source_id
+        ),
+        latest_mbc AS (
+            SELECT
+                h.id,
+                TRIM(UPPER(h.mbc_name)) AS name,
+                h.cargo_name AS cargo,
+                COALESCE(p.vessel_unloading_berth, e.berth_master) AS berth,
+                COALESCE(p.vessel_arrival_port, e.arrived_at_port) AS arrival_port,
+                COALESCE(p.unloading_commenced, e.loading_commenced) AS unloading_commenced,
+                COALESCE(p.unloading_completed, e.loading_completed) AS unloading_completed,
+                COALESCE(p.vessel_cast_off, e.cast_off_from_berth) AS mbc_cast_off,
+                (COALESCE(h.bl_quantity,0) - COALESCE(a.actual_qty,0)) AS balance,
+                ROW_NUMBER() OVER (
+                    PARTITION BY h.id
+                    ORDER BY COALESCE(p.id, e.id) DESC
+                ) rn
+            FROM mbc_header h
+            LEFT JOIN mbc_discharge_port_lines p ON p.mbc_id = h.id AND h.operation_type ILIKE 'Import'
+            LEFT JOIN mbc_export_load_port_lines e ON e.mbc_id = h.id AND h.operation_type ILIKE 'Export'
+            LEFT JOIN actual a ON a.source_id = h.id
+            WHERE p.mbc_id IS NOT NULL OR e.mbc_id IS NOT NULL
+        )
+        SELECT *
+        FROM latest_mbc
+        WHERE rn = 1
+          AND arrival_port IS NOT NULL
+          AND TRIM(arrival_port) <> ''
+    """, (target_date_str, target_date_str, shift_key))
+    for r in cur.fetchall():
+        r = dict(r)
+        bal = float(r.get('balance') or 0)
+        if bal <= 0.01:
+            continue
+        al_dt = safe_dt(r.get('arrival_port'))
+        if not al_dt or al_dt.date() < REPORT_CUTOFF_DATE or al_dt > to_dt:
+            continue
+        co_dt = safe_dt(r.get('mbc_cast_off'))
+        if co_dt and co_dt <= to_dt:
+            continue
+        comp_dt = safe_dt(r.get('unloading_completed'))
+        if comp_dt and comp_dt <= to_dt:
+            continue
+        alongside_vessels.append({
+            'id': r['id'],
+            'name': r['name'],
+            'type': 'MBC',
+            'cargo': r['cargo'],
+            'berth': (r.get('berth') or '').strip().upper(),
+            'balance': bal
+        })
+
     cur.close()
     conn.close()
 
-    table_items = []
-    for r in rows:
-        r_bal = int(round(float(r['balance'] or 0)))
-        if r_bal <= 0:
+    # 4. Merge layout items and alongside vessels
+    live_map = {v['name']: v for v in alongside_vessels}
+    final_candidates = []
+    seen_names = set()
+
+    for it in layout_items:
+        name = (it.get('name') or '').strip().upper()
+        if not name or name in seen_names:
             continue
-        raw_berth = (r.get('berth') or '').strip().upper()
-        cargo = _clean_cargo_name(r.get('cargo'))
+        vtype = (it.get('type') or '').strip().upper()
+        cargo = it.get('cargo') or ''
+        berth = (it.get('berth') or '').strip().upper()
+        bal = float(it.get('balance') or it.get('balance_qty') or 0)
+        if name in live_map:
+            bal = live_map[name]['balance']
+            if live_map[name].get('cargo'):
+                cargo = live_map[name]['cargo']
+            if not vtype:
+                vtype = live_map[name].get('type') or ''
+        if not vtype:
+            vtype = 'MBC' if 'MBC' in name else 'BARGE'
+        if bal > 0.01:
+            final_candidates.append({'name': name, 'type': vtype, 'cargo': cargo, 'berth': berth, 'balance': bal})
+            seen_names.add(name)
 
-        if _is_wr19(raw_berth):
-            b_display = 'WR 19'
-            note = '(WR 19)'
-            is_sp = True
+    for v in alongside_vessels:
+        if v['name'] not in seen_names:
+            final_candidates.append(v)
+            seen_names.add(v['name'])
+
+    # 5. Group by Jetty vs Special Berths
+    # Rules:
+    # - WR 19: Any vessel at WR 19 is separated as (WR 19).
+    # - Berth 10, 11, 12: ONLY if it is an MBC, separated as (Berth No.X).
+    # - Alongside time exists but berth not assigned (or Waiting Area / Berths 1-9): aggregated under standard Jetty.
+    jetty_totals = defaultdict(float)
+    special_totals = defaultdict(lambda: defaultdict(float))
+
+    for c in final_candidates:
+        berth = (c.get('berth') or '').strip().upper()
+        vtype = (c.get('type') or '').strip().upper()
+        cargo = _clean_cargo_name(c.get('cargo'))
+        bal = float(c.get('balance') or 0)
+        if bal <= 0.01:
+            continue
+
+        is_wr = _is_wr19(berth)
+        is_sp, b_num = _is_berth_10_to_12(berth)
+        is_mbc = (vtype == 'MBC') or ('MBC' in (c.get('name') or '').upper())
+
+        if is_wr:
+            special_totals['WR 19'][cargo] += bal
+        elif is_sp and is_mbc:
+            special_totals[f'BERTH {b_num}'][cargo] += bal
         else:
-            is_sp, b_num = _is_berth_10_to_12(raw_berth)
-            if is_sp:
-                b_display = f"BERTH {b_num}"
-                note = f"(Berth No.{b_num})"
-                is_sp = True
-            else:
-                b_display = 'Jetty'
-                note = ''
-                is_sp = False
+            jetty_totals[cargo] += bal
 
+    table_items = []
+    for cargo in sorted(jetty_totals):
         table_items.append({
-            'berth': b_display,
+            'berth': 'Jetty',
             'cargo': cargo,
-            'balance': r_bal,
-            'note': note,
-            'is_special': is_sp
+            'balance': int(round(jetty_totals[cargo])),
+            'note': '',
+            'is_special': False
         })
+
+    for b_name in sorted(special_totals):
+        note = '(WR 19)' if '19' in b_name else f"(Berth No.{b_name.split()[-1]})"
+        for cargo in sorted(special_totals[b_name]):
+            table_items.append({
+                'berth': b_name,
+                'cargo': cargo,
+                'balance': int(round(special_totals[b_name][cargo])),
+                'note': note,
+                'is_special': True
+            })
 
     grand_total = sum(it['balance'] for it in table_items)
 
     # Build WhatsApp / SMS Text Block
-    sms_lines = [f"Cargo Balance at Jetty for {shift_key} Shift", ""]
+    shift_time_range = {
+        'A': '06:00 to 14:00',
+        'B': '14:00 to 22:00',
+        'C': '22:00 to 06:00'
+    }.get(shift_key, '')
+    time_label = f" ({shift_time_range})" if shift_time_range else ""
+
+    sms_lines = [f"Cargo Balance at Jetty for {shift_key} Shift{time_label}", ""]
     if table_items:
         max_c_len = max(len(it['cargo']) for it in table_items)
         max_c_len = max(max_c_len, 14)
@@ -418,7 +480,7 @@ def _fetch_shift_cargo_balance(report_date_str, shift_key):
         'entry_date': target_date_str,
         'shift': shift_key,
         'shift_display': f"{shift_key} Shift",
-        'title': f"Cargo Balance at Jetty for {shift_key} Shift",
+        'title': f"Cargo Balance at Jetty for {shift_key} Shift{time_label}",
         'items': table_items,
         'total_qty': grand_total,
         'total_balance': grand_total,
