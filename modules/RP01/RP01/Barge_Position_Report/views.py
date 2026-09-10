@@ -2825,10 +2825,10 @@ def _jetty_v2_shift_window(report_date_str, shift):
     return from_dt, to_dt
 
 
-def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
-    """Independent copy — computes barge status AS OF `to_dt` (end of the
-    selected shift window) instead of 'right now'. Does not call or modify
-    _fetch_all_barges()."""
+def _fetch_barges_asof_v2(from_dt, to_dt, report_date_str, shift='ALL'):
+    """Fetch all barges from ldud_barge_lines with their status and balance
+    computed as of `to_dt` (the cumulative end timestamp of the selected
+    shift window). Matches logic with daily_barge_report."""
 
     conn = get_db()
     cur = get_cursor(conn)
@@ -2875,12 +2875,15 @@ def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
             l.trip_number,
             l.cargo_name,
             lb.berth_name,
+            l.trip_start,
             l.anchored_gull_island,
             l.cast_off_mv,
-            l.cast_off_port,
             l.along_side_berth,
             l.commence_discharge_berth,
             l.completed_discharge_berth,
+            l.cast_off_berth,
+            l.cast_off_berth_nt,
+            l.cast_off_port,
             COALESCE(l.discharge_quantity,0) AS discharge_qty,
             (
                 COALESCE(l.discharge_quantity,0)
@@ -2918,13 +2921,19 @@ def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
         row = dict(row)
         balance_qty = max(float(row.get("balance_qty") or 0), 0)
 
+        trip_start_dt  = _parse_dt(row.get("trip_start"))
         alongside_dt   = _parse_dt(row.get("along_side_berth"))
         commence_dt    = _parse_dt(row.get("commence_discharge_berth"))
         completed_dt   = _parse_dt(row.get("completed_discharge_berth"))
-        cast_off_dt    = _parse_dt(row.get("cast_off_port"))
+        cast_off_dt    = _parse_dt(row.get("cast_off_berth") or row.get("cast_off_berth_nt") or row.get("cast_off_port"))
         cast_off_mv_dt = _parse_dt(row.get("cast_off_mv"))
 
+        # Cutoff check: match daily_barge_report REPORT_CUTOFF_DATE (2026-05-01)
+        if trip_start_dt and trip_start_dt < cutoff_dt:
+            continue
         if alongside_dt and alongside_dt < cutoff_dt:
+            continue
+        if trip_start_dt and trip_start_dt > to_dt:
             continue
 
         cast_off_by_then  = bool(cast_off_dt and cast_off_dt <= to_dt)
@@ -2932,18 +2941,25 @@ def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
 
         status = None
         if alongside_dt and alongside_dt <= to_dt and not cast_off_by_then:
-            if commence_dt and commence_dt <= to_dt and not completed_by_then:
+            if completed_by_then or balance_qty <= 0.01:
+                # Barge has finished discharging
+                if completed_dt and completed_dt < from_dt:
+                    status = None  # completed in past shift, not active now
+                else:
+                    status = "Discharge Completed"
+            elif commence_dt and commence_dt <= to_dt:
                 status = "Under Discharge"
-            elif not commence_dt or commence_dt > to_dt:
+            elif balance_qty > 0.01:
                 status = "Waiting"
 
         # ── ETA = "Loaded & Transit": cast off mother vessel by to_dt,
-        # but NOT yet alongside the discharge berth as of to_dt.
+        # but NOT yet alongside the discharge berth as of to_dt, and has remaining cargo.
         alongside_by_then = bool(alongside_dt and alongside_dt <= to_dt)
         eta_active = bool(
             cast_off_mv_dt
             and cast_off_mv_dt <= to_dt
             and not alongside_by_then
+            and balance_qty > 0.01
         )
 
         berth = (row.get("berth_name") or "").upper()
@@ -2955,6 +2971,8 @@ def _fetch_barges_asof_v2(to_dt, report_date_str, shift='ALL'):
             "name": row["barge_name"],
             "cargo": row.get("cargo_name") or "",
             "balance_qty": balance_qty,
+            "along_side_berth": row.get("along_side_berth"),
+            "completed_discharge_berth": row.get("completed_discharge_berth"),
             "berth": berth,
             "status": status,
             "eta_active": eta_active,
@@ -3055,31 +3073,38 @@ def api_jetty_cargo_report_v2():
     report_date = request.args.get('date', '')
     shift = request.args.get('shift', 'ALL')
     if not report_date:
-        return jsonify({'jetty_waiting': [], 'total_jetty': 0, 'total_eta': 0, 'berth_discharge': []})
+        return jsonify({
+            'jetty_waiting': [],
+            'total_jetty': 0,
+            'total_eta': 0,
+            'berth_discharge': []
+        })
 
     from_dt, to_dt = _jetty_v2_shift_window(report_date, shift)
-    barges = _fetch_barges_asof_v2(to_dt, report_date, shift)
-    mbcs   = _fetch_mbc_asof_v2(to_dt, report_date, shift)
+    barges = _fetch_barges_asof_v2(from_dt, to_dt, report_date, shift)
+    mbcs = _fetch_mbc_asof_v2(to_dt, report_date, shift)
 
     jetty_counts = defaultdict(int)
     eta_counts = defaultdict(int)
-    discharge_counts = defaultdict(int)   # ✅ NEW — Under Discharge cargo count
+    discharge_counts = defaultdict(int)
     berth_rows = []
 
     # ── Barges still feed JETTY (Waiting), ETA (Loaded/Transit),
-    #    ani ata UNDER DISCHARGE counts ──
+    #    and UNDER DISCHARGE counts ──
     for b in barges:
         cargo = (b.get('cargo') or 'UNKNOWN').strip().upper() or 'UNKNOWN'
-        if b['status'] == 'Waiting':
+
+        if b['status'] == 'Waiting' and b.get('balance_qty', 0) > 0.01:
             jetty_counts[cargo] += 1
+
         if b.get('eta_active'):
             eta_counts[cargo] += 1
-        # ✅ NEW — status Under Discharge 
-        
-        if b['status'] in ('Under Discharge', 'Discharge Completed'):
+
+        if b['status'] == 'Under Discharge':
             discharge_counts[cargo] += 1
-        # NOTE: barges STILL not added to berth_rows — that table is
-        # MBC-only, 
+
+        # NOTE: barges STILL not added to berth_rows —
+        # that table is MBC-only
 
     # ── CARGO / BERTH / CARGO BAL table — MBC only (UNCHANGED) ─────────────
     for m in mbcs:
@@ -3093,30 +3118,44 @@ def api_jetty_cargo_report_v2():
                 'cargo': m.get('cargo') or '',
                 'berth': (m.get('berth') or '').upper(),
                 'balance': m.get('balance_qty', 0),
-                '_commence_dt': _parse_dt(m.get('unloading_commenced')),
+                '_commence_dt': _parse_dt(
+                    m.get('unloading_commenced')
+                ),
             })
 
     latest_by_berth = {}
+
     for row in berth_rows:
         b = row['berth']
         existing = latest_by_berth.get(b)
+
         row_dt = row['_commence_dt']
         existing_dt = existing['_commence_dt'] if existing else None
-        if not existing or (row_dt and (not existing_dt or row_dt > existing_dt)):
+
+        if not existing or (
+            row_dt and
+            (not existing_dt or row_dt > existing_dt)
+        ):
             latest_by_berth[b] = row
 
     berth_rows = list(latest_by_berth.values())
+
     for row in berth_rows:
         row.pop('_commence_dt', None)
 
-    # ✅ CHANGED — discharge_counts 
-    all_cargos = sorted(set(jetty_counts) | set(eta_counts) | set(discharge_counts))
+    # ── discharge_counts ──
+    all_cargos = sorted(
+        set(jetty_counts) |
+        set(eta_counts) |
+        set(discharge_counts)
+    )
+
     jetty_waiting = [
         {
             'cargo': c,
             'jetty': jetty_counts.get(c, 0),
             'eta': eta_counts.get(c, 0),
-            'discharge': discharge_counts.get(c, 0),   # ✅ NEW field
+            'discharge': discharge_counts.get(c, 0),
         }
         for c in all_cargos
     ]
@@ -3125,7 +3164,7 @@ def api_jetty_cargo_report_v2():
         'jetty_waiting': jetty_waiting,
         'total_jetty': sum(jetty_counts.values()),
         'total_eta': sum(eta_counts.values()),
-        'total_discharge': sum(discharge_counts.values()),   # ✅ NEW
+        'total_discharge': sum(discharge_counts.values()),
         'berth_discharge': berth_rows,
     })
     
