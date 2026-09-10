@@ -17,6 +17,7 @@ from .mbc_tracking      import views as _mbc_tracking_views    # noqa: registers
 from .port_map          import views as _port_map_views        # noqa: registers port-map routes on bp
 from .daily_barge_report import views as _mv_barge_report_views  # noqa: registers mv-barge-report routes on bp
 from .cargo_report import views as _cargo_report_views
+from .cargo_statistics import cargo_statistics as _cargo_statistics_views
 from .historical_data import views as _historical_data_views  # noqa: registers historical-data routes on bp
 from .Barge_Position_Report  import views as _barge_position_views
 
@@ -25,6 +26,7 @@ from .daily_progress_report import views as _daily_progress_report_views
 from .two_hour_report import views as _two_hour_report_views  # noqa: registers two-hour-report routes on bp
 from .port_overview import views as _port_overview_views  # noqa: registers port-overview routes on bp
 from .ai_chat import views as _ai_chat_views  # noqa: registers ai-chat routes on bp
+from .shift_cargo_balance import views as _shift_cargo_balance_views  # noqa: registers shift-cargo-balance routes on bp
 
 def login_required(f):
     @wraps(f)
