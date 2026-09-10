@@ -472,6 +472,9 @@ def upload_proof_docs():
     ldud_id = request.form.get('ldud_id')
     if not ldud_id:
         return jsonify({'error': 'Missing ldud_id'}), 400
+    # A closed record's evidence must not be swappable after the fact.
+    if model.get_doc_status(ldud_id) == 'Closed':
+        return jsonify({'error': 'Record is closed — send it back to Draft to change the proof'}), 403
 
     files = request.files.getlist('files')
     if not files:
