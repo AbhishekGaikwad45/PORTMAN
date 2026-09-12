@@ -87,8 +87,16 @@ def get_data(page=1, size=20, filters=None):
     try:
         cur.execute(f'SELECT COUNT(*) FROM ldud_header {where_sql}', params)
         total = cur.fetchone()['count']
-        cur.execute(f'SELECT * FROM ldud_header {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s',
-                    params + [size, (page - 1) * size])
+        cur.execute(f'''
+            SELECT *,
+                   (SELECT pd.id FROM ldud_proof_documents pd
+                     WHERE pd.ldud_id = ldud_header.id ORDER BY pd.id DESC LIMIT 1) AS _proof_doc_id,
+                   (SELECT pd.original_filename FROM ldud_proof_documents pd
+                     WHERE pd.ldud_id = ldud_header.id ORDER BY pd.id DESC LIMIT 1) AS _proof_filename,
+                   (SELECT COUNT(*) FROM ldud_proof_documents pd
+                     WHERE pd.ldud_id = ldud_header.id) AS _proof_count
+            FROM ldud_header {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s
+        ''', params + [size, (page - 1) * size])
         rows = [dict(r) for r in cur.fetchall()]
 
         # Collect vcn_ids to batch-fetch computed fields
@@ -698,6 +706,11 @@ def get_closure_eligibility(ldud_id):
         hc_incomplete = cur.fetchone()['count']
         if hc_incomplete > 0:
             missing.append(f'Hold Completion — {hc_incomplete} hold(s) missing Commenced/Completed dates')
+
+    # Proof of Quantity: uploaded from the Proof of Qty grid column
+    cur.execute('SELECT COUNT(*) FROM ldud_proof_documents WHERE ldud_id=%s', (ldud_id,))
+    if cur.fetchone()['count'] == 0:
+        missing.append('Proof of Quantity — document must be uploaded (Proof of Qty column)')
 
     # Vessel operations total vs BL total
     vcn_id = header['vcn_id']

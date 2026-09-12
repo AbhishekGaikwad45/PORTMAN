@@ -409,6 +409,8 @@
         </div>
     </div>
 </div>
+<!-- Shared hidden input for the Proof of Qty grid column (anyone can upload) -->
+<input type="file" id="proofColInput" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadProofColumn()">
 <!-- Closure Modal -->
 <div id="closureModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
     <div style="background:white;border-radius:8px;padding:24px;max-width:480px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
@@ -421,20 +423,8 @@
         <!-- Eligible content -->
         <div id="closureEligibleSection" style="display:none;">
             <div id="closureQtyInfo" style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px;"></div>
-            <!-- Proof of Quantity (mandatory) -->
-            <div style="margin-bottom:14px;">
-                <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">
-                    Proof of Quantity <span style="color:#e53e3e">*</span>
-                    <span style="font-size:11px;color:#718096;font-weight:400;">&nbsp;mandatory — multiple files allowed</span>
-                </label>
-                <div id="closureDocsList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:4px;"></div>
-                <input type="file" id="closureDocsInput" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadProofDocs()">
-                <button type="button" onclick="document.getElementById('closureDocsInput').click()"
-                        style="padding:6px 14px;background:#ebf8ff;border:1px dashed #3182ce;border-radius:4px;cursor:pointer;font-size:12px;color:#2b6cb0;font-weight:500;">
-                    + Upload Proof of Quantity
-                </button>
-                <div id="closureDocsUploading" style="display:none;font-size:12px;color:#718096;margin-top:4px;">Uploading…</div>
-            </div>
+            <!-- Proof of Quantity — uploaded from the Proof of Qty grid column -->
+            <div id="closureProofView" style="margin-bottom:14px;font-size:12px;"></div>
             <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Confirm your password <span style="color:#e53e3e">*</span></label>
             <input type="password" id="closurePassword" placeholder="Enter your login password…" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;margin-bottom:14px;">
             <div style="display:flex;gap:8px;">
@@ -973,6 +963,24 @@
             },
             {title: "Created By", field: "created_by", width: 90},
             {title: "Material PO", field: "material_po_number", editor: canEdit ? "input" : false, width: 120},
+            {
+                title: "Proof of Qty", field: "_proof_doc_id", width: 150, headerSort: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    let html = '';
+                    if (data._proof_doc_id) {
+                        const name = data._proof_filename || 'file';
+                        const short = name.length > 14 ? name.slice(0, 13) + '…' : name;
+                        const extra = (data._proof_count || 1) > 1 ? ` +${data._proof_count - 1}` : '';
+                        html += `<a href="/api/module/LDUD01/proof_docs/file/${data._proof_doc_id}" target="_blank" title="${name}" onclick="event.stopPropagation()" style="color:#2b6cb0;text-decoration:underline;font-size:11px;">📄 ${short}${extra}</a>`;
+                    }
+                    if ((data.doc_status || 'Draft') !== 'Closed') {
+                        html += `<button class="btn-info-closure" style="margin-left:6px;padding:2px 6px;" onclick="triggerProofUpload(${data.id}, event)" title="Upload proof of quantity">+ Upload</button>`;
+                    }
+                    return html || '<span style="color:#a0aec0;font-size:11px;">—</span>';
+                }
+            },
             {
                 title: "Closure", field: "_closure_actions", width: 110, headerSort: false,
                 formatter: function(cell) {
@@ -3764,9 +3772,7 @@ if (type === 'delays') {
         closureTargetId = id;
         closureUploadedDocs = [];
         document.getElementById('closurePassword').value = '';
-        document.getElementById('closureDocsList').innerHTML = '';
-        document.getElementById('closureDocsInput').value = '';
-        document.getElementById('closureDocsUploading').style.display = 'none';
+        document.getElementById('closureProofView').innerHTML = '';
         document.getElementById('closureMissingSection').style.display = 'none';
         document.getElementById('closureEligibleSection').style.display = 'none';
         document.getElementById('closureModal').style.display = 'flex';
@@ -3788,6 +3794,18 @@ if (type === 'delays') {
             document.getElementById('btnPartialClose').style.display = check.can_full_close ? 'none' : 'block';
             document.getElementById('closureEligibleSection').style.display = 'block';
         }
+
+        // Read-only view of the proofs (uploaded from the Proof of Qty grid column).
+        try {
+            const dres = await fetch(`/api/module/LDUD01/proof_docs/${id}`);
+            const ddata = await dres.json();
+            closureUploadedDocs = ddata.docs || [];
+            const view = document.getElementById('closureProofView');
+            view.innerHTML = closureUploadedDocs.length
+                ? 'Proof of Quantity: ' + closureUploadedDocs.map(d =>
+                    `<a href="/api/module/LDUD01/proof_docs/file/${d.id}" target="_blank" style="color:#2b6cb0;text-decoration:underline;">📄 ${d.original_filename}</a>`).join(', ')
+                : '<span style="color:#c53030;">No Proof of Quantity uploaded — use the Proof of Qty column in the grid.</span>';
+        } catch(e) {}
     }
 
     async function showClosureInfo(id) {
@@ -3806,40 +3824,46 @@ if (type === 'delays') {
         closureTargetId = null;
     }
 
-    async function uploadProofDocs() {
-        const input = document.getElementById('closureDocsInput');
-        const files = input.files;
-        if (!files || !files.length) return;
+    // Proof of Qty grid column upload (anyone can fill; files are added to the record)
+    let proofUploadTargetId = null;
 
-        document.getElementById('closureDocsUploading').style.display = 'block';
+    function triggerProofUpload(id, event) {
+        if (event) event.stopPropagation();
+        proofUploadTargetId = id;
+        const input = document.getElementById('proofColInput');
+        input.value = '';
+        input.click();
+    }
+
+    async function uploadProofColumn() {
+        const input = document.getElementById('proofColInput');
+        if (!input.files || !input.files.length || !proofUploadTargetId) return;
         const fd = new FormData();
-        fd.append('ldud_id', closureTargetId);
-        for (const f of files) fd.append('files', f);
-
+        fd.append('ldud_id', proofUploadTargetId);
+        for (const f of input.files) fd.append('files', f);
         try {
             const res = await fetch('/api/module/LDUD01/proof_docs/upload', { method: 'POST', body: fd });
             const data = await res.json();
             if (data.error) { alert(data.error); return; }
-
-            const list = document.getElementById('closureDocsList');
-            for (const doc of data.docs) {
-                closureUploadedDocs.push(doc);
-                const item = document.createElement('div');
-                item.style.cssText = 'font-size:12px;color:#276749;background:#f0fff4;padding:3px 8px;border-radius:4px;display:flex;align-items:center;gap:6px;';
-                item.innerHTML = `<span>✓</span><span>${doc.original_filename}</span>`;
-                list.appendChild(item);
+            const doc = data.docs[data.docs.length - 1];
+            const row = table.getRows().find(r => r.getData().id === proofUploadTargetId);
+            if (row) {
+                const prev = row.getData()._proof_count || 0;
+                row.update({_proof_doc_id: doc.id, _proof_filename: doc.original_filename,
+                            _proof_count: prev + data.docs.length});
+                row.reformat();
             }
         } catch(e) {
             alert('Upload failed. Please try again.');
         } finally {
-            document.getElementById('closureDocsUploading').style.display = 'none';
             input.value = '';
+            proofUploadTargetId = null;
         }
     }
 
     async function confirmClose(closeType) {
         if (closureUploadedDocs.length === 0) {
-            alert('Please upload at least one Proof of Quantity document before closing.');
+            alert('Please upload at least one Proof of Quantity document (Proof of Qty column) before closing.');
             return;
         }
         const password = document.getElementById('closurePassword').value.trim();

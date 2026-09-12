@@ -56,7 +56,7 @@ Every request/response is logged in `integration_logs` (viewable in FSAP01/FLOG0
 | `Reference` | 16 | `DPPL/26-27/166` | **PMS document number.** SAP matches everything back on this — see §7 |
 | `Document_type` | 2 | `DR` / `DG` | `DR` = Invoice & Debit Note, `DG` = Credit Note |
 | `Customer_Code` | 10 | `I510257` | SAP customer code from the party master |
-| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TDS − TCS + round-off**, always positive. Built from the header's `subtotal`/`cgst`/`sgst`/`igst`, never from `total_amount` — that is a display total and already includes TCS. |
+| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TCS + round-off**, always positive — the customer debit equals the face value of the invoice (and the e-invoice `TotInvVal`). TDS is **not** netted off. Built from the header's `subtotal`/`cgst`/`sgst`/`igst`, never from `total_amount` — that is a display total and already includes TCS. |
 | `Business_place` | 4 | `5130` | SAP config; defaults to company code |
 | `Section_code` | 4 | `5130` | SAP config; defaults to company code |
 | `Text` | 25 | invoice number | Short narration |
@@ -228,7 +228,7 @@ Example — taxable 200,000.00, CGST/SGST 18,000.00 each, TDS 4,000.00:
 }
 ```
 
-Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 **+ 4,000** = `"240000.00"` (TDS is **added** in the header total).
+Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 = `"236000.00"` — TDS does **not** move the header total either way. The customer is invoiced the gross; they withhold the 4,000 when they pay. `TDS_GL`/`TDS_amount` are carried on the item for SAP's withholding records only.
 
 ### 5.5 TCS
 
@@ -249,7 +249,7 @@ Typically on sale-type transactions (e.g. scrap — header `Service_Sale: "A"`).
 }
 ```
 
-Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 **− 2,360** = `"233640.00"` (TCS is **subtracted** in the header total).
+Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 **+ 2,360** = `"238360.00"` (TCS is **added** — it is collected from the customer, so it is part of the receivable).
 
 ### 5.6 Round-off
 

@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Arrival Planner — RP03{% endblock %}
+
+{% macro chip(t) %}
+<div class="chip {{ t.kind|lower }}" title="{{ t.name }} {{ t.trip_label }} | last stamped: {{ t.last_stage }} at {{ t.last_at.strftime('%d-%m %H:%M') }} | typically {{ t.leg_p50 }} h from there (n={{ t.leg_n }}) | window {{ t.eta_p10.strftime('%d-%m %H:%M') }} to {{ t.eta_p90.strftime('%d-%m %H:%M') }}">
+    <span class="chip-eta">{{ t.eta.strftime('%H:%M') }}</span>
+    <span class="chip-name">{{ t.name }}</span>
+    {% if t.qty %}<span class="chip-qty">{{ '{:,.0f}'.format(t.qty) }} {{ t.uom }}</span>{% endif %}
+    {% if t.cargo %}<span class="chip-cargo">{{ t.cargo }}</span>{% endif %}
+    {% if t.via %}<span class="chip-via">ex {{ t.via }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro plain_row(t, when, note) %}
+<div class="plain-row">
+    <span class="tag {{ t.kind|lower }}">{{ t.kind }}</span>
+    <b>{{ t.name }}</b>
+    {% if t.trip_label %}<span class="muted">{{ t.trip_label }}</span>{% endif %}
+    {% if t.qty %}<span>{{ '{:,.0f}'.format(t.qty) }} {{ t.uom }}</span>{% endif %}
+    {% if t.cargo %}<span>{{ t.cargo }}</span>{% endif %}
+    {% if t.via %}<span class="muted">ex {{ t.via }}</span>{% endif %}
+    <span class="when">{{ when }}</span>
+    <span class="muted">{{ note }}</span>
+</div>
+{% endmacro %}
+
+{% block head %}
+<style>
+    .page-header { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+    .page-header h2 { margin:0; font-size:18px; color:var(--text-primary); }
+    .module-badge { background:#4a90d9; color:#fff; padding:3px 10px; border-radius:4px;
+                    font-size:11px; font-weight:700; letter-spacing:.5px; }
+    .breadcrumb { font-size:11px; color:var(--text-secondary); margin-bottom:14px; }
+    .breadcrumb a { color:#4a90d9; text-decoration:none; }
+    .breadcrumb a:hover { text-decoration:underline; }
+
+    .summary { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+               margin-bottom:14px; font-size:12px; color:var(--text-secondary); }
+    .pill { background:var(--bg-secondary); border:1px solid var(--border-color);
+            border-radius:20px; padding:4px 12px; }
+    .pill b { color:var(--text-primary); }
+    .pill.warn b { color:#e53e3e; }
+    .btn-refresh { margin-left:auto; background:#4a90d9; color:#fff; border:none;
+                   border-radius:4px; padding:6px 14px; font-size:12px; cursor:pointer;
+                   text-decoration:none; }
+
+    .cal { width:100%; border-collapse:collapse; table-layout:fixed;
+           border:1px solid var(--border-color); }
+    .cal th, .cal td { border:1px solid var(--border-color); vertical-align:top; }
+    .cal thead th { background:linear-gradient(180deg,#4a5568,#2d3748); color:#fff;
+                    font-size:12px; padding:8px; text-align:center; }
+    .cal thead th small { display:block; font-weight:400; opacity:.8; }
+    .cal .hour-col { width:78px; }
+    .cal td.hour { background:var(--bg-secondary); color:var(--text-secondary);
+                   font-size:11px; text-align:center; padding:7px 2px; white-space:nowrap; }
+    .cal td.slot { padding:3px; height:32px; }
+    .cal tr.is-now td { box-shadow:inset 0 2px 0 #e53e3e; }
+    .cal tr.is-now td.hour { color:#e53e3e; font-weight:700; }
+    .cal tr:nth-child(even) td.slot { background:rgba(127,127,127,.05); }
+
+    .chip { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; font-size:11px;
+            padding:4px 8px; margin:2px 0; border-radius:4px; border-left:3px solid;
+            background:var(--bg-secondary); color:var(--text-primary); cursor:help; }
+    .chip.barge { border-left-color:#38a169; }
+    .chip.mbc   { border-left-color:#dd6b20; }
+    .chip-eta   { font-weight:700; font-variant-numeric:tabular-nums; }
+    .chip-name  { font-weight:600; }
+    .chip-qty   { font-variant-numeric:tabular-nums; }
+    .chip-cargo, .chip-via { color:var(--text-secondary); }
+
+    .section { margin-top:22px; }
+    .section h3 { font-size:13px; margin:0 0 4px; color:var(--text-primary); }
+    .section p.hint { font-size:11px; color:var(--text-secondary); margin:0 0 8px; }
+    .plain-row { display:flex; flex-wrap:wrap; gap:10px; align-items:baseline;
+                 font-size:12px; padding:5px 8px; border-bottom:1px solid var(--border-color); }
+    .plain-row .when { margin-left:auto; font-variant-numeric:tabular-nums; }
+    .tag { font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px; color:#fff; }
+    .tag.barge { background:#38a169; }
+    .tag.mbc   { background:#dd6b20; }
+    .muted { color:var(--text-secondary); }
+    .empty { font-size:12px; color:var(--text-secondary); padding:6px 8px; }
+
+    details.basis { margin-top:24px; font-size:12px; color:var(--text-secondary); }
+    details.basis summary { cursor:pointer; color:#4a90d9; }
+    details.basis table { border-collapse:collapse; margin-top:8px; }
+    details.basis td, details.basis th { border:1px solid var(--border-color);
+                                         padding:3px 10px; text-align:left; }
+
+    @media (max-width:700px) {
+        .cal, .cal tbody, .cal tr, .cal td { display:block; width:auto; }
+        .cal thead { display:none; }
+        .cal tr { border-bottom:1px solid var(--border-color); }
+        .cal td.slot:empty { display:none; }
+        .cal td.hour { text-align:left; font-weight:700; }
+        .plain-row .when { margin-left:0; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <span class="module-badge">RP03</span>
+    <h2>Arrival Planner</h2>
+</div>
+<div class="breadcrumb"><a href="/">Home</a> / Reports / Arrival Planner</div>
+
+<div class="summary">
+    <span class="pill">Ops day from <b>{{ board.ops_start.strftime('%d-%m-%Y %H:%M') }}</b></span>
+    <span class="pill"><b>{{ board.inbound_count }}</b> arriving in the next 48 h</span>
+    {% if board.overdue %}<span class="pill warn"><b>{{ board.overdue|length }}</b> overdue</span>{% endif %}
+    <span class="pill"><b>{{ board.at_port|length }}</b> at port now</span>
+    <span class="pill">as of {{ board.now.strftime('%d-%m-%Y %H:%M') }} IST</span>
+    <a class="btn-refresh" href="{{ url_for('RP03.index') }}">Refresh</a>
+</div>
+
+<table class="cal">
+    <thead>
+        <tr>
+            <th class="hour-col">Hour</th>
+            {% for d in board.days %}
+            <th>{{ d.label }}
+                <small>{{ d.start.strftime('%a %d %b %H:%M') }} → {{ d.end.strftime('%a %d %b %H:%M') }}</small>
+            </th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for h in board.hours %}
+        {% set hi = loop.index0 %}
+        <tr class="{{ 'is-now' if h.now }}">
+            <td class="hour">{{ h.label }}</td>
+            {% for day in board.days %}
+            <td class="slot">
+                {% for t in board.slots[hi][loop.index0] %}{{ chip(t) }}{% endfor %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if board.overdue %}
+<div class="section">
+    <h3>Overdue — ETA passed, arrival not stamped ({{ board.overdue|length }})</h3>
+    <p class="hint">Either running late or the arrival milestone has not been entered yet.</p>
+    {% for t in board.overdue %}
+        {{ plain_row(t, 'ETA was ' ~ t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage ~ ' ' ~ t.last_at.strftime('%d-%m %H:%M')) }}
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="section">
+    <h3>At port now — arrived, discharge not complete ({{ board.at_port|length }})</h3>
+    <p class="hint">These are holding berths, so they matter when you plan the incoming ones.</p>
+    {% for t in board.at_port %}
+        {{ plain_row(t, 'arrived ' ~ t.arrived_at.strftime('%d-%m %H:%M'), '') }}
+    {% else %}
+        <div class="empty">Nothing at port.</div>
+    {% endfor %}
+</div>
+
+{% if board.beyond %}
+<div class="section">
+    <h3>Beyond the board — ETA past tomorrow ({{ board.beyond|length }})</h3>
+    {% for t in board.beyond %}
+        {{ plain_row(t, t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage) }}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if board.unknown %}
+<div class="section">
+    <h3>No ETA yet ({{ board.unknown|length }})</h3>
+    <p class="hint">The trip's latest milestone has too few past voyages to average, so no arrival time is offered. Listed so the cargo is not lost.</p>
+    {% for t in board.unknown %}
+        {{ plain_row(t, t.sort_at.strftime('%d-%m %H:%M'), 'last: ' ~ (t.last_stage or 'nothing stamped')) }}
+    {% endfor %}
+</div>
+{% endif %}
+
+<details class="basis">
+    <summary>How these ETAs are worked out</summary>
+    <p>No ETA is stored anywhere in the system, so each trip is placed at its latest
+       stamped milestone plus the median time this port has actually taken from that
+       milestone to arrival. Hover any chip for its p10–p90 window. Medians are
+       recomputed from completed trips on every page load; a stage needs at least
+       30 past voyages before it is used.</p>
+    <table>
+        <tr><th>Leg</th><th>Median hours to arrival</th><th>Voyages measured</th></tr>
+        {% for r in board.basis %}
+        <tr>
+            <td><span class="tag {{ r.kind|lower }}">{{ r.kind }}</span> {{ r.stage }}</td>
+            <td>{{ r.p50 }}</td>
+            <td>{{ r.n }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</details>
+{% endblock %}

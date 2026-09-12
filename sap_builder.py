@@ -13,7 +13,7 @@ Header fields (PORTBIRD spec):
   Reference              16 char — PMS doc number; for reversals: original SAP Document_Number
   Document_type          DR for Invoice / Debit Note, DG for Credit Note
   Customer_Code          10 char
-  Invoice_Amount         13 curr (taxable + GST + TDS - TCS + Round_off, always positive)
+  Invoice_Amount         13 curr (taxable + GST + TCS + Round_off, always positive)
   Business_place
   Section_code
   Text                   short narration (25 char)
@@ -349,12 +349,24 @@ def _build_items(lines, reference, amount_field='line_amount',
 
 
 def _total_invoice_amount(header, lines, amount_field='line_amount'):
-    """Return net invoice value (taxable + GST + TDS - TCS + Round_off).
+    """Return the receivable: taxable + GST + TCS + Round_off.
 
-    This is the documented PORTBIRD `Invoice_Amount` contract (SAP_Payload_Guide
-    §4). The taxable + GST base is rebuilt from the header's own components —
-    never from `total_amount`, which is a display total whose convention has
-    changed once already (it now includes TCS, which would double-count here).
+    This is the customer's debit line, and it must equal the face value of the
+    invoice the customer was handed — the same number the IRP validates as
+    `TotInvVal` (see einvoice_builder).
+
+      * TCS is collected *from* the customer, so it is part of what they owe.
+        It is added. Subtracting it (sign inverted 2026-05-15 .. 2026-09-11)
+        understated every TCS receivable by 2x the TCS.
+      * TDS does not appear at all. It is the customer's own withholding at
+        payment time, not a reduction of the invoice — `total_amount` and the
+        e-invoice `TotInvVal` both exclude it, so netting it off here would put
+        SAP out of step with the printed document. `TDS_GL`/`TDS_amount` still
+        ride on the ITEM for SAP's withholding-tax records.
+
+    The taxable + GST base is rebuilt from the header's own components — never
+    from `total_amount`, which is a display total that already includes TCS and
+    would double-count it here.
     """
     total = (float(header.get('subtotal') or 0)
              + float(header.get('cgst_amount') or 0)
@@ -366,15 +378,12 @@ def _total_invoice_amount(header, lines, amount_field='line_amount'):
         total += sum(float(l.get('sgst_amount') or 0) for l in lines)
         total += sum(float(l.get('igst_amount') or 0) for l in lines)
 
-    tds = float(header.get('tds_amount') or 0)
-    if not tds:
-        tds = sum(float(l.get('tds_amount') or 0) for l in lines)
     tcs = float(header.get('tcs_amount') or 0)
     if not tcs:
         tcs = sum(float(l.get('tcs_amount') or 0) for l in lines)
     round_off = float(header.get('round_off') or 0)
 
-    return total + tds - tcs + round_off
+    return total + tcs + round_off
 
 
 # ---------------------------------------------------------------------------
