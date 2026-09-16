@@ -2990,7 +2990,7 @@
                     {
                         label: 'Jetty Discharge (Steel)',
                         data: steel,
-                        backgroundColor: '#b7c9e2',
+                        backgroundColor: '#F28C28',
                         borderColor: '#8fa8c4',
                         borderWidth: 1,
                         categoryPercentage: 0.72,
@@ -4434,7 +4434,7 @@
 
         // Excel chart matches the UI: ONLY Steel Jetty, MBC, MV and Daily Consumption.
         const series = [
-    { col: 'AZ', title: 'Jetty Discharge (Steel)', color: 'B7C9E2', values: plotRows.map(r => r.steel) },
+    { col: 'AZ', title: 'Jetty Discharge (Steel)', color: 'F28C28', values: plotRows.map(r => r.steel) },
     { col: 'BA', title: 'MBC Discharge', color: 'F6D98B', values: plotRows.map(r => r.mbc) },
     { col: 'BB', title: 'MV Discharge', color: 'AEBBD1', values: plotRows.map(r => r.mv) },
     { col: 'BC', title: 'Daily Consumption', color: 'B9D9A7', values: plotRows.map(r => r.consumption) }
