@@ -111,7 +111,17 @@ def _fetch_berth_occupancy():
     cur = get_cursor(conn)
     cur.execute("""
         SELECT berth_layout FROM barge_position_report
-        ORDER BY report_date DESC, updated_at DESC
+            WHERE berth_layout IS NOT NULL
+              AND jsonb_array_length(berth_layout) > 0
+            ORDER BY
+                report_date DESC,
+                CASE shift
+                    WHEN 'C' THEN 3
+                    WHEN 'B' THEN 2
+                    WHEN 'A' THEN 1
+                    ELSE 0
+                END DESC,
+                updated_at DESC
         LIMIT 1
     """)
     row = cur.fetchone()
@@ -134,8 +144,9 @@ def _fetch_berth_occupancy():
         if not berth or berth == 'WAITING' or not name:
             continue
         lv = live.get(name.upper())
-        if lv is None and live:
-            continue
+        # The saved Barge Position layout is authoritative for placement.
+        # Keep the item visible even when the live row cannot be matched;
+        # live quantities and status still replace the saved values when found.
         commenced = (item.get('unloading_commenced') or item.get('commence_discharge_berth') or '').strip()
         if not commenced and lv:
             commenced = (lv.get('unloading_commenced') or lv.get('commence_discharge_berth') or '').strip()
