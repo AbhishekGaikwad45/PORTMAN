@@ -50,6 +50,13 @@ MAX_H = 240.0       # a leg longer than 10 days is a data error, not a voyage
 STALE_DAYS = 7      # a trip untouched this long is an abandoned document
 OPS_HOUR = 7        # the operational day runs 07:00 → 07:00
 HORIZON_DAYS = 2    # today + tomorrow
+SLOT_MIN = 30       # grid resolution
+SLOTS_PER_DAY = 24 * 60 // SLOT_MIN
+NO_PRIORITY = 9999  # unranked trips sort after ranked ones inside a slot
+# ponytail: a berth double-book is called on ETAs closer together than this.
+# There is no discharge-duration model — tune the constant, or measure per-berth
+# occupancy from completed trips if the false alarms start costing attention.
+BERTH_GAP_H = 6
 
 
 def _dt(val):
@@ -62,6 +69,88 @@ def _dt(val):
         return datetime.fromisoformat(str(val).strip())
     except Exception:
         return None
+
+
+def _int(val):
+    """Form fields arrive as strings; blank means 'not set', not zero."""
+    try:
+        return int(str(val).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _plans():
+    """{(kind, trip_id): plan row} — the only table this module owns."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('''
+        SELECT p.trip_kind, p.trip_id, p.berth_id, p.route_id, p.priority,
+               p.planned_at, p.remarks, p.updated_by, p.updated_at,
+               b.berth_name, r.route_name
+        FROM rp03_arrival_plan p
+        LEFT JOIN port_berth_master b ON b.id = p.berth_id
+        LEFT JOIN conveyor_routes   r ON r.id = p.route_id
+    ''')
+    out = {(r['trip_kind'], r['trip_id']): dict(r) for r in cur.fetchall()}
+    cur.close()
+    conn.close()
+    return out
+
+
+def _options():
+    """Berth and route choices for the assign form, straight from the masters."""
+    conn = get_db()
+    cur = get_cursor(conn)
+    cur.execute('SELECT id, berth_name FROM port_berth_master '
+                'ORDER BY berth_sequence NULLS LAST, berth_name')
+    berths = [dict(r) for r in cur.fetchall()]
+    cur.execute('SELECT id, route_name FROM conveyor_routes '
+                'WHERE is_active = 1 ORDER BY route_name')
+    routes = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return berths, routes
+
+
+def save_plan(form, user):
+    """Upsert one trip's plan. Everything blank deletes the row — a plan with
+    no berth, route, priority, pin or remark is the same as no plan."""
+    kind = (form.get('kind') or '').strip().upper()
+    if kind not in ('BARGE', 'MBC'):
+        raise ValueError('unknown trip kind: %r' % kind)
+    trip_id = _int(form.get('trip_id'))
+    if trip_id is None:
+        raise ValueError('missing trip id')
+    berth_id = _int(form.get('berth_id'))
+    route_id = _int(form.get('route_id'))
+    priority = _int(form.get('priority'))
+    planned = _dt(form.get('planned_at'))
+    remarks = (form.get('remarks') or '').strip() or None
+
+    conn = get_db()
+    cur = get_cursor(conn)
+    if not any((berth_id, route_id, priority, planned, remarks)):
+        cur.execute('DELETE FROM rp03_arrival_plan WHERE trip_kind = %s AND trip_id = %s',
+                    [kind, trip_id])
+    else:
+        cur.execute('''
+            INSERT INTO rp03_arrival_plan
+                (trip_kind, trip_id, berth_id, route_id, priority, planned_at,
+                 remarks, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (trip_kind, trip_id) DO UPDATE SET
+                berth_id   = EXCLUDED.berth_id,
+                route_id   = EXCLUDED.route_id,
+                priority   = EXCLUDED.priority,
+                planned_at = EXCLUDED.planned_at,
+                remarks    = EXCLUDED.remarks,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = EXCLUDED.updated_at
+        ''', [kind, trip_id, berth_id, route_id, priority, planned, remarks,
+              user, datetime.now()])
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def _fetch():
@@ -125,7 +214,7 @@ def _leg_table(rows, stages, arrival_col):
     return table
 
 
-def _open_trips(rows, stages, table, arrival_col, done_col, spec, now):
+def _open_trips(rows, stages, table, arrival_col, done_col, spec, now, plans):
     """Live trips, each tagged 'inbound' / 'arrived' / 'unknown'.
 
     One flat list rather than three, so the caller can pick the latest trip per
@@ -136,6 +225,8 @@ def _open_trips(rows, stages, table, arrival_col, done_col, spec, now):
     for r in rows:
         arrival = _dt(r[arrival_col])
         done = _dt(r[done_col])
+        if arrival and done:
+            continue                        # discharged and gone
         last = None
         for col, _label in stages:
             t = _dt(r.get(col))
@@ -145,6 +236,7 @@ def _open_trips(rows, stages, table, arrival_col, done_col, spec, now):
         if not seen_at or seen_at < now - timedelta(days=STALE_DAYS):
             continue                        # abandoned document, not a voyage
         trip = {
+            'id':         r['id'],
             'kind':       spec['kind'],
             'name':       (r[spec['name']] or '').strip(),
             'doc':        r.get('doc_num') or '',
@@ -157,30 +249,55 @@ def _open_trips(rows, stages, table, arrival_col, done_col, spec, now):
             'last_at':    last[1] if last else None,
             'sort_at':    seen_at,
         }
+        plan = plans.get((spec['kind'], r['id'])) or {}
+        trip.update({
+            'berth_id': plan.get('berth_id'), 'berth': plan.get('berth_name'),
+            'route_id': plan.get('route_id'), 'route': plan.get('route_name'),
+            'priority': plan.get('priority'), 'remarks': plan.get('remarks'),
+            'planned_by': plan.get('updated_by'),
+        })
         if arrival:
-            if done:
-                continue                    # discharged and gone
             trip.update({'bucket': 'arrived', 'arrived_at': arrival})
             trips.append(trip)
             continue
         band = table.get(last[0]) if last else None
-        if not band:
-            # Either no milestone at all, or one with too few past samples to
-            # average — show it, don't guess. Hiding it loses the cargo.
-            trip['bucket'] = 'unknown'
-            trips.append(trip)
-            continue
-        p10, p50, p90, n = band
-        trip.update({
-            'bucket':  'inbound',
-            'eta':     last[1] + timedelta(hours=p50),
-            'eta_p10': last[1] + timedelta(hours=p10),
-            'eta_p90': last[1] + timedelta(hours=p90),
-            'leg_p50': p50,
-            'leg_n':   n,
-        })
+        if band:
+            p10, p50, p90, n = band
+            trip.update({
+                'eta':     last[1] + timedelta(hours=p50),
+                'eta_p10': last[1] + timedelta(hours=p10),
+                'eta_p90': last[1] + timedelta(hours=p90),
+                'leg_p50': p50,
+                'leg_n':   n,
+            })
+        pinned = _dt(plan.get('planned_at'))
+        if pinned:
+            # The planner's slot wins; the derived ETA stays visible beside it so
+            # the plan drifting away from reality is something you can see.
+            trip['derived_eta'] = trip.get('eta')
+            if trip.get('eta'):
+                trip['drift_min'] = round((trip['eta'] - pinned).total_seconds() / 60)
+            trip.update({'eta': pinned, 'pinned': True})
+        # No band and no pin means either no milestone at all, or one with too
+        # few past samples to average — show it, don't guess. Hiding it loses
+        # the cargo.
+        trip['bucket'] = 'inbound' if trip.get('eta') else 'unknown'
         trips.append(trip)
     return trips
+
+
+def _flag_berth_clashes(trips):
+    """Mark trips sharing a berth within BERTH_GAP_H of each other."""
+    by_berth = defaultdict(list)
+    for t in trips:
+        when = t.get('eta') or t.get('arrived_at')
+        if t.get('berth_id') and when:
+            by_berth[t['berth_id']].append((when, t))
+    for group in by_berth.values():
+        group.sort(key=lambda p: p[0])
+        for (t1, a), (t2, b) in zip(group, group[1:]):
+            if (t2 - t1).total_seconds() / 3600 < BERTH_GAP_H:
+                a['berth_clash'] = b['berth_clash'] = True
 
 
 def _latest_per_vessel(trips):
@@ -193,10 +310,46 @@ def _latest_per_vessel(trips):
     return list(best.values())
 
 
+def _slot_time(ops_start, idx):
+    return (ops_start + timedelta(minutes=SLOT_MIN * idx)).strftime('%H:%M')
+
+
+def _merge_rows(slots, ops_start, live_idx):
+    """One row per slot, except that runs of slots empty on EVERY day collapse
+    into a single 'no arrivals' row. The live slot never merges, so the now-line
+    stays on the board even in the middle of a quiet stretch."""
+    def quiet(i):
+        return not any(slots[i]) and i != live_idx
+
+    rows, i, n = [], 0, len(slots)
+    while i < n:
+        if not quiet(i):
+            rows.append({'label': '%s–%s' % (_slot_time(ops_start, i),
+                                             _slot_time(ops_start, i + 1)),
+                         'now': i == live_idx, 'empty': False, 'span': 1,
+                         'cells': slots[i]})
+            i += 1
+            continue
+        j = i
+        while j < n and quiet(j):
+            j += 1
+        rows.append({'label': '%s – %s' % (_slot_time(ops_start, i),
+                                           _slot_time(ops_start, j)),
+                     'now': False, 'empty': True, 'span': j - i, 'cells': None})
+        i = j
+    return rows
+
+
+def _slot_order(t):
+    """Inside a slot: planner priority first, then ETA. Unranked sorts last."""
+    return (t['priority'] if t.get('priority') else NO_PRIORITY, t['eta'])
+
+
 def board(now=None):
-    """Two operational days of hourly arrival slots, plus what falls outside."""
+    """Two operational days of half-hourly arrival slots, plus what falls outside."""
     now = now or datetime.now()
     barges, mbcs = _fetch()
+    plans = _plans()
 
     barge_table = _leg_table(barges, BARGE_STAGES, BARGE_ARRIVAL)
     mbc_table   = _leg_table(mbcs,   MBC_STAGES,   MBC_ARRIVAL)
@@ -206,40 +359,40 @@ def board(now=None):
                     {'kind': 'BARGE', 'name': 'barge_name', 'qty': 'discharge_quantity',
                      'via': 'vessel_name',
                      'trip_label': lambda r: 'Trip %s' % r['trip_number'] if r.get('trip_number') else ''},
-                    now)
+                    now, plans)
         + _open_trips(mbcs, MBC_STAGES, mbc_table, MBC_ARRIVAL, MBC_DONE,
                       {'kind': 'MBC', 'name': 'mbc_name', 'qty': 'bl_quantity',
                        'via': 'load_port', 'trip_label': lambda r: r.get('doc_num') or ''},
-                      now))
+                      now, plans))
     inbound = [t for t in trips if t['bucket'] == 'inbound']
     at_port = [t for t in trips if t['bucket'] == 'arrived']
     unknown = [t for t in trips if t['bucket'] == 'unknown']
+    _flag_berth_clashes(inbound + at_port)
+    clashes = sum(1 for t in inbound + at_port if t.get('berth_clash'))
 
     # Operational day: before 07:00 we are still inside yesterday's ops day.
     ops_start = now.replace(hour=OPS_HOUR, minute=0, second=0, microsecond=0)
     if now.hour < OPS_HOUR:
         ops_start -= timedelta(days=1)
+    slot_secs = SLOT_MIN * 60
 
-    slots = [[[] for _ in range(HORIZON_DAYS)] for _ in range(24)]
+    slots = [[[] for _ in range(HORIZON_DAYS)] for _ in range(SLOTS_PER_DAY)]
     overdue, beyond = [], []
-    for t in sorted(inbound, key=lambda x: x['eta']):
-        offset = (t['eta'] - ops_start).total_seconds() / 3600
-        if offset < 0:
+    for t in sorted(inbound, key=_slot_order):
+        idx = int((t['eta'] - ops_start).total_seconds() // slot_secs)
+        if idx < 0:
             overdue.append(t)               # ETA has passed, arrival not stamped
-        elif offset >= 24 * HORIZON_DAYS:
+        elif idx >= SLOTS_PER_DAY * HORIZON_DAYS:
             beyond.append(t)
         else:
-            slots[int(offset) % 24][int(offset) // 24].append(t)
+            slots[idx % SLOTS_PER_DAY][idx // SLOTS_PER_DAY].append(t)
 
     days = [{'start': ops_start + timedelta(days=d),
              'end':   ops_start + timedelta(days=d + 1),
              'label': ('Today', 'Tomorrow')[d] if d < 2 else 'Day %d' % (d + 1)}
             for d in range(HORIZON_DAYS)]
-    live_hour = int((now - ops_start).total_seconds() // 3600)
-    hours = [{'label': '%s–%s' % ((ops_start + timedelta(hours=h)).strftime('%H:%M'),
-                                  (ops_start + timedelta(hours=h + 1)).strftime('%H:%M')),
-              'now': h == live_hour}
-             for h in range(24)]
+    live_idx = int((now - ops_start).total_seconds() // slot_secs)
+    berths, routes = _options()
 
     basis = ([{'kind': 'BARGE', 'stage': lbl, 'p50': barge_table[c][1], 'n': barge_table[c][3]}
               for c, lbl in BARGE_STAGES if c in barge_table] +
@@ -247,12 +400,14 @@ def board(now=None):
               for c, lbl in MBC_STAGES if c in mbc_table])
 
     return {
-        'now': now, 'ops_start': ops_start, 'days': days, 'hours': hours,
+        'now': now, 'ops_start': ops_start, 'days': days,
+        'rows': _merge_rows(slots, ops_start, live_idx),
         'slots': slots, 'overdue': overdue, 'beyond': beyond,
         'at_port': sorted(at_port, key=lambda x: x['arrived_at']),
         'unknown': sorted(unknown, key=lambda x: x['sort_at'], reverse=True),
         'inbound_count': sum(len(c) for row in slots for c in row),
-        'basis': basis,
+        'basis': basis, 'berths': berths, 'routes': routes, 'clashes': clashes,
+        'slot_secs': slot_secs,
     }
 
 
@@ -270,22 +425,58 @@ def _busy_stamp():
     return datetime.fromtimestamp(epochs[int(len(epochs) * 0.95)])
 
 
+def _check_merge():
+    """Pure check on the row merging — no DB, so it runs on any dataset."""
+    start = datetime(2026, 1, 1, OPS_HOUR)
+    empty = [[[] for _ in range(HORIZON_DAYS)] for _ in range(SLOTS_PER_DAY)]
+
+    rows = _merge_rows(empty, start, -1)         # nothing anywhere, no live slot
+    assert len(rows) == 1 and rows[0]['empty'] and rows[0]['span'] == SLOTS_PER_DAY
+
+    busy = [[[] for _ in range(HORIZON_DAYS)] for _ in range(SLOTS_PER_DAY)]
+    busy[5][1].append({'name': 'X'})             # occupied on the second day only
+    rows = _merge_rows(busy, start, 9)
+    assert sum(r['span'] for r in rows) == SLOTS_PER_DAY, 'rows must cover the day'
+    assert [r['span'] for r in rows] == [5, 1, 3, 1, SLOTS_PER_DAY - 10]
+    assert not rows[1]['empty'] and rows[1]['cells'] is busy[5]
+    assert rows[3]['now'] and not rows[3]['empty'], 'the live slot must never merge'
+    assert all(r['cells'] is None for r in rows if r['empty'])
+
+    a = {'berth_id': 1, 'eta': start, 'name': 'A'}
+    b = {'berth_id': 1, 'eta': start + timedelta(hours=BERTH_GAP_H - 1), 'name': 'B'}
+    c = {'berth_id': 1, 'eta': start + timedelta(hours=BERTH_GAP_H * 3), 'name': 'C'}
+    _flag_berth_clashes([a, b, c])
+    assert a.get('berth_clash') and b.get('berth_clash') and not c.get('berth_clash')
+
+
 def _demo(now=None):
     """Self-check: run against the live DB and assert the board holds together."""
+    _check_merge()
     b = board(now=now)
     if not b['inbound_count'] and now is None:
         # Every trip is older than STALE_DAYS: rewind to where the data ends so
         # the assertions below actually exercise a populated board.
         return _demo(now=_busy_stamp())
-    assert len(b['slots']) == 24 and all(len(r) == HORIZON_DAYS for r in b['slots'])
+    assert len(b['slots']) == SLOTS_PER_DAY
+    assert all(len(r) == HORIZON_DAYS for r in b['slots'])
     assert b['ops_start'].hour == OPS_HOUR
     assert b['ops_start'] <= b['now'] < b['ops_start'] + timedelta(days=1)
+    assert sum(r['span'] for r in b['rows']) == SLOTS_PER_DAY
+    assert not any(r['empty'] and r['cells'] for r in b['rows'])
     placed = [t for row in b['slots'] for cell in row for t in cell]
     assert len(placed) == b['inbound_count']
     for t in placed:
         assert b['ops_start'] <= t['eta'] < b['ops_start'] + timedelta(days=HORIZON_DAYS)
-        assert t['eta_p10'] <= t['eta'] <= t['eta_p90'], 'band inverted for %s' % t['name']
-        assert t['eta'] >= t['last_at'], 'ETA before its own milestone'
+        if t.get('pinned'):
+            if t.get('derived_eta'):
+                assert t['drift_min'] == round(
+                    (t['derived_eta'] - t['eta']).total_seconds() / 60), 'drift mismatch'
+        else:
+            assert t['eta_p10'] <= t['eta'] <= t['eta_p90'], 'band inverted for %s' % t['name']
+            assert t['eta'] >= t['last_at'], 'ETA before its own milestone'
+    for cell in (c for row in b['slots'] for c in row):
+        ranks = [_slot_order(t) for t in cell]
+        assert ranks == sorted(ranks), 'priority order broken inside a slot'
     for t in b['overdue']:
         assert t['eta'] < b['ops_start']
     names = [(t['kind'], t['name'].upper())
@@ -293,10 +484,15 @@ def _demo(now=None):
     assert len(names) == len(set(names)), 'a vessel appears on the board twice'
     for row in b['basis']:
         assert row['n'] >= MIN_N and 0 <= row['p50'] <= MAX_H
+    planned = [t for t in placed + b['overdue'] + b['at_port'] + b['unknown']
+               if t.get('berth_id') or t.get('route_id') or t.get('priority')]
     print('RP03 selfcheck OK @ %s — %d inbound in %d h, %d overdue, %d at port, %d no-ETA, '
-          'basis %d stages' % (b['now'].strftime('%Y-%m-%d %H:%M'), b['inbound_count'],
-                               24 * HORIZON_DAYS, len(b['overdue']), len(b['at_port']),
-                               len(b['unknown']), len(b['basis'])))
+          'basis %d stages, %d rows (%d merged), %d planned, %d berths, %d routes'
+          % (b['now'].strftime('%Y-%m-%d %H:%M'), b['inbound_count'],
+             24 * HORIZON_DAYS, len(b['overdue']), len(b['at_port']),
+             len(b['unknown']), len(b['basis']), len(b['rows']),
+             sum(1 for r in b['rows'] if r['empty']), len(planned),
+             len(b['berths']), len(b['routes'])))
 
 
 if __name__ == '__main__':

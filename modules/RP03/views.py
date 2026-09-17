@@ -1,6 +1,6 @@
 from functools import wraps
 
-from flask import render_template, session, redirect, url_for
+from flask import render_template, request, session, redirect, url_for
 
 from database import get_user_permissions
 from . import bp
@@ -30,3 +30,18 @@ def index():
         return render_template('no_access.html'), 403
     return render_template('rp03.html', username=session.get('username'),
                            permissions=perms, board=model.board())
+
+
+@bp.route('/module/RP03/assign', methods=['POST'])
+@login_required
+def assign():
+    """Berth / route / priority / pinned slot for one trip. RP03's own table —
+    nothing here touches the LDUD or MBC operational records."""
+    perms = get_perms()
+    if not perms.get('can_edit'):
+        return render_template('no_access.html'), 403
+    try:
+        model.save_plan(request.form, session.get('username'))
+    except ValueError:
+        return 'Invalid assignment', 400
+    return redirect(url_for('RP03.index'))
