@@ -2,17 +2,78 @@
 
 {% block title %}Arrival Planner — RP03{% endblock %}
 
-{% macro chip(t) %}
-<div class="chip {{ t.kind|lower }}" title="{{ t.name }} {{ t.trip_label }} | last stamped: {{ t.last_stage }} at {{ t.last_at.strftime('%d-%m %H:%M') }} | typically {{ t.leg_p50 }} h from there (n={{ t.leg_n }}) | window {{ t.eta_p10.strftime('%d-%m %H:%M') }} to {{ t.eta_p90.strftime('%d-%m %H:%M') }}">
-    <span class="chip-eta">{{ t.eta.strftime('%H:%M') }}</span>
-    <span class="chip-name">{{ t.name }}</span>
-    {% if t.qty %}<span class="chip-qty">{{ '{:,.0f}'.format(t.qty) }} {{ t.uom }}</span>{% endif %}
-    {% if t.cargo %}<span class="chip-cargo">{{ t.cargo }}</span>{% endif %}
-    {% if t.via %}<span class="chip-via">ex {{ t.via }}</span>{% endif %}
+{# Plan badges: what a planner has assigned, or nothing at all. #}
+{% macro plan_badges(t) %}
+    {% if t.berth %}<span class="asg berth {{ 'clash' if t.berth_clash }}"
+         title="{{ 'Berth double-booked within 6 h' if t.berth_clash else 'Assigned berth' }}">{{ t.berth }}</span>{% endif %}
+    {% if t.route %}<span class="asg route" title="Assigned route">{{ t.route }}</span>{% endif %}
+    {% if t.priority %}<span class="asg prio" title="Priority in this slot">P{{ t.priority }}</span>{% endif %}
+{% endmacro %}
+
+{# The write path. One plain form per trip, no JS: POST then redirect. #}
+{% macro assign_form(t, board, can_edit) %}
+{% if can_edit %}
+<details class="assign">
+    <summary>{{ 'edit plan' if (t.berth or t.route or t.priority or t.pinned) else 'plan' }}</summary>
+    <form method="post" action="{{ url_for('RP03.assign') }}">
+        <input type="hidden" name="kind" value="{{ t.kind }}">
+        <input type="hidden" name="trip_id" value="{{ t.id }}">
+        <label>Berth
+            <select name="berth_id">
+                <option value="">— none —</option>
+                {% for b in board.berths %}
+                <option value="{{ b.id }}" {% if b.id == t.berth_id %}selected{% endif %}>{{ b.berth_name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Route
+            <select name="route_id">
+                <option value="">— none —</option>
+                {% for r in board.routes %}
+                <option value="{{ r.id }}" {% if r.id == t.route_id %}selected{% endif %}>{{ r.route_name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Priority
+            <input type="number" name="priority" min="1" step="1" placeholder="—" value="{{ t.priority or '' }}">
+        </label>
+        <label>Pin to slot
+            <input type="datetime-local" name="planned_at" step="{{ board.slot_secs }}"
+                   value="{{ t.eta.strftime('%Y-%m-%dT%H:%M') if t.pinned else '' }}">
+        </label>
+        <label>Remarks
+            <input type="text" name="remarks" maxlength="200" value="{{ t.remarks or '' }}">
+        </label>
+        <div class="assign-actions">
+            <button type="submit">Save</button>
+            <span class="muted">Leave the slot blank to follow the predicted ETA. Clear every
+                field to remove the plan.{% if t.planned_by %} Last set by {{ t.planned_by }}.{% endif %}</span>
+        </div>
+    </form>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro chip(t, board, can_edit) %}
+<div class="chip {{ t.kind|lower }}{{ ' pinned' if t.pinned }}">
+    <div class="chip-head" title="{{ t.name }} {{ t.trip_label }} | last stamped: {{ t.last_stage or 'nothing' }}{% if t.last_at %} at {{ t.last_at.strftime('%d-%m %H:%M') }}{% endif %}{% if t.leg_p50 %} | typically {{ t.leg_p50 }} h from there (n={{ t.leg_n }}){% endif %}{% if t.eta_p10 %} | window {{ t.eta_p10.strftime('%d-%m %H:%M') }} to {{ t.eta_p90.strftime('%d-%m %H:%M') }}{% endif %}">
+        <span class="chip-eta">{{ t.eta.strftime('%H:%M') }}</span>
+        {% if t.pinned %}<span class="pin" title="Pinned by a planner">PIN</span>{% endif %}
+        <span class="chip-name">{{ t.name }}</span>
+        {% if t.qty %}<span class="chip-qty">{{ '{:,.0f}'.format(t.qty) }} {{ t.uom }}</span>{% endif %}
+        {% if t.cargo %}<span class="chip-cargo">{{ t.cargo }}</span>{% endif %}
+        {% if t.via %}<span class="chip-via">ex {{ t.via }}</span>{% endif %}
+        {{ plan_badges(t) }}
+    </div>
+    {% if t.pinned and t.derived_eta %}
+    <div class="drift">predicted {{ t.derived_eta.strftime('%d-%m %H:%M') }}
+        ({{ '%+d' % t.drift_min }} min vs plan)</div>
+    {% endif %}
+    {{ assign_form(t, board, can_edit) }}
 </div>
 {% endmacro %}
 
-{% macro plain_row(t, when, note) %}
+{% macro plain_row(t, when, note, board, can_edit) %}
 <div class="plain-row">
     <span class="tag {{ t.kind|lower }}">{{ t.kind }}</span>
     <b>{{ t.name }}</b>
@@ -20,8 +81,10 @@
     {% if t.qty %}<span>{{ '{:,.0f}'.format(t.qty) }} {{ t.uom }}</span>{% endif %}
     {% if t.cargo %}<span>{{ t.cargo }}</span>{% endif %}
     {% if t.via %}<span class="muted">ex {{ t.via }}</span>{% endif %}
+    {{ plan_badges(t) }}
     <span class="when">{{ when }}</span>
     <span class="muted">{{ note }}</span>
+    {{ assign_form(t, board, can_edit) }}
 </div>
 {% endmacro %}
 
@@ -51,23 +114,56 @@
     .cal thead th { background:linear-gradient(180deg,#4a5568,#2d3748); color:#fff;
                     font-size:12px; padding:8px; text-align:center; }
     .cal thead th small { display:block; font-weight:400; opacity:.8; }
-    .cal .hour-col { width:78px; }
+    .cal .hour-col { width:104px; }
     .cal td.hour { background:var(--bg-secondary); color:var(--text-secondary);
                    font-size:11px; text-align:center; padding:7px 2px; white-space:nowrap; }
-    .cal td.slot { padding:3px; height:32px; }
+    .cal td.slot { padding:3px; height:30px; }
+    .cal tr.quiet td { background:rgba(127,127,127,.04); color:var(--text-secondary);
+                       font-size:11px; font-style:italic; padding:5px 8px; height:auto; }
     .cal tr.is-now td { box-shadow:inset 0 2px 0 #e53e3e; }
     .cal tr.is-now td.hour { color:#e53e3e; font-weight:700; }
     .cal tr:nth-child(even) td.slot { background:rgba(127,127,127,.05); }
 
-    .chip { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; font-size:11px;
-            padding:4px 8px; margin:2px 0; border-radius:4px; border-left:3px solid;
-            background:var(--bg-secondary); color:var(--text-primary); cursor:help; }
+    .chip { font-size:11px; padding:4px 8px; margin:2px 0; border-radius:4px;
+            border-left:3px solid; background:var(--bg-secondary); color:var(--text-primary); }
+    .chip-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; cursor:help; }
     .chip.barge { border-left-color:#38a169; }
     .chip.mbc   { border-left-color:#dd6b20; }
+    .chip.pinned { outline:1px dashed rgba(74,144,217,.7); }
     .chip-eta   { font-weight:700; font-variant-numeric:tabular-nums; }
     .chip-name  { font-weight:600; }
     .chip-qty   { font-variant-numeric:tabular-nums; }
     .chip-cargo, .chip-via { color:var(--text-secondary); }
+    .pin { font-size:9px; font-weight:700; letter-spacing:.5px; color:#fff;
+           background:#4a90d9; border-radius:3px; padding:0 4px; }
+    .drift { font-size:10px; color:var(--text-secondary); margin-top:2px; }
+
+    /* planner assignments */
+    .asg { font-size:10px; font-weight:600; padding:1px 6px; border-radius:3px;
+           border:1px solid var(--border-color); background:var(--bg-primary);
+           color:var(--text-primary); white-space:nowrap; }
+    .asg.berth { border-color:#4a90d9; color:#4a90d9; }
+    .asg.route { border-color:#805ad5; color:#805ad5; }
+    .asg.prio  { border-color:#d69e2e; color:#d69e2e; font-variant-numeric:tabular-nums; }
+    .asg.clash { background:#e53e3e; border-color:#e53e3e; color:#fff; }
+
+    details.assign { margin-top:3px; }
+    details.assign > summary { font-size:10px; color:#4a90d9; cursor:pointer;
+                               list-style:none; width:max-content; }
+    details.assign > summary::marker { content:''; }
+    details.assign form { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end;
+                          margin-top:6px; padding:8px; border:1px solid var(--border-color);
+                          border-radius:4px; background:var(--bg-primary); }
+    details.assign label { display:flex; flex-direction:column; gap:2px; font-size:10px;
+                           color:var(--text-secondary); }
+    details.assign select, details.assign input { font-size:11px; padding:3px 5px;
+        border:1px solid var(--border-color); border-radius:3px;
+        background:var(--bg-secondary); color:var(--text-primary); }
+    details.assign input[name="priority"] { width:60px; }
+    details.assign .assign-actions { display:flex; align-items:center; gap:8px;
+                                     flex:1 1 100%; font-size:10px; }
+    details.assign button { background:#4a90d9; color:#fff; border:none; border-radius:3px;
+                            padding:5px 14px; font-size:11px; cursor:pointer; }
 
     .section { margin-top:22px; }
     .section h3 { font-size:13px; margin:0 0 4px; color:var(--text-primary); }
@@ -99,6 +195,7 @@
 {% endblock %}
 
 {% block content %}
+{% set can_edit = permissions.can_edit %}
 <div class="page-header">
     <span class="module-badge">RP03</span>
     <h2>Arrival Planner</h2>
@@ -110,6 +207,7 @@
     <span class="pill"><b>{{ board.inbound_count }}</b> arriving in the next 48 h</span>
     {% if board.overdue %}<span class="pill warn"><b>{{ board.overdue|length }}</b> overdue</span>{% endif %}
     <span class="pill"><b>{{ board.at_port|length }}</b> at port now</span>
+    {% if board.clashes %}<span class="pill warn"><b>{{ board.clashes }}</b> berth clash{{ '' if board.clashes == 1 else 'es' }}</span>{% endif %}
     <span class="pill">as of {{ board.now.strftime('%d-%m-%Y %H:%M') }} IST</span>
     <a class="btn-refresh" href="{{ url_for('RP03.index') }}">Refresh</a>
 </div>
@@ -126,16 +224,23 @@
         </tr>
     </thead>
     <tbody>
-        {% for h in board.hours %}
-        {% set hi = loop.index0 %}
-        <tr class="{{ 'is-now' if h.now }}">
-            <td class="hour">{{ h.label }}</td>
+        {% for row in board.rows %}
+        {% if row.empty %}
+        <tr class="quiet">
+            <td class="hour">{{ row.label }}</td>
+            <td colspan="{{ board.days|length }}">no arrivals
+                <span class="muted">({{ row.span }} × {{ board.slot_secs // 60 }} min)</span></td>
+        </tr>
+        {% else %}
+        <tr class="{{ 'is-now' if row.now }}">
+            <td class="hour">{{ row.label }}</td>
             {% for day in board.days %}
             <td class="slot">
-                {% for t in board.slots[hi][loop.index0] %}{{ chip(t) }}{% endfor %}
+                {% for t in row.cells[loop.index0] %}{{ chip(t, board, can_edit) }}{% endfor %}
             </td>
             {% endfor %}
         </tr>
+        {% endif %}
         {% endfor %}
     </tbody>
 </table>
@@ -145,7 +250,7 @@
     <h3>Overdue — ETA passed, arrival not stamped ({{ board.overdue|length }})</h3>
     <p class="hint">Either running late or the arrival milestone has not been entered yet.</p>
     {% for t in board.overdue %}
-        {{ plain_row(t, 'ETA was ' ~ t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage ~ ' ' ~ t.last_at.strftime('%d-%m %H:%M')) }}
+        {{ plain_row(t, 'ETA was ' ~ t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage ~ ' ' ~ t.last_at.strftime('%d-%m %H:%M'), board, can_edit) }}
     {% endfor %}
 </div>
 {% endif %}
@@ -154,7 +259,7 @@
     <h3>At port now — arrived, discharge not complete ({{ board.at_port|length }})</h3>
     <p class="hint">These are holding berths, so they matter when you plan the incoming ones.</p>
     {% for t in board.at_port %}
-        {{ plain_row(t, 'arrived ' ~ t.arrived_at.strftime('%d-%m %H:%M'), '') }}
+        {{ plain_row(t, 'arrived ' ~ t.arrived_at.strftime('%d-%m %H:%M'), '', board, can_edit) }}
     {% else %}
         <div class="empty">Nothing at port.</div>
     {% endfor %}
@@ -164,7 +269,7 @@
 <div class="section">
     <h3>Beyond the board — ETA past tomorrow ({{ board.beyond|length }})</h3>
     {% for t in board.beyond %}
-        {{ plain_row(t, t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage) }}
+        {{ plain_row(t, t.eta.strftime('%d-%m %H:%M'), 'last: ' ~ t.last_stage, board, can_edit) }}
     {% endfor %}
 </div>
 {% endif %}
@@ -174,7 +279,7 @@
     <h3>No ETA yet ({{ board.unknown|length }})</h3>
     <p class="hint">The trip's latest milestone has too few past voyages to average, so no arrival time is offered. Listed so the cargo is not lost.</p>
     {% for t in board.unknown %}
-        {{ plain_row(t, t.sort_at.strftime('%d-%m %H:%M'), 'last: ' ~ (t.last_stage or 'nothing stamped')) }}
+        {{ plain_row(t, t.sort_at.strftime('%d-%m %H:%M'), 'last: ' ~ (t.last_stage or 'nothing stamped'), board, can_edit) }}
     {% endfor %}
 </div>
 {% endif %}
