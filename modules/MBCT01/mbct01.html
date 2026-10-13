@@ -1,0 +1,2806 @@
+{% extends "base.html" %}
+
+{% block title %}MBC Timings - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+    .btn-approve {
+        background: #38a169; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-approve:hover { background: #276749; }
+    .btn-back-draft {
+        background: #744210; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-back-draft:hover { background: #553009; }
+    .btn-info-approval {
+        background: #3182ce; color: white; border: none;
+        padding: 2px 7px; border-radius: 4px; cursor: pointer;
+        font-size: 12px; font-weight: 700; line-height: 1.6;
+    }
+    .btn-info-approval:hover { background: #2b6cb0; }
+    .approval-badge {
+        padding: 2px 8px; border-radius: 12px;
+        font-size: 11px; font-weight: 600; cursor: pointer;
+        display: inline-block;
+    }
+    .detail-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 9999;
+        overflow: auto;
+    }
+    .detail-modal.active {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 20px;
+    }
+    .detail-modal-content {
+        background: white;
+        border-radius: 8px;
+        width: 95%;
+        max-width: 1400px;
+        margin: 20px auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        position: relative;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    .dark-theme .detail-modal-content {
+        background: #1e293b;
+        color: #e2e8f0;
+    }
+    .detail-modal-header {
+        padding: 20px;
+        border-bottom: 2px solid #3182ce;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: sticky;
+        top: 0;
+        background: white;
+        z-index: 10;
+    }
+    .dark-theme .detail-modal-header {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .detail-modal-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    .detail-modal-close {
+        background: #e53e3e;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .detail-modal-close:hover {
+        background: #c53030;
+    }
+    .detail-modal-body {
+        padding: 20px;
+    }
+    .sub-table-container {
+        background: #f8fafc;
+        padding: 15px;
+        border-bottom: 2px solid #3182ce;
+        box-sizing: border-box;
+        width: 100% !important;
+        overflow: hidden;
+        display: block;
+        margin: 0;
+    }
+    .btn-open-details {
+        background: #3182ce;
+        color: white;
+        border: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    .btn-open-details:hover {
+        background: #2c5282;
+    }
+    .dark-theme .sub-table-container {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .sub-section {
+        margin-bottom: 15px;
+        border: 1px solid #cbd5e0;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    .sub-section:last-child {
+        margin-bottom: 0;
+    }
+    .dark-theme .sub-section {
+        border-color: #475569;
+    }
+    .sub-section-header {
+        background: #e2e8f0;
+        padding: 10px 15px;
+        font-weight: 600;
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #1a202c;
+    }
+    .dark-theme .sub-section-header {
+        background: #334155;
+        color: #e2e8f0;
+    }
+    .sub-section-content {
+        background: white;
+        overflow-x: auto;
+    }
+    .dark-theme .sub-section-content {
+        background: #1e293b;
+    }
+    .sub-tabulator {
+        font-size: 11px;
+        width: 100% !important;
+    }
+    .sub-tabulator .tabulator-header {
+        background: #f1f5f9 !important;
+        border-bottom: 1px solid #cbd5e0 !important;
+    }
+    .sub-tabulator .tabulator-header .tabulator-col {
+        background: #f1f5f9 !important;
+        border-right: 1px solid #e2e8f0 !important;
+    }
+    .sub-tabulator .tabulator-header .tabulator-col-title {
+        color: #374151 !important;
+        font-weight: 600 !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header {
+        background: #475569 !important;
+        border-bottom: 1px solid #64748b !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header .tabulator-col {
+        background: #475569 !important;
+        border-right: 1px solid #64748b !important;
+    }
+    .dark-theme .sub-tabulator .tabulator-header .tabulator-col-title {
+        color: #e2e8f0 !important;
+    }
+    .btn-sub-add {
+        background: #48bb78;
+        color: white;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .btn-sub-add:hover {
+        background: #38a169;
+    }
+    .btn-sub-save {
+        background: #3182ce;
+        color: white;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .btn-sub-save:hover {
+        background: #2c5282;
+    }
+    .btn-sub-delete {
+        background: #fc8181;
+        color: white;
+        border: none;
+        padding: 3px 10px;
+        border-radius: 3px;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .btn-sub-delete:hover {
+        background: #f56565;
+    }
+    .sub-section-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    
+    .tug-activity-custom-header {
+        background: #1b4d79 !important;
+        border-bottom: 2px solid #143e6a !important;
+        color: #ffffff !important;
+        justify-content: center !important;
+        position: relative;
+    }
+    .tug-activity-custom-header > span {
+        font-weight: 800 !important;
+        font-size: 13px !important;
+    }
+    .tug-activity-custom-header .sub-section-actions {
+        position: absolute;
+        right: 15px;
+    }
+    .tug-activity-custom-header.dirty-section {
+        border-left: 4px solid #dd6b20 !important;
+        /* Keep background blue, or let it change? Better to keep the blue but maybe add an orange tint or just keep the border */
+    }
+
+    /* Tug Activity Header & Cell Styling (Matching Screenshot 3) */
+    .tug-tabulator.tabulator {
+        border: 1px solid #cbd5e0;
+    }
+    .tug-tabulator .tabulator-header {
+        background: #1b4d79 !important;
+        border-bottom: 2px solid #143e6a !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .tabulator-col {
+        background: #2e75b6 !important;
+        border-right: 1px solid #1f5080 !important;
+        border-bottom: 1px solid #1f5080 !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+        padding: 4px 6px !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .tabulator-col .tabulator-col-title {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 11px !important;
+        text-align: center !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .tabulator-col-group {
+        background: #245d91 !important;
+        border-right: 2px solid #103355 !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .tabulator-col-group .tabulator-col-title {
+        font-size: 12px !important;
+        font-weight: 800 !important;
+        color: #ffffff !important;
+        text-align: center !important;
+        padding: 5px !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .activity-header-col {
+        background: #1b4d79 !important;
+        border-right: 2px solid #103355 !important;
+    }
+    .sub-tabulator.tug-tabulator .tabulator-header .activity-header-col .tabulator-col-title {
+        color: #ffffff !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        line-height: 1.25 !important;
+        text-align: center !important;
+        white-space: normal !important;
+    }
+    .tug-tabulator .activity-cell {
+        background: #f8fafc !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+        border-right: 2px solid #cbd5e0 !important;
+    }
+    .tug-tabulator .tabulator-cell {
+        border-right: 1px solid #e2e8f0 !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        font-size: 11px !important;
+    }
+    .dark-theme .tug-tabulator .tabulator-header {
+        background: #0f172a !important;
+    }
+    .dark-theme .tug-tabulator .tabulator-col {
+        background: #1e3a5f !important;
+        border-color: #0f2744 !important;
+    }
+    .dark-theme .tug-tabulator .activity-cell {
+        background: #1e293b !important;
+        color: #f1f5f9 !important;
+        border-right-color: #475569 !important;
+    }
+    .dark-theme .tug-tabulator .tabulator-cell {
+        border-color: #334155 !important;
+    }
+    .tug-not-applicable {
+        color: #94a3b8 !important;
+        font-weight: bold;
+    }
+    /* Dirty section indicator */
+    .sub-section-header.dirty-section > span::after {
+        content: ' ●';
+        color: #e53e3e;
+        font-size: 16px;
+        margin-left: 8px;
+    }
+    /* Unsaved warning modal */
+    .unsaved-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 19999;
+        align-items: center;
+        justify-content: center;
+    }
+    .unsaved-modal-overlay.active { display: flex; }
+    .unsaved-modal-box {
+        background: white;
+        border-radius: 8px;
+        padding: 20px 24px;
+        max-width: 380px;
+        width: 90%;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .dark-theme .unsaved-modal-box { background: #1e293b; color: #e2e8f0; }
+    .unsaved-modal-box h4 { margin: 0 0 8px; font-size: 15px; }
+    .unsaved-modal-box ul { margin: 0 0 16px; padding-left: 18px; font-size: 13px; }
+    .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    /* Header unsaved banner */
+    .unsaved-banner {
+        display: none;
+        background: #fffbeb;
+        border: 1px solid #f6e05e;
+        color: #744210;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-weight: 500;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        align-items: center;
+        gap: 8px;
+    }
+    .unsaved-banner.visible { display: flex; }
+    .dark-theme .unsaved-banner { background: #2d3748; border-color: #4a5568; color: #fbd38d; }
+    /* Autosave toast */
+    .autosave-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #2d3748;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        z-index: 99999;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+    }
+    .autosave-toast.show { opacity: 1; }
+    /* Filter panel */
+    .filter-panel {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+    }
+    .dark-theme .filter-panel { background: #1e293b; border-color: #334155; }
+    .filter-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .filter-col-select, .filter-text-input, .filter-from, .filter-to {
+        padding: 4px 8px;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+        font-size: 12px;
+        background: white;
+    }
+    .dark-theme .filter-col-select,
+    .dark-theme .filter-text-input,
+    .dark-theme .filter-from,
+    .dark-theme .filter-to { background: #0f172a; color: #e2e8f0; border-color: #334155; }
+    .filter-multi-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+    }
+    .filter-multi-list label { display: flex; gap: 4px; align-items: center; font-size: 12px; cursor: pointer; }
+    .filter-remove {
+        background: none;
+        border: none;
+        color: #e53e3e;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 4px;
+        line-height: 1;
+    }
+    .filter-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .btn-filter-add { background: #edf2f7; color: #2d3748; border: 1px solid #cbd5e0; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-apply { background: #3182ce; color: white; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-clear { background: #e2e8f0; color: #2d3748; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .sub-save-status { font-size: 11px; color: #38a169; margin-left: 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>MBC Timings</h2>
+    <span class="module-code">MBCT01</span>
+    <span id="saveStatus" class="save-status"></span>
+</div>
+
+<div class="toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()">Delete Selected</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    {% if permissions.can_edit or permissions.can_add %}<button id="editModeBtn" class="btn" style="font-size:12px;padding:4px 12px;background:#805ad5;color:white;border:none;" onclick="toggleEditMode()">✏️ Edit</button>{% endif %}
+    <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="toggleFilterPanel()">⚙ Filters <span id="filterBadge" style="display:none;background:#3182ce;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <div class="row-info">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+<!-- Header unsaved banner -->
+<div id="unsavedBanner" class="unsaved-banner">
+    ⚠ You have unsaved header changes &mdash; <button class="btn btn-save" onclick="saveAll()" style="margin:0;padding:3px 10px;font-size:12px;">Save Now</button>
+</div>
+<div id="editModeBanner" style="display:none;background:#ebf8ff;border-left:4px solid #3182ce;color:#2b6cb0;padding:8px 14px;font-size:12px;">
+    ✏️ <b>Edit mode</b> — Check rows to select for editing, then modify cells and click <b>Save</b>.
+</div>
+<div id="filterPanel" class="filter-panel" style="display:none;">
+    <div id="filterRows"></div>
+    <div class="filter-actions">
+        <button class="btn-filter-add" onclick="addFilterRow()">+ Add Filter</button>
+        <button class="btn-filter-apply" onclick="applyFilters()">Apply</button>
+        <button class="btn-filter-clear" onclick="clearFilters()">Clear All</button>
+        <button onclick="saveCurrentFilter()" style="background:#48bb78;color:white;border:none;padding:5px 14px;border-radius:4px;font-size:12px;cursor:pointer;">💾 Save Filter</button>
+    </div>
+    <div id="savedFiltersBar" style="margin-top:8px;display:none;align-items:center;flex-wrap:wrap;gap:6px;">
+        <span style="font-size:11px;color:#718096;font-weight:600;white-space:nowrap;">Saved Filters:</span>
+        <div id="savedFiltersList" style="display:inline-flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+</div>
+
+<div id="table"></div>
+
+<div id="detailsModal" class="detail-modal">
+    <div class="detail-modal-content">
+        <div class="detail-modal-header">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <h3 id="modalTitle" style="margin:0;">Details</h3>
+                <span id="modalDirtyBadge" style="display:none;background:#fed7d7;color:#c53030;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">⚠ Unsaved changes</span>
+                <span id="modalLockBanner" style="display:none;"></span>
+            </div>
+            <button class="detail-modal-close" onclick="closeDetailsModal()">Close</button>
+        </div>
+        <div class="detail-modal-body">
+            <div id="modalSubTables"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Shared hidden input for the Proof of Qty grid column (anyone can upload) -->
+<input type="file" id="proofColInput" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv,.doc,.docx" style="display:none;" onchange="uploadProofColumn()">
+
+<!-- Approval Info Modal -->
+<div id="approvalInfoModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:480px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px;font-size:16px;font-weight:600;">Approval Checklist</h3>
+        <div id="approvalInfoBody" style="font-size:13px;margin-bottom:16px;"></div>
+        <div id="approvalProofView" style="display:none;margin-bottom:14px;font-size:12px;"></div>
+        <div id="approvalPasswordSection" style="display:none;margin-bottom:14px;">
+            <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Confirm your password <span style="color:#e53e3e">*</span></label>
+            <input type="password" id="approvalPassword" placeholder="Enter your login password…" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;">
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button onclick="closeApprovalInfoModal()" style="padding:6px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Close</button>
+            <button id="approvalInfoApproveBtn" style="display:none;padding:6px 18px;background:#38a169;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;" onclick="confirmApprove()">✓ Approve</button>
+        </div>
+    </div>
+</div>
+
+<!-- Send Back to Draft Modal -->
+<div id="sendBackModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:8px;padding:24px;max-width:420px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px;font-size:16px;font-weight:600;">Send Back to Draft</h3>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;">Reason <span style="color:#e53e3e">*</span></label>
+        <textarea id="sendBackComment" rows="4" placeholder="Enter reason for sending back to Draft..." style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e0;border-radius:4px;font-size:13px;resize:vertical;"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+            <button onclick="closeSendBackModal()" style="padding:6px 18px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+            <button onclick="confirmSendBack()" style="padding:6px 18px;background:#744210;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">↩ Send Back</button>
+        </div>
+    </div>
+</div>
+<!-- Unsaved Changes Warning Modal -->
+<div id="unsavedModal" class="unsaved-modal-overlay">
+    <div class="unsaved-modal-box">
+        <h4>⚠ Unsaved Changes</h4>
+        <p style="font-size:13px;margin:0 0 8px;">The following sections have unsaved changes:</p>
+        <ul id="unsavedSectionList"></ul>
+        <div class="unsaved-modal-actions">
+            <button onclick="unsavedGoBack()" style="padding:6px 14px;border:1px solid #cbd5e0;background:white;border-radius:4px;cursor:pointer;font-size:13px;">Go Back</button>
+            <button onclick="unsavedDiscard()" style="padding:6px 14px;background:#e53e3e;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">Discard &amp; Close</button>
+            <button onclick="unsavedSaveAll()" style="padding:6px 14px;background:#38a169;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Save All &amp; Close</button>
+        </div>
+    </div>
+</div>
+<!-- Autosave Toast -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('MBCT01', 'MBC Timings');
+
+    
+let table;
+let availableDocs = [];
+let availableDocsMap = {};
+
+// Fetch available documents
+async function loadAvailableDocs() {
+    try {
+        const res = await fetch('/api/module/MBCT01/available_docs');
+        const data = await res.json();
+        availableDocs = data.map(d => ({label: d.doc_num, value: d.id}));
+        data.forEach(d => {
+            availableDocsMap[d.id] = d;
+        });
+    } catch(e) {
+        console.error("Error loading available docs:", e);
+    }
+}
+
+    let docSeriesList = [];
+    let defaultDocSeries = '';
+    let mbcList = [];
+    let portList = [];
+    let operationTypes = [];
+    let cargoTypes = [];
+    let cargoNames = [];
+    let cargoByType = {};
+    let uomList = [];
+    let defaultUom = '';
+    let berthList = [];
+    let payloaderList = [];
+    let customerList = [];
+    let equipmentList = [];
+    let tugList = [];
+    let subTables = {};
+    let currentMbcId = null;
+    let currentBlQty = null;
+
+    // Dirty tracking
+    let dirtySubSections = {};
+    let headerDirty = false;
+    let _isSaving = false;
+    let dirtyRowIds = new Set();
+    let moduleConfig = {};
+
+    const currentUser = '{{ session.username }}';
+    const permissions = {
+        can_read: {{ permissions.can_read|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+
+    function getTodayDate() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    function showStatus(message, type) {
+        const status = document.getElementById('saveStatus');
+        status.textContent = message;
+        status.className = 'save-status ' + type;
+        if (type === 'saved') {
+            setTimeout(() => { status.textContent = ''; status.className = 'save-status'; }, 2000);
+        }
+    }
+
+    function showUnsavedBanner() {
+        document.getElementById('unsavedBanner').classList.add('visible');
+    }
+    function hideUnsavedBanner() {
+        document.getElementById('unsavedBanner').classList.remove('visible');
+        headerDirty = false;
+    }
+
+    function markDirty(section) {
+        dirtySubSections[section] = true;
+        const header = document.querySelector(`[data-section="${section}"]`) || document.getElementById(`${section}-header-${currentMbcId}`);
+        if (header) header.classList.add('dirty-section');
+        const span = document.getElementById(`${section}-status-${currentMbcId}`);
+        if (span) span.classList.add('dirty');
+        updateModalDirtyBadge();
+    }
+
+    function clearDirty(section) {
+        dirtySubSections[section] = false;
+        const header = document.querySelector(`[data-section="${section}"]`) || document.getElementById(`${section}-header-${currentMbcId}`);
+        if (header) header.classList.remove('dirty-section');
+        const span = document.getElementById(`${section}-status-${currentMbcId}`);
+        if (span) span.classList.remove('dirty');
+        updateModalDirtyBadge();
+    }
+
+    function clearAllDirty() {
+        dirtySubSections = {};
+        document.querySelectorAll('.sub-section-header.dirty-section').forEach(el => el.classList.remove('dirty-section'));
+        updateModalDirtyBadge();
+    }
+
+    function updateModalDirtyBadge() {
+        const hasDirty = Object.values(dirtySubSections).some(Boolean);
+        const badge = document.getElementById('modalDirtyBadge');
+        if (badge) badge.style.display = hasDirty ? 'inline-block' : 'none';
+    }
+
+    function getDirtySections() {
+        return Object.entries(dirtySubSections).filter(([,v]) => v).map(([k]) => k);
+    }
+
+    function showSubStatus(type, parentId, msg) {
+        const header = document.querySelector(`[data-section="${type}"]`);
+        if (!header) return;
+        let status = header.querySelector('.sub-save-status');
+        if (!status) {
+            status = document.createElement('span');
+            status.className = 'sub-save-status';
+            header.querySelector('.sub-section-actions').appendChild(status);
+        }
+        status.textContent = msg;
+        setTimeout(() => { status.textContent = ''; }, 3000);
+    }
+
+    function unsavedGoBack() {
+        document.getElementById('unsavedModal').classList.remove('active');
+    }
+
+    function unsavedDiscard() {
+        document.getElementById('unsavedModal').classList.remove('active');
+        closeDetailsModal(true);
+    }
+
+    async function unsavedSaveAll() {
+        const dirty = getDirtySections();
+        for (const section of dirty) {
+            await saveSubTable(section, currentMbcId, true);
+        }
+        document.getElementById('unsavedModal').classList.remove('active');
+        if (getDirtySections().length === 0) {
+            closeDetailsModal(true);
+        }
+    }
+
+    async function loadMasterData() {
+        await loadAvailableDocs();
+        const [dsRes, mbcRes, otRes, ctRes, cnRes, uomRes, berthRes, pplRes, custRes, equipRes, tugRes, configRes, portRes] = await Promise.all([
+            fetch('/api/module/MBCDS01/all'),
+            fetch('/api/module/MBCM01/all'),
+            fetch('/api/module/LUEU01/operation-types'),
+            fetch('/api/module/VCG01/types'),
+            fetch('/api/module/VCG01/all'),
+            fetch('/api/module/VQM01/all'),
+            fetch('/api/module/PBM01/all'),
+            fetch('/api/module/PPL01/all'),
+            fetch('/api/module/VCUM01/all'),
+            fetch('/api/module/VEM01/all'),
+            fetch('/api/module/TGM01/all'),
+            fetch('/admin/api/config/MBCT01'),
+            fetch('/api/module/VPM01/all'),
+        ]);
+        const dsData = await dsRes.json();
+        docSeriesList = dsData.map(d => d.name);
+        const defaultDs = dsData.find(d => d.is_default);
+        defaultDocSeries = defaultDs ? defaultDs.name : '';
+        mbcList = await mbcRes.json();
+        operationTypes = await otRes.json();
+        cargoTypes = await ctRes.json();
+        const cnData = await cnRes.json();
+        cargoByType = {};
+        cnData.forEach(c => {
+            if (c.cargo_type) {
+                if (!cargoByType[c.cargo_type]) cargoByType[c.cargo_type] = [];
+                if (c.cargo_name && !cargoByType[c.cargo_type].includes(c.cargo_name))
+                    cargoByType[c.cargo_type].push(c.cargo_name);
+            }
+        });
+        cargoNames = [...new Set(cnData.map(c => c.cargo_name).filter(Boolean))].sort();
+        uomList = await uomRes.json();
+        const uomDefaultRes = await fetch('/api/module/VQM01/default');
+        const uomDefaultData = await uomDefaultRes.json();
+        defaultUom = uomDefaultData.default || '';
+        berthList = await berthRes.json();
+        payloaderList = await pplRes.json();
+        customerList = await custRes.json();
+        equipmentList = await equipRes.json();
+        tugList = await tugRes.json();
+        moduleConfig = await configRes.json();
+        portList = await portRes.json();
+        initFilterConfig();
+        initTable();
+    }
+
+    // datetimeEditor and dateEditor are now global (defined in base.html), but we override datetimeEditor here for immediate validation
+    var datetimeEditor = function(cell, onRendered, success, cancel) {
+        var cellValue = cell.getValue() || '';
+        var input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "DD-MM-YYYY HH:MM";
+        input.maxLength = 16;
+        input.value = _dbToDisplay(cellValue);
+        input.style.width = "100%";
+        input.style.boxSizing = "border-box";
+        input.style.padding = "4px";
+        input.style.fontFamily = "monospace";
+        input.style.fontSize = "12px";
+        var resolved = false;
+
+        _maskDatetime(input);
+
+        function complete() {
+            if (resolved) return;
+            resolved = true;
+            
+            var rawInput = input.value.trim();
+            if (!rawInput) {
+                success('');
+                return;
+            }
+            
+            var dbVal = _displayToDb(rawInput);
+            if (!dbVal) {
+                alert('Invalid date/time format.\n\nPlease enter a valid date and time (e.g., DD-MM-YYYY HH:mm).');
+                cancel();
+                return;
+            }
+            
+            if (!parseValidationDate(dbVal)) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time (e.g., DD-MM-YYYY HH:mm).');
+                cancel();
+                return;
+            }
+            
+            success(dbVal);
+        }
+
+        onRendered(function() { input.focus(); input.select(); input.style.height = "100%"; });
+        input.addEventListener("blur", function() { complete(); });
+        input.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") complete();
+            if (e.key === "Escape") { resolved = true; cancel(); }
+        });
+        return input;
+    };
+
+    let isApprover = false;
+    const isAdmin = {{ 'true' if session.get('is_admin') else 'false' }};
+    let editMode = false;
+
+    function isDraftRow(docStatus) {
+        return !docStatus || docStatus === 'Draft' || docStatus === 'Pending';
+    }
+    let currentModalData = null;
+
+    function initTable() {
+        isApprover = moduleConfig.approver_id == '{{ session.user_id }}' || isAdmin;
+        const canEdit = permissions.can_edit || permissions.can_add;
+
+        const dsOptions = {};
+        docSeriesList.forEach(d => { dsOptions[d] = d; });
+
+        const mbcOptions = {};
+        mbcList.forEach(m => { mbcOptions[m] = m; });
+
+        const portOptions = {};
+        portList.forEach(p => { portOptions[p] = p; });
+
+        const otOptions = {};
+        operationTypes.forEach(o => { otOptions[o] = o; });
+
+        const ctOptions = {};
+        cargoTypes.forEach(c => { ctOptions[c] = c; });
+
+        const uomOptions = {};
+        uomList.forEach(u => { uomOptions[u] = u; });
+
+        const columns = [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {
+                title: "Details",
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    return '<button class="btn-open-details">+</button>';
+                },
+                width: 70,
+                hozAlign: "center",
+                headerSort: false,
+                cellClick: function(e, cell) {
+                    const row = cell.getRow();
+                    const data = row.getData();
+                    if (!data.id) return;
+                    openDetailsModal(data);
+                }
+            },
+            {title: "Operation Type", field: "operation_type", editor: false, width: 110,
+                editorParams: {values: {'Import': 'Import', 'Export': 'Export'}}},
+            {title: "Doc Num", field: "doc_num", width: 140, 
+                editor: canEdit ? "list" : false, 
+                editorParams: {
+                    values: availableDocs,
+                    autocomplete: true,
+                    listOnEmpty: true,
+                    clearable: true
+                },
+                cellEdited: function(cell) {
+                    const row = cell.getRow();
+                    const docId = cell.getValue();
+                    if (docId && availableDocsMap[docId]) {
+                        const doc = availableDocsMap[docId];
+                        row.update({
+                            mbc_id: doc.id,
+                            doc_num: doc.doc_num,
+                            doc_date: doc.doc_date,
+                            mbc_name: doc.mbc_name,
+                            operation_type: doc.operation_type,
+                            load_port: doc.load_port,
+                            cargo_name: doc.cargo_name,
+                            bl_quantity: doc.bl_quantity,
+                            doc_status: doc.doc_status
+                        });
+                        markDirty(row);
+                    }
+                }
+            },
+            {title: "Doc Series", field: "doc_series", editor: false, width: 100,
+                editorParams: {values: dsOptions, autocomplete: true, allowEmpty: true}},
+            {title: "Doc Date", field: "doc_date", width: 100, editor: false},
+            {title: "MBC Name", field: "mbc_name", editor: false, width: 120,
+                editorParams: {values: mbcOptions, autocomplete: true, allowEmpty: true}},
+            {title: "Load Port", field: "load_port", editor: false, width: 120,
+                editorParams: {values: portOptions, autocomplete: true, allowEmpty: true}},
+            {title: "Cargo Type", field: "cargo_type", editor: false, width: 100,
+                editorParams: {values: ctOptions, autocomplete: true, allowEmpty: true}},
+            {title: "Cargo Name", field: "cargo_name", editor: false, width: 120,
+                editorParams: function(cell) {
+                    const type = cell.getRow().getData().cargo_type;
+                    const names = (type && cargoByType[type]) ? cargoByType[type] : cargoNames;
+                    const opts = {};
+                    names.forEach(n => { opts[n] = n; });
+                    return {values: opts, autocomplete: true, allowEmpty: true};
+                }},
+            {title: "BL Qty", field: "bl_quantity", editor: false, width: 80, hozAlign: "right",
+                editorParams: {min: 0, step: 0.01}},
+            {title: "UOM", field: "quantity_uom", editor: false, width: 70,
+                editorParams: {values: uomOptions, autocomplete: true, allowEmpty: true}},
+            {title: "Status", field: "doc_status", width: 105, headerSort: false,
+                formatter: function(cell) {
+                    const val = cell.getValue() || 'Draft';
+                    const id = cell.getRow().getData().id;
+                    let color, bg;
+                    if (val === 'Approved') { color = '#276749'; bg = '#c6f6d5'; }
+                    else { color = '#744210'; bg = '#fefcbf'; }
+                    const click = id ? `onclick="showApprovalLog(${id}, event)"` : '';
+                    return `<span class="approval-badge" style="background:${bg};color:${color};" ${click} title="Click for history">${val}</span>`;
+                }
+            },
+            {title: "Created By", field: "created_by", width: 90},
+            {
+                title: "Proof of Qty", field: "_proof_doc_id", width: 150, headerSort: false, visible: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    let html = '';
+                    if (data._proof_doc_id) {
+                        const name = data._proof_filename || 'file';
+                        const short = name.length > 16 ? name.slice(0, 15) + '…' : name;
+                        html += `<a href="/api/module/MBCT01/proof_docs/file/${data._proof_doc_id}" target="_blank" title="${name}" onclick="event.stopPropagation()" style="color:#2b6cb0;text-decoration:underline;font-size:11px;">📄 ${short}</a>`;
+                    }
+                    if (data.doc_status !== 'Approved') {
+                        const label = data._proof_doc_id ? '↻' : '+ Upload';
+                        const tip = data._proof_doc_id ? 'Replace file' : 'Upload proof';
+                        html += `<button class="btn-info-approval" style="margin-left:6px;padding:2px 6px;" onclick="triggerProofUpload(${data.id}, event)" title="${tip}">${label}</button>`;
+                    }
+                    return html || '<span style="color:#a0aec0;font-size:11px;">—</span>';
+                }
+            },
+            {
+                title: "Approval", field: "_approval_actions", width: 170, headerSort: false, visible: false,
+                formatter: function(cell) {
+                    const data = cell.getRow().getData();
+                    if (!data.id) return '';
+                    if (data.doc_status === 'Approved') {
+                        if (isApprover) {
+                            return `<button class="btn-back-draft" onclick="openSendBackModal(${data.id})">↩ Draft</button>`;
+                        }
+                        return '';
+                    }
+                    if (data._eligible && isApprover) {
+                        return `<button class="btn-approve" onclick="quickApprove(${data.id}, event)" title="All requirements met — click to approve">✓ Approve</button>` +
+                               `<button class="btn-info-approval" style="margin-left:4px;" onclick="openApprovalInfoModal(${data.id})" title="View details">ℹ️</button>`;
+                    }
+                    return `<button class="btn-info-approval" onclick="openApprovalInfoModal(${data.id})">ℹ️ Info</button>`;
+                }
+            }
+        ].filter(Boolean);
+
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 160px)",
+            layout: "fitDataFill",
+            columns: columns,
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            paginationSizeSelector: [20, 50, 75, 100, true],
+            ajaxURL: "/api/module/MBCT01/data",
+            ajaxParams: function() { return currentFilters.length ? { filters: JSON.stringify(currentFilters) } : {}; },
+            ajaxResponse: function(url, params, response) {
+                document.getElementById('rowCount').textContent = response.data.length;
+                document.getElementById('totalCount').textContent = response.total;
+                return response;
+            },
+            selectable: true,
+            rowFormatter: function(row) {
+                const data = row.getData();
+                const status = data.doc_status;
+                const el = row.getElement();
+                if (isDraftRow(status) && data.id) {
+                    el.style.backgroundColor = '#fffff0';
+                    el.style.outline = '';
+                    el.title = '';
+                } else if (editMode && data.id && row.isSelected()) {
+                    el.style.backgroundColor = '#ebf8ff';
+                    el.style.outline = '2px solid #3182ce';
+                    el.title = '';
+                } else {
+                    if (status === 'Approved') el.style.backgroundColor = '#f0fff4';
+                    else el.style.backgroundColor = '#fffff0';
+                    if (data._autosave_error) {
+                        el.style.outline = '2px solid #e53e3e';
+                        el.title = `Autosave failed: ${data._autosave_error}`;
+                    } else {
+                        el.style.outline = '';
+                        el.title = '';
+                    }
+                }
+            }
+        });
+
+        table.on('cellEditing', function(cell) {
+            const field = cell.getColumn().getField();
+            if (!field) return;
+            const rowData = cell.getRow().getData();
+            if (!rowData.id) return;
+            if (!editMode || !cell.getRow().isSelected()) {
+                cell.cancelEdit();
+            }
+        });
+        table.on('rowSelectionChanged', function(data, rows, selected, deselected) {
+            if (!editMode) return;
+            selected.forEach(function(row) {
+                const d = row.getData();
+                if (d.doc_status === 'Approved' && !isApprover) {
+                    row.deselect();
+                    alert('Approved records can only be edited by the approver.');
+                    return;
+                }
+                row.reformat();
+            });
+            deselected.forEach(function(row) { row.reformat(); });
+        });
+        table.on('cellEdited', function(cell) {
+            if (_isSaving) return;
+            headerDirty = true;
+            const id = cell.getRow().getData().id;
+            if (id) dirtyRowIds.add(String(id));
+            showUnsavedBanner();
+        });
+        table.on('rowAdded', function() {
+            if (_isSaving) return;
+            headerDirty = true;
+            showUnsavedBanner();
+        });
+
+        if (localStorage.getItem('theme') === 'dark') {
+            document.getElementById('table').classList.add('tabulator-dark');
+        }
+    }
+
+    async function openDetailsModal(data) {
+        const mbcId = data.id;
+        const operationType = data.operation_type || 'Import';
+        clearAllDirty();
+        dirtySubSections = {};
+        currentMbcId = mbcId;
+        currentModalData = data;
+
+        renderModalTitle(mbcId);
+
+        const modalBody = document.getElementById('modalSubTables');
+        modalBody.innerHTML = '';
+        const _hRow = table.getRows().find(r => r.getData().id === mbcId);
+        const canAct = permissions.can_edit || permissions.can_add;
+
+        // Lock banner in modal header
+        const lockBanner = document.getElementById('modalLockBanner');
+        lockBanner.style.display = 'none';
+
+        const subContainer = document.createElement('div');
+        subContainer.className = 'sub-table-container';
+
+        subContainer.innerHTML = `
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="anchorage">
+                    <span>Anchorage Recording</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('anchorage', ${mbcId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('anchorage', ${mbcId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="anchorage-table-${mbcId}" class="sub-tabulator"></div></div>
+            </div>
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="port_activity">
+                    <span>Port Activity</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addSubRow('port_activity', ${mbcId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('port_activity', ${mbcId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="port_activity-table-${mbcId}" class="sub-tabulator"></div></div>
+            </div>
+            <div class="sub-section">
+                <div class="sub-section-header" data-section="tug_activity">
+                    <span>Tug Activity</span>
+                    <div class="sub-section-actions">
+                        ${canAct ? `<button class="btn-sub-add" onclick="addTugActivityRow(${mbcId})">+ Add</button>` : ''}
+                        ${canAct ? `<button class="btn-sub-save" onclick="saveSubTable('tug_activity', ${mbcId})">Save</button>` : ''}
+                    </div>
+                </div>
+                <div class="sub-section-content"><div id="tug_activity-table-${mbcId}" class="sub-tabulator"></div></div>
+            </div>
+        `;
+
+        modalBody.appendChild(subContainer);
+        document.getElementById('detailsModal').classList.add('active');
+
+        subTables[mbcId] = {};
+        currentBlQty = data.bl_quantity;
+        await initSubTables(mbcId, operationType, data.bl_quantity);
+    }
+
+    // Build the modal title: "<doc> — <MBC name> | Cargo: <names> (<operation>)".
+    // Cargo names come from the Customer Details sub-table rows (distinct), and fall
+    // back to the header's own cargo_name until that sub-table has loaded.
+    function renderModalTitle(mbcId) {
+        const titleEl = document.getElementById('modalTitle');
+        if (!titleEl || !currentModalData || currentMbcId !== mbcId) return;
+        const data = currentModalData;
+        let cargos = [];
+        const tbl = subTables[mbcId] && subTables[mbcId].customer_details;
+        if (tbl) {
+            cargos = [...new Set(tbl.getRows()
+                .map(r => (r.getData().cargo_name || '').toString().trim())
+                .filter(Boolean))];
+        }
+        if (!cargos.length && data.cargo_name) cargos = [data.cargo_name];
+        const base = [data.doc_num, data.mbc_name].filter(Boolean).join(' — ') || 'MBC';
+        const cargoPart = cargos.length ? ` | Cargo: ${cargos.join(', ')}` : '';
+        titleEl.textContent = `Details for ${base}${cargoPart} (${data.operation_type || 'Import'})`;
+    }
+
+    function closeDetailsModal(force = false) {
+        const dirty = getDirtySections();
+        if (!force && dirty.length > 0) {
+            const list = document.getElementById('unsavedSectionList');
+            list.innerHTML = dirty.map(s => `<li>${s.replace(/_/g,' ')}</li>`).join('');
+            document.getElementById('unsavedModal').classList.add('active');
+            return;
+        }
+        const modal = document.getElementById('detailsModal');
+        modal.classList.remove('active');
+        if (currentMbcId && subTables[currentMbcId]) {
+            Object.values(subTables[currentMbcId]).forEach(t => {
+                if (t && typeof t.destroy === 'function') t.destroy();
+            });
+            delete subTables[currentMbcId];
+        }
+        document.getElementById('modalSubTables').innerHTML = '';
+        clearAllDirty();
+        currentMbcId = null;
+    }
+
+    // Close modal when clicking outside or pressing Escape
+    document.addEventListener('DOMContentLoaded', function() {
+        const modal = document.getElementById('detailsModal');
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) closeDetailsModal();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.classList.contains('active')) closeDetailsModal();
+        });
+    });
+
+    async function initSubTables(mbcId, operationType, blQty) {
+        const _mbcRow = table.getRows().find(r => r.getData().id === mbcId);
+        const canEdit = permissions.can_edit || permissions.can_add;
+        const canDelete = permissions.can_delete || permissions.can_edit;
+        const isDark = localStorage.getItem('theme') === 'dark';
+
+        const berthOptions = {};
+        berthList.forEach(b => { berthOptions[b] = b; });
+        berthOptions['R-19'] = 'R-19';
+
+        const equipOptions = {};
+        equipmentList.forEach(e => { equipOptions[e] = e; });
+
+        const customerOptions = {};
+        customerList.forEach(c => { customerOptions[c] = c; });
+
+        const dtFmt = datetimeCellFormatter;
+        const delBtn = function(type) {
+            return canDelete ? {title: "", field: "actions", formatter: deleteButtonFormatter, width: 50, hozAlign: "center", headerSort: false,
+                cellClick: function(e, cell) { 
+                    const id = cell.getRow().getData().id;
+                    if (id) {
+                        deleteSubRow(type, id, mbcId); 
+                    } else {
+                        if (confirm('Delete this row?')) cell.getRow().delete();
+                    }
+                }
+            } : null;
+        };
+
+        // Generic multi-select dropdown editor factory (mirrors LDUD01 pattern)
+        function makeMultiSelectEditor(optionsList, labelPrefix) {
+            return function(cell, onRendered, success, cancel) {
+                var currentVal = cell.getValue() || '';
+                var selected = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
+                var wrapper = document.createElement('div');
+                wrapper.style.cssText = 'width:100%;height:100%;padding:4px;box-sizing:border-box;font-size:11px;cursor:pointer;';
+                wrapper.textContent = currentVal || 'Select...';
+                var dropdown = document.createElement('div');
+                dropdown.style.cssText = 'position:fixed;z-index:99999;background:white;border:1px solid #cbd5e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:160px;max-height:240px;overflow-y:auto;display:none;';
+                optionsList.forEach(function(item) {
+                    var label = document.createElement('label');
+                    label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px;';
+                    label.addEventListener('mouseenter', function() { label.style.background = '#f1f5f9'; });
+                    label.addEventListener('mouseleave', function() { label.style.background = 'none'; });
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox'; cb.value = item;
+                    cb.checked = selected.includes(item);
+                    cb.style.cssText = 'margin:0;cursor:pointer;width:14px;height:14px;';
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(labelPrefix ? labelPrefix + item : item));
+                    dropdown.appendChild(label);
+                });
+                var btnRow = document.createElement('div');
+                btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;';
+                var confirmBtn = document.createElement('button');
+                confirmBtn.textContent = 'Apply';
+                confirmBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#3182ce;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+                confirmBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var vals = Array.from(dropdown.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+                    cleanup(); success(vals.join(', '));
+                });
+                var cancelBtn = document.createElement('button');
+                cancelBtn.textContent = 'Cancel';
+                cancelBtn.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;background:#e2e8f0;color:#374151;border:none;border-radius:4px;cursor:pointer;font-weight:500;';
+                cancelBtn.addEventListener('click', function(e) { e.stopPropagation(); cleanup(); cancel(); });
+                btnRow.appendChild(confirmBtn); btnRow.appendChild(cancelBtn);
+                dropdown.appendChild(btnRow);
+                document.body.appendChild(dropdown);
+                function cleanup() { if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown); document.removeEventListener('mousedown', outsideClick); }
+                function outsideClick(e) { if (!dropdown.contains(e.target) && !wrapper.contains(e.target)) { cleanup(); cancel(); } }
+                onRendered(function() {
+                    var rect = cell.getElement().getBoundingClientRect();
+                    dropdown.style.left = rect.left + 'px';
+                    dropdown.style.top = (rect.bottom + 2) + 'px';
+                    dropdown.style.display = 'block';
+                    setTimeout(function() { document.addEventListener('mousedown', outsideClick); }, 10);
+                });
+                wrapper.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') { cleanup(); cancel(); }
+                    if (e.key === 'Enter') {
+                        var vals = Array.from(dropdown.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
+                        cleanup(); success(vals.join(', '));
+                    }
+                });
+                return wrapper;
+            };
+        }
+
+        function multiBadgeFormatter(color) {
+            return function(cell) {
+                var val = cell.getValue();
+                if (!val) return '';
+                return val.split(',').map(function(v) {
+                    return '<span style="background:' + color + ';color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:2px;">' + v.trim() + '</span>';
+                }).join('');
+            };
+        }
+
+        function validateDateFormat(cell) {
+            const value = cell.getValue();
+            if (!value) return true;
+            if (!parseValidationDate(value)) {
+                alert('Invalid date/time.\n\nPlease enter a valid date and time (e.g., DD-MM-YYYY HH:mm).');
+                cell.setValue(cell.getOldValue(), true);
+                return false;
+            }
+            return true;
+        }
+
+        var unloadedByMultiEditor = canEdit ? makeMultiSelectEditor(equipmentList, '') : false;
+        var tugMultiEditor = canEdit ? makeMultiSelectEditor(tugList, '') : false;
+        var unloadingBerthMultiEditor = canEdit ? makeMultiSelectEditor(berthList, '') : false;
+
+        // Anchorage Recording table
+        subTables[mbcId].anchorage = new Tabulator(`#anchorage-table-${mbcId}`, {
+            layout: "fitDataFill",
+            height: 150,
+            ajaxURL: `/api/module/MBCT01/anchorage/${mbcId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: (cell) => {
+                const f = cell.getField();
+                if (['eta_gull', 'nor_tendered_green_buoy', 'anchor_dropped_gull', 'anchor_away_gull', 'passing_gull_island', 'passing_high_tension', 'passing_yellow_crane'].includes(f) && !validateDateFormat(cell)) return;
+                markDirty('anchorage');
+            },
+            columns: [
+                {title: "ETA at Gull", field: "eta_gull", width: 140, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "NOR Tendered (Green Buoy)", field: "nor_tendered_green_buoy", width: 180, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Anchor Dropped at Gull", field: "anchor_dropped_gull", width: 170, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Anchor Away from Gull", field: "anchor_away_gull", width: 170, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Passing Gull Island", field: "passing_gull_island", width: 150, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Passing High Tension", field: "passing_high_tension", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Passing Yellow Crane", field: "passing_yellow_crane", width: 160, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Remarks", field: "remarks", width: 150, editor: canEdit ? "input" : false},
+                delBtn('anchorage')
+            ].filter(Boolean)
+        });
+        if (isDark) document.querySelector(`#anchorage-table-${mbcId}`).classList.add('tabulator-dark');
+
+        let currentTugList = [];
+
+        function encodeTugField(tug) {
+            return 'tug_' + String(tug).replace(/[^a-zA-Z0-9]/g, '_');
+        }
+
+        function isTugApplicable(cell, tugName) {
+            if (!canEdit) return false;
+            const rowData = cell.getRow().getData();
+            if (!rowData.port_activity_id) return true;
+            const pRows = subTables[mbcId]?.port_activity?.getRows() || [];
+            const portRow = pRows.find(r => r.getData().id === rowData.port_activity_id);
+            if (!portRow) return true;
+            const tugsStr = portRow.getData().tugs || '';
+            const list = tugsStr.split(',').map(s => s.trim()).filter(Boolean);
+            if (list.length === 0) return true;
+            return list.includes(tugName);
+        }
+
+        function buildTugActivityColumns(uniqueTugs) {
+            const innerCols = [
+                {
+                    title: "Activity",
+                    field: "activity_name",
+                    width: 170,
+                    headerSort: false,
+                    editable: canEdit,
+                    editor: canEdit ? "list" : false,
+                    editorParams: {values: ['Berthing', 'Shifting', 'Unberthing', 'Other']},
+                    headerHozAlign: "center",
+                    hozAlign: "left",
+                    cssClass: "activity-header-col",
+                    formatter: function(cell) {
+                        return `<span style="font-weight:700;">${cell.getValue() || 'Select Activity...'}</span>`;
+                    }
+                }
+            ];
+
+            if (uniqueTugs.length === 0) {
+                innerCols.push({
+                    title: "",
+                    field: "_empty_placeholder",
+                    width: 420,
+                    headerSort: false,
+                    editable: false,
+                    headerHozAlign: "center",
+                    hozAlign: "center",
+                    formatter: function() {
+                        return '<span style="color:#94a3b8;font-style:italic;">Select tug(s) in Port Activity under "Tug Utilised" to show tug timings</span>';
+                    }
+                });
+            }
+
+            uniqueTugs.forEach(tug => {
+                const tKey = encodeTugField(tug);
+                function updateRunningHours(cell, tk) {
+                    const row = cell.getRow();
+                    const startStr = row.getData()[`${tk}__engine_start`];
+                    const stopStr = row.getData()[`${tk}__engine_stop`];
+                    if (startStr && stopStr) {
+                        const start = parseValidationDate(startStr);
+                        const stop = parseValidationDate(stopStr);
+                        if (start && stop && stop >= start) {
+                            const diffMs = stop - start;
+                            const diffMins = Math.floor(diffMs / 60000);
+                            const days = Math.floor(diffMins / (24 * 60));
+                            const hours = Math.floor((diffMins % (24 * 60)) / 60);
+                            const mins = diffMins % 60;
+                            let res = [];
+                            if (days > 0) res.push(days + 'd');
+                            if (hours > 0) res.push(hours + 'h');
+                            if (mins > 0) res.push(mins + 'min');
+                            if (res.length === 0) res.push('0min');
+                            row.update({ [`${tk}__t_running_hours`]: res.join(' ') });
+                        }
+                    }
+                }
+                innerCols.push({
+                    title: tug,
+                    headerHozAlign: "center",
+                    columns: [
+                        {
+                            title: "Tug Made Fast",
+                            field: `${tKey}__tug_made_fast`,
+                            width: 135,
+                            editor: canEdit ? datetimeEditor : false,
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                return dtFmt(cell);
+                            },
+                            headerHozAlign: "center",
+                            editable: (cell) => isTugApplicable(cell, tug)
+                        },
+                        {
+                            title: "Tug Cast Off",
+                            field: `${tKey}__tug_cast_off`,
+                            width: 135,
+                            editor: canEdit ? datetimeEditor : false,
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                return dtFmt(cell);
+                            },
+                            headerHozAlign: "center",
+                            editable: (cell) => isTugApplicable(cell, tug)
+                        },
+                        {
+                            title: "Engine Start",
+                            field: `${tKey}__engine_start`,
+                            width: 135,
+                            editor: canEdit ? datetimeEditor : false,
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                return dtFmt(cell);
+                            },
+                            headerHozAlign: "center",
+                            editable: (cell) => isTugApplicable(cell, tug),
+                            cellEdited: function(cell) {
+                                updateRunningHours(cell, tKey);
+                                markDirty('tug_activity');
+                            }
+                        },
+                        {
+                            title: "Engine Stop",
+                            field: `${tKey}__engine_stop`,
+                            width: 135,
+                            editor: canEdit ? datetimeEditor : false,
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                return dtFmt(cell);
+                            },
+                            headerHozAlign: "center",
+                            editable: (cell) => isTugApplicable(cell, tug),
+                            cellEdited: function(cell) {
+                                updateRunningHours(cell, tKey);
+                                markDirty('tug_activity');
+                            }
+                        },
+                        {
+                            title: "T. Running Hours",
+                            field: `${tKey}__t_running_hours`,
+                            width: 120,
+                            editor: canEdit ? "input" : false,
+                            headerHozAlign: "center",
+                            hozAlign: "right",
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                return '<span style="font-weight:bold;">' + (cell.getValue() || '') + '</span>';
+                            },
+                            editable: (cell) => isTugApplicable(cell, tug)
+                        },
+                        {
+                            title: "Fuel Used",
+                            field: `${tKey}__fuel_used`,
+                            width: 110,
+                            editor: canEdit ? "number" : false,
+                            headerHozAlign: "center",
+                            hozAlign: "right",
+                            formatter: function(cell) {
+                                if (!isTugApplicable(cell, tug)) return '<span class="tug-not-applicable">—</span>';
+                                const val = cell.getValue();
+                                return (val !== null && val !== undefined && val !== '') ? parseFloat(val).toFixed(2) : '';
+                            },
+                            editable: (cell) => isTugApplicable(cell, tug)
+                        }
+                    ]
+                });
+            });
+
+            innerCols.push({
+                title: "Remark",
+                field: "remark",
+                width: 150,
+                editor: canEdit ? "input" : false,
+                headerHozAlign: "center",
+                hozAlign: "left"
+            });
+            
+            innerCols.push(delBtn('tug_activity'));
+
+            return innerCols;
+        }
+
+        async function loadTugActivity(mbcId, initialData = null) {
+            let savedRecords = [];
+            try {
+                const res = await fetch(`/api/module/MBCT01/tug_activity/${mbcId}`);
+                if (res.ok) savedRecords = await res.json();
+            } catch(e) { console.error('Error fetching tug activity:', e); }
+
+            let rawData = [];
+            if (initialData && Array.isArray(initialData)) {
+                rawData = initialData;
+            } else if (subTables[mbcId]?.port_activity) {
+                const pRows = subTables[mbcId].port_activity.getRows();
+                rawData = pRows.map(r => r.getData ? r.getData() : r);
+            }
+
+            if (!rawData || rawData.length === 0) {
+                try {
+                    const portRes = await fetch(`/api/module/MBCT01/port_activity/${mbcId}`);
+                    if (portRes.ok) {
+                        rawData = await portRes.json();
+                    }
+                } catch(e) { console.error('Error fetching port activity fallback:', e); }
+            }
+
+            const tugSet = new Set();
+            
+            rawData.forEach(d => {
+                const tugsStr = d.tugs || '';
+                tugsStr.split(',').map(s => s.trim()).filter(Boolean).forEach(t => tugSet.add(t));
+            });
+
+            currentTugList = Array.from(tugSet);
+
+            const rowMap = {};
+            rawData.forEach(p => {
+                if (p.id) {
+                    rowMap[p.id] = {
+                        id: p.id,
+                        port_activity_id: p.id,
+                        activity_name: p.activity_id || ''
+                    };
+                }
+            });
+
+            savedRecords.forEach(rec => {
+                const pid = rec.port_activity_id;
+                if (!rowMap[pid]) {
+                    rowMap[pid] = {
+                        id: pid,
+                        port_activity_id: pid,
+                        activity_name: rec.port_activity_name || ''
+                    };
+                }
+                const tKey = encodeTugField(rec.tug_id);
+                rowMap[pid][`${tKey}__tug_made_fast`] = rec.tug_made_fast;
+                rowMap[pid][`${tKey}__tug_cast_off`] = rec.tug_cast_off;
+                rowMap[pid][`${tKey}__engine_start`] = rec.engine_start;
+                rowMap[pid][`${tKey}__engine_stop`] = rec.engine_stop;
+                rowMap[pid][`${tKey}__t_running_hours`] = rec.t_running_hours;
+                rowMap[pid][`${tKey}__fuel_used`] = rec.fuel_used;
+                if (rec.remark) rowMap[pid].remark = rec.remark;
+            });
+
+            const cols = buildTugActivityColumns(currentTugList);
+            const tableData = Object.values(rowMap);
+
+            if (subTables[mbcId]?.tug_activity) {
+                subTables[mbcId].tug_activity.setColumns(cols);
+                subTables[mbcId].tug_activity.setData(tableData);
+            } else {
+                subTables[mbcId].tug_activity = new Tabulator(`#tug_activity-table-${mbcId}`, {
+                    layout: "fitDataFill",
+                    data: tableData,
+                    columnDefaults: { headerSort: false },
+                    cellEdited: function(cell) {
+                        const f = cell.getField();
+                        if ((f.includes('__engine_start') || f.includes('__engine_stop') || f.includes('__tug_made_fast') || f.includes('__tug_cast_off')) && !validateDateFormat(cell)) return;
+                        markDirty('tug_activity');
+                        const field = cell.getField();
+                        if (field.includes('__engine_start') || field.includes('__engine_stop')) {
+                            const [tKey] = field.split('__');
+                            const row = cell.getRow();
+                            const d = row.getData();
+                            const startVal = d[`${tKey}__engine_start`];
+                            const stopVal = d[`${tKey}__engine_stop`];
+                            if (startVal && stopVal) {
+                                const dStart = parseValidationDate(startVal);
+                                const dStop = parseValidationDate(stopVal);
+                                if (dStart && dStop && dStop >= dStart) {
+                                    const diffHours = ((dStop - dStart) / (1000 * 60 * 60)).toFixed(2);
+                                    row.update({[`${tKey}__t_running_hours`]: parseFloat(diffHours)});
+                                }
+                            }
+                        }
+                    },
+                    columns: cols
+                });
+                if (isDark) document.querySelector(`#tug_activity-table-${mbcId}`).classList.add('tabulator-dark');
+            }
+        }
+
+        function syncTugActivity(mbcId) {
+            const portTable = subTables[mbcId]?.port_activity;
+            const tugTable = subTables[mbcId]?.tug_activity;
+            if (!portTable || !tugTable) return;
+
+            const pRows = portTable.getRows();
+            const newTugSet = new Set();
+            pRows.forEach(r => {
+                const tugsStr = r.getData().tugs || '';
+                tugsStr.split(',').map(s => s.trim()).filter(Boolean).forEach(t => newTugSet.add(t));
+            });
+            const newTugs = Array.from(newTugSet);
+
+            const tugsChanged = newTugs.length !== currentTugList.length || !newTugs.every(t => currentTugList.includes(t));
+            if (tugsChanged) {
+                currentTugList = newTugs;
+                tugTable.setColumns(buildTugActivityColumns(newTugs));
+            }
+
+            const currentData = tugTable.getData();
+            const dataMap = {};
+            currentData.forEach(d => {
+                dataMap[d.port_activity_id || d.id] = d;
+            });
+
+            const updatedData = [];
+            pRows.forEach(r => {
+                const p = r.getData();
+                const pid = p.id;
+                const existing = dataMap[pid] || { id: pid, port_activity_id: pid };
+                existing.activity_name = p.activity_id || '';
+                updatedData.push(existing);
+            });
+
+            tugTable.setData(updatedData);
+        }
+
+        subTables[mbcId].syncTugActivity = () => syncTugActivity(mbcId);
+        subTables[mbcId].loadTugActivity = () => loadTugActivity(mbcId);
+
+        // Port Activity table
+        subTables[mbcId].port_activity = new Tabulator(`#port_activity-table-${mbcId}`, {
+            layout: "fitDataFill",
+            height: 150,
+            ajaxURL: `/api/module/MBCT01/port_activity/${mbcId}`,
+            columnDefaults: { headerSort: false },
+            cellEdited: function(cell) {
+                const f = cell.getField();
+                if (['first_line_ashore_cast_off', 'all_made_fast_cast_off', 'shore_supply_starts', 'shore_supply_ends'].includes(f) && !validateDateFormat(cell)) return;
+                markDirty('port_activity');
+                if (f === 'tugs' || f === 'activity_id') {
+                    syncTugActivity(mbcId);
+                }
+            },
+            dataLoaded: function(data) {
+                loadTugActivity(mbcId, data);
+            },
+            columns: [
+                {title: "Activity", field: "activity_id", width: 100, editor: canEdit ? "list" : false, editorParams: {values: ['Berthing', 'Shifting', 'Unberthing']}},
+                {title: "Tug Utilised", field: "tugs", width: 150, editor: tugMultiEditor, formatter: multiBadgeFormatter('#3182ce')},
+                {title: "First Line Ashore / Cast Off", field: "first_line_ashore_cast_off", width: 180, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "All Made Fast / Cast Off", field: "all_made_fast_cast_off", width: 180, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Shore Supply Starts", field: "shore_supply_starts", width: 150, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "Shore Supply Ends", field: "shore_supply_ends", width: 150, editor: canEdit ? datetimeEditor : false, formatter: dtFmt},
+                {title: "From Berth / Anchorage", field: "from_berth_anchorage_id", width: 150, editor: canEdit ? "list" : false, editorParams: {values: berthOptions}},
+                {title: "To Berth / Anchorage", field: "to_berth_anchorage_id", width: 150, editor: canEdit ? "list" : false, editorParams: {values: berthOptions}},
+                {title: "Loaded Condition", field: "loaded_condition", width: 120, editor: canEdit ? "list" : false, editorParams: {values: ['Full', 'Partly', 'Empty']}},
+                {title: "MBC Position", field: "mbc_position", width: 100, editor: canEdit ? "list" : false, editorParams: {values: ['STB/Side', 'P/Side']}},
+                {title: "Reasons", field: "reasons", width: 150, editor: canEdit ? "input" : false},
+                delBtn('port_activity')
+            ].filter(Boolean)
+        });
+        if (isDark) document.querySelector(`#port_activity-table-${mbcId}`).classList.add('tabulator-dark');
+
+        // Tug Activity table initialization is handled entirely by loadTugActivity()
+        // which runs immediately after port_activity data is loaded.
+        loadTugActivity(mbcId);
+    }
+
+    function deleteButtonFormatter(cell) {
+        return '<button class="btn-sub-delete">X</button>';
+    }
+
+    function addTugActivityRow(mbcId) {
+        if (subTables[mbcId] && subTables[mbcId].tug_activity) {
+            subTables[mbcId].tug_activity.addRow({});
+            markDirty('tug_activity');
+        }
+    }
+
+    async function addSubRow(type, mbcId) {
+        const res = await fetch(`/api/module/MBCT01/${type}/save`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mbc_id: mbcId})
+        });
+        const data = await res.json();
+        if (data.id && subTables[mbcId] && subTables[mbcId][type]) {
+            const newRow = {id: data.id, mbc_id: mbcId};
+            await subTables[mbcId][type].addRow(newRow, false);
+            if (type === 'port_activity' && subTables[mbcId]?.syncTugActivity) {
+                subTables[mbcId].syncTugActivity();
+            }
+        }
+    }
+
+    function parseValidationDate(value) {
+        if (!value) return null;
+
+        if (value instanceof Date) {
+            return isNaN(value.getTime()) ? null : value;
+        }
+
+        const str = String(value).trim();
+        if (!str) return null;
+
+        let day, month, year, hour, minute, second = 0;
+
+        // Try DD-MM-YYYY HH:mm
+        let match = str.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s+IST)?$/i);
+        if (match) {
+            day = parseInt(match[1], 10);
+            month = parseInt(match[2], 10);
+            year = parseInt(match[3], 10);
+            hour = parseInt(match[4], 10);
+            minute = parseInt(match[5], 10);
+            second = parseInt(match[6] || '0', 10);
+        } else {
+            // Try YYYY-MM-DD[ T]HH:mm (the format Tabulator db values use)
+            match = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+            if (!match) return null;
+            
+            year = parseInt(match[1], 10);
+            month = parseInt(match[2], 10);
+            day = parseInt(match[3], 10);
+            hour = parseInt(match[4], 10);
+            minute = parseInt(match[5], 10);
+            second = parseInt(match[6] || '0', 10);
+        }
+
+        if (month < 1 || month > 12) return null;
+        if (year < 1900 || year > 2100) return null;
+        const daysInMonth = new Date(year, month, 0).getDate();
+        if (day < 1 || day > daysInMonth) return null;
+        if (hour < 0 || hour > 23) return null;
+        if (minute < 0 || minute > 59) return null;
+        if (second < 0 || second > 59) return null;
+
+        // Convert IST to UTC (assuming local inputs are in IST)
+        const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+        date.setUTCMinutes(date.getUTCMinutes() - 330);
+
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+
+function validateDateSequence(rows, pairs) {
+
+    for (let i = 0; i < rows.length; i++) {
+
+        const d = rows[i].getData();
+
+        for (const [fieldA, labelA, fieldB, labelB] of pairs) {
+
+            // ====================================================
+            // Validate FIRST DATE
+            // ====================================================
+
+            if (d[fieldA]) {
+
+                const dateA =
+                    parseValidationDate(d[fieldA]);
+
+                if (!dateA) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelA}" ` +
+                        `contains an invalid date/time:\n\n` +
+                        `${d[fieldA]}\n\n` +
+                        `Please enter a valid date in DD-MM-YYYY HH:MM format.`
+                    );
+
+                    return false;
+                }
+            }
+
+
+            // ====================================================
+            // Validate SECOND DATE
+            // ====================================================
+
+            if (d[fieldB]) {
+
+                const dateB =
+                    parseValidationDate(d[fieldB]);
+
+                if (!dateB) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelB}" ` +
+                        `contains an invalid date/time:\n\n` +
+                        `${d[fieldB]}\n\n` +
+                        `Please enter a valid date in DD-MM-YYYY HH:MM format.`
+                    );
+
+                    return false;
+                }
+            }
+
+
+            // ====================================================
+            // SEQUENCE VALIDATION
+            // ====================================================
+
+            if (d[fieldA] && d[fieldB]) {
+
+                const dateA =
+                    parseValidationDate(d[fieldA]);
+
+                const dateB =
+                    parseValidationDate(d[fieldB]);
+
+                if (dateB < dateA) {
+
+                    alert(
+                        `Row ${i + 1}: "${labelB}" ` +
+                        `(${d[fieldB]}) must be same or after ` +
+                        `"${labelA}" (${d[fieldA]}).`
+                    );
+
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+    async function saveSubTable(type, mbcId, silent = false) {
+        if (!mbcId) mbcId = currentMbcId;
+        if (!subTables[mbcId] || !subTables[mbcId][type]) return;
+
+        const allRows = subTables[mbcId][type].getRows();
+
+        // ── Validation: customer_details — customer name required ──
+        if (type === 'customer_details') {
+            for (let i = 0; i < allRows.length; i++) {
+                const d = allRows[i].getData();
+                if (!d.customer_name || d.customer_name.toString().trim() === '') {
+                    alert(`Row ${i + 1}: Customer is required. Please select a customer before saving.`);
+                    return;
+                }
+            }
+            // existing BL quantity check
+            if (currentBlQty != null && currentBlQty !== '') {
+                const total = allRows.reduce((sum, r) => sum + (parseFloat(r.getData().quantity) || 0), 0);
+                if (total > parseFloat(currentBlQty)) {
+                    alert(`Cannot save: Total quantity (${total.toFixed(2)}) exceeds BL quantity (${parseFloat(currentBlQty).toFixed(2)}).`);
+                    return;
+                }
+            }
+        }
+
+        // ── Validation: export_load_port — date fields must be in chronological order ──
+        if (type === 'export_load_port') {
+            const pairs = [
+                ['arrived_at_port',     'Arrived at Port',         'alongside_at_berth',    'Alongside at Berth'],
+                ['alongside_at_berth',  'Alongside at Berth',      'loading_commenced',     'Loading Commenced'],
+                ['loading_commenced',   'Loading Commenced',       'loading_completed',     'Loading Completed'],
+                ['loading_completed',   'Loading Completed',       'cast_off_from_berth',   'Cast off From Berth'],
+                ['cast_off_from_berth', 'Cast off From Berth',     'sailed_out_from_port',  'Sailed Out From Port'],
+                ['sailed_out_from_port','Sailed Out From Port',    'eta_at_gull_island',    'ETA at Gull Island'],
+            ];
+            if (!validateDateSequence(allRows, pairs)) return;
+        }
+
+        // ── Validation: load_port — date fields must be in chronological order ──
+        if (type === 'load_port') {
+            const pairs = [
+                ['arrived_load_port',  'Arrived Load Port',   'alongside_berth',     'Alongside Berth'],
+                ['alongside_berth',    'Alongside Berth',     'loading_commenced',   'Loading Commenced'],
+                ['loading_commenced',  'Loading Commenced',   'loading_completed',   'Loading Completed'],
+                ['loading_completed',  'Loading Completed',   'cast_off_load_port',  'Cast Off Load Port'],
+                ['cast_off_load_port', 'Cast Off Load Port',  'eta',                 'ETA at Gull Island'],
+            ];
+            if (!validateDateSequence(allRows, pairs)) return;
+        }
+        // ============================================================
+// CROSS-TABLE VALIDATION
+//
+// Arrived Gull Island must be same or after
+// Cast Off Load Port
+// ============================================================
+
+const dischargeTable =
+    subTables[mbcId]?.discharge_port;
+
+if (dischargeTable) {
+
+    const dischargeRows =
+        dischargeTable.getRows();
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const loadData =
+            allRows[i].getData();
+
+        if (!loadData.cast_off_load_port) {
+            continue;
+        }
+
+        const castOffLoadPort =
+            parseValidationDate(
+                loadData.cast_off_load_port
+            );
+
+        if (!castOffLoadPort) {
+            continue;
+        }
+
+
+        for (let j = 0; j < dischargeRows.length; j++) {
+
+            const dischargeData =
+                dischargeRows[j].getData();
+
+            if (!dischargeData.arrival_gull_island) {
+                continue;
+            }
+
+            const arrivalGullIsland =
+                parseValidationDate(
+                    dischargeData.arrival_gull_island
+                );
+
+            if (!arrivalGullIsland) {
+                continue;
+            }
+
+
+            if (
+                arrivalGullIsland <
+                castOffLoadPort
+            ) {
+
+                alert(
+                    `Discharge Row ${j + 1}: ` +
+                    `"Arrived Gull Island" ` +
+                    `(${dischargeData.arrival_gull_island}) ` +
+                    `cannot be before ` +
+                    `"Cast Off Load Port" ` +
+                    `(${loadData.cast_off_load_port}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
+
+        // ── Validation: discharge_port — date fields must be in chronological order ──
+// ── Validation: discharge_port ──
+if (type === 'discharge_port') {
+
+    // ============================================================
+    // 1. ARRIVED GULL ISLAND >= CAST OFF LOAD PORT
+    //    Cast Off Load Port is in LOAD PORT table
+    //    Arrived Gull Island is in DISCHARGE PORT table
+    // ============================================================
+
+    const loadPortTable = subTables[mbcId]?.load_port;
+
+    if (loadPortTable) {
+
+        const loadPortRows = loadPortTable.getRows();
+
+        for (let i = 0; i < allRows.length; i++) {
+
+            const dischargeData = allRows[i].getData();
+
+            if (!dischargeData.arrival_gull_island) {
+                continue;
+            }
+
+            const arrivalGullIsland =
+                parseValidationDate(
+                    dischargeData.arrival_gull_island
+                );
+
+            if (!arrivalGullIsland) {
+                continue;
+            }
+
+            for (let j = 0; j < loadPortRows.length; j++) {
+
+                const loadData =
+                    loadPortRows[j].getData();
+
+                if (!loadData.cast_off_load_port) {
+                    continue;
+                }
+
+                const castOffLoadPort =
+                    parseValidationDate(
+                        loadData.cast_off_load_port
+                    );
+
+                if (!castOffLoadPort) {
+                    continue;
+                }
+
+                if (arrivalGullIsland < castOffLoadPort) {
+
+                    alert(
+                        `Row ${i + 1}: ` +
+                        `"Arrived Gull Island" ` +
+                        `(${dischargeData.arrival_gull_island}) ` +
+                        `cannot be before ` +
+                        `"Cast Off Load Port" ` +
+                        `(${loadData.cast_off_load_port}).`
+                    );
+
+                    return;
+                }
+            }
+        }
+    }
+
+
+    // ============================================================
+    // 2. NORMAL DISCHARGE DATE SEQUENCE
+    // ============================================================
+
+    const pairs = [
+
+        // Arrived Gull Island
+        // >= Cast Off Load Port handled above
+
+        [
+            'arrival_gull_island',
+            'Arrived Gull Island',
+            'departure_gull_island',
+            'Departure Gull Island'
+        ],
+
+        [
+            'departure_gull_island',
+            'Departure Gull Island',
+            'arrived_yellow_crane',
+            'Arrived Yellow Crane'
+        ],
+
+        [
+            'arrived_yellow_crane',
+            'Arrived Yellow Crane',
+            'vessel_arrival_port',
+            'MBC Arrival Port'
+        ],
+
+        [
+            'vessel_arrival_port',
+            'MBC Arrival Port',
+            'vessel_all_made_fast',
+            'MBC AMF at Unloading Berth'
+        ],
+
+        [
+            'vessel_all_made_fast',
+            'MBC AMF at Unloading Berth',
+            'unloading_commenced',
+            'Unloading Commenced'
+        ],
+
+        [
+            'unloading_commenced',
+            'Unloading Commenced',
+            'cleaning_commenced',
+            'Cleaning Commenced'
+        ],
+
+        [
+            'cleaning_commenced',
+            'Cleaning Commenced',
+            'unloading_completed',
+            'Unloading Completed'
+        ],
+
+        [
+            'unloading_completed',
+            'Unloading Completed',
+            'vessel_cast_off',
+            'MBC Cast Off'
+        ],
+
+        [
+            'vessel_cast_off',
+            'MBC Cast Off',
+            'sailed_out_load_port',
+            'Sailed Out From Discharge Port'
+        ],
+
+        [
+            'discharge_start_shifting',
+            'Discharge Start',
+            'discharge_stop_shifting',
+            'Discharge Stop'
+        ],
+
+        [
+            'sailed_out_load_port',
+            'Sailed Out From Discharge Port',
+            'reached_load_port',
+            'Reached Load Port'
+        ]
+
+    ];
+
+
+    if (!validateDateSequence(allRows, pairs)) {
+        return;
+    }
+
+
+    // ============================================================
+    // 3. MBC ARRIVAL PORT
+    //
+    // Must be after BOTH:
+    // Arrived Yellow Crane
+    // AND
+    // Departure Gull Island
+    // ============================================================
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const d = allRows[i].getData();
+
+        if (!d.vessel_arrival_port) {
+            continue;
+        }
+
+        const arrivalPort =
+            parseValidationDate(
+                d.vessel_arrival_port
+            );
+
+        if (!arrivalPort) {
+            continue;
+        }
+
+
+        // Check Departure Gull Island
+        if (d.departure_gull_island) {
+
+            const departureGull =
+                parseValidationDate(
+                    d.departure_gull_island
+                );
+
+            if (
+                departureGull &&
+                arrivalPort < departureGull
+            ) {
+
+                alert(
+                    `Row ${i + 1}: ` +
+                    `"MBC Arrival Port" ` +
+                    `(${d.vessel_arrival_port}) ` +
+                    `must be same or after ` +
+                    `"Departure Gull Island" ` +
+                    `(${d.departure_gull_island}).`
+                );
+
+                return;
+            }
+        }
+
+
+        // Check Arrived Yellow Crane
+        if (d.arrived_yellow_crane) {
+
+            const yellowCrane =
+                parseValidationDate(
+                    d.arrived_yellow_crane
+                );
+
+            if (
+                yellowCrane &&
+                arrivalPort < yellowCrane
+            ) {
+
+                alert(
+                    `Row ${i + 1}: ` +
+                    `"MBC Arrival Port" ` +
+                    `(${d.vessel_arrival_port}) ` +
+                    `must be same or after ` +
+                    `"Arrived Yellow Crane" ` +
+                    `(${d.arrived_yellow_crane}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
+
+// ── Validation: MBC Cleaning Details ──
+if (type === 'cleaning') {
+
+    for (let i = 0; i < allRows.length; i++) {
+
+        const d = allRows[i].getData();
+
+        if (d.start_time && d.end_time) {
+
+            const startTime = parseValidationDate(d.start_time);
+            const endTime = parseValidationDate(d.end_time);
+
+            // Invalid Start Time
+            if (!startTime) {
+                alert(
+                    `Row ${i + 1}: "Start Time" ` +
+                    `(${d.start_time}) is not a valid date/time.`
+                );
+                return;
+            }
+
+            // Invalid End Time
+            if (!endTime) {
+                alert(
+                    `Row ${i + 1}: "End Time" ` +
+                    `(${d.end_time}) is not a valid date/time.`
+                );
+                return;
+            }
+
+            // End Time must be greater than Start Time
+            if (endTime <= startTime) {
+
+                alert(
+                    `Row ${i + 1}: "End Time" ` +
+                    `(${d.end_time}) must be greater than ` +
+                    `"Start Time" (${d.start_time}).`
+                );
+
+                return;
+            }
+        }
+    }
+}
+
+        if (type === 'tug_activity') {
+            const tugTable = subTables[mbcId]?.tug_activity;
+            if (!tugTable) return;
+            const rows = tugTable.getRows();
+            const payload = [];
+
+            const pRows = subTables[mbcId]?.port_activity?.getRows() || [];
+            const allTugSet = new Set();
+            pRows.forEach(r => {
+                const s = r.getData().tugs || '';
+                s.split(',').map(x => x.trim()).filter(Boolean).forEach(t => allTugSet.add(t));
+            });
+
+            rows.forEach(r => {
+                const d = r.getData();
+                const pid = d.port_activity_id || d.id;
+                
+                const portRow = pRows.find(pr => pr.getData().id === pid);
+                const assignedTugsStr = portRow ? (portRow.getData().tugs || '') : '';
+                const assignedTugs = assignedTugsStr.split(',').map(x => x.trim()).filter(Boolean);
+                const isManual = !pid;
+
+                const encodeTugField = (tugName) => 'tug_' + String(tugName).replace(/[^a-zA-Z0-9]/g, '_');
+                allTugSet.forEach(tug => {
+                    if (!isManual && !assignedTugs.includes(tug)) return;
+
+                    const tKey = encodeTugField(tug);
+                    const madeFast = d[`${tKey}__tug_made_fast`];
+                    const castOff = d[`${tKey}__tug_cast_off`];
+                    const engStart = d[`${tKey}__engine_start`];
+                    const engStop = d[`${tKey}__engine_stop`];
+                    const runHours = d[`${tKey}__t_running_hours`];
+                    const fuel = d[`${tKey}__fuel_used`];
+
+                    const hasAny = madeFast || castOff || engStart || engStop || (runHours != null && runHours !== '') || (fuel != null && fuel !== '');
+                    if (hasAny && (pid || isManual)) {
+                        payload.push({
+                            mbc_id: mbcId,
+                            port_activity_id: pid || null,
+                            port_activity_name: d.activity_name,
+                            tug_id: tug,
+                            tug_made_fast: madeFast || null,
+                            tug_cast_off: castOff || null,
+                            engine_start: engStart || null,
+                            engine_stop: engStop || null,
+                            t_running_hours: (runHours !== '' && runHours != null) ? runHours : null,
+                            fuel_used: (fuel !== '' && fuel != null) ? fuel : null,
+                            remark: d.remark || null
+                        });
+                    } else if (d.remark && (pid || isManual)) {
+                        // Even if no tug activity timings are entered, save remark if it exists
+                        payload.push({
+                            mbc_id: mbcId,
+                            port_activity_id: pid || null,
+                            port_activity_name: d.activity_name,
+                            tug_id: tug,
+                            remark: d.remark
+                        });
+                    }
+                });
+            });
+
+            if (payload.length === 0) {
+                clearDirty('tug_activity');
+                if (!silent) showSubStatus('tug_activity', mbcId, 'Saved 0 row(s)');
+                return;
+            }
+
+            const res = await fetch(`/api/module/MBCT01/tug_activity/save`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({mbc_id: mbcId, rows: payload})
+            });
+            const result = await res.json();
+            if (result.success) {
+                clearDirty('tug_activity');
+                if (!silent) showSubStatus('tug_activity', mbcId, `Saved ${payload.length} tug activity record(s)`);
+            } else {
+                alert(result.error || 'Failed to save tug activity');
+            }
+            return;
+        }
+
+        const rows = subTables[mbcId][type].getRows();
+        let savedCount = 0;
+
+        for (const row of rows) {
+            const data = row.getData();
+            if (data.id) {
+                const res = await fetch(`/api/module/MBCT01/${type}/save`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({...data, mbc_id: mbcId})
+                });
+                const result = await res.json();
+                if (result.success) {
+                    savedCount++;
+                } else {
+                    // A rejected save (billed/invoiced/approved lock) must be
+                    // visible — staying dirty keeps the unsaved edit on screen.
+                    alert(result.error || 'Save was rejected.');
+                    if (!silent) showSubStatus(type, mbcId, `Saved ${savedCount} row(s) — not saved: rejected`);
+                    return;
+                }
+            }
+        }
+        clearDirty(type);
+        if (!silent) showSubStatus(type, mbcId, `Saved ${savedCount} row(s)`);
+        if (type === 'port_activity' && subTables[mbcId]?.syncTugActivity) {
+            subTables[mbcId].syncTugActivity();
+        }
+    }
+
+    async function deleteSubRow(type, id, mbcId) {
+        if (!confirm('Delete this row?')) return;
+        const res = await fetch(`/api/module/MBCT01/${type}/delete`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: id})
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!result.success) {
+            // Keep the row on screen — it still exists on the server.
+            alert(result.error || 'Delete was rejected.');
+            return;
+        }
+        if (subTables[mbcId] && subTables[mbcId][type]) {
+            const row = subTables[mbcId][type].getRows().find(r => r.getData().id === id);
+            if (row) row.delete();
+            if (row) await row.delete();
+            if (type === 'port_activity' && subTables[mbcId]?.syncTugActivity) {
+                subTables[mbcId].syncTugActivity();
+            }
+        }
+    }
+
+    function addRow() {
+        table.addRow({
+            created_by: currentUser,
+            created_date: getTodayDate(),
+            doc_date: getTodayDate(),
+            doc_status: 'Draft',
+            doc_series: defaultDocSeries,
+            quantity_uom: defaultUom
+        }, true);
+    }
+
+    function deleteSelected() {
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+        selected.forEach(async row => {
+            const id = row.getData().id;
+            if (!id) { row.delete(); return; }
+            const res = await fetch("/api/module/MBCT01/delete", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!result.success) {
+                // Billed or invoiced MBCs are refused — leave the row visible.
+                alert(result.error || 'Delete was rejected.');
+                return;
+            }
+            if (currentMbcId === id) closeDetailsModal();
+            row.delete();
+        });
+    }
+
+    async function saveAll() {
+        _isSaving = true;
+        try {
+            showStatus('Saving...', 'saving');
+            const rows = table.getRows();
+            let savedCount = 0, errorMsg = '';
+            for (const row of rows) {
+                const data = row.getData();
+                if (data.id && !dirtyRowIds.has(String(data.id))) continue;
+                const res = await fetch("/api/module/MBCT01/save", {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.id) {
+                    row.update({id: result.id, doc_num: result.doc_num, doc_status: result.doc_status});
+                    savedCount++;
+                } else if (result.error && !errorMsg) {
+                    errorMsg = result.error;
+                }
+            }
+            if (errorMsg && savedCount === 0) {
+                showStatus(errorMsg, 'unsaved');
+            } else {
+                dirtyRowIds.clear();
+                showStatus(`Saved ${savedCount} row(s)`, 'saved');
+                hideUnsavedBanner();
+                editMode = false;
+                const editBtn = document.getElementById('editModeBtn');
+                if (editBtn) { editBtn.textContent = '✏️ Edit'; editBtn.style.background = '#805ad5'; }
+                const editBanner = document.getElementById('editModeBanner');
+                if (editBanner) editBanner.style.display = 'none';
+                await table.setData("/api/module/MBCT01/data");
+            }
+        } finally {
+            _isSaving = false;
+        }
+    }
+
+    function toggleEditMode() {
+        if (editMode) {
+            editMode = false;
+            table.deselectRow();
+            const btn = document.getElementById('editModeBtn');
+            if (btn) { btn.textContent = '✏️ Edit'; btn.style.background = '#805ad5'; }
+            document.getElementById('editModeBanner').style.display = 'none';
+            table.getRows().forEach(r => r.reformat());
+            hideUnsavedBanner();
+            table.setData('/api/module/MBCT01/data');
+        } else {
+            editMode = true;
+            const btn = document.getElementById('editModeBtn');
+            if (btn) { btn.textContent = '✖ Cancel Edit'; btn.style.background = '#e53e3e'; }
+            document.getElementById('editModeBanner').style.display = 'block';
+        }
+    }
+
+    // Approval functions
+    let approvalTargetId = null;
+    let approvalUploadedDocs = [];
+    let sendBackTargetId = null;
+
+    async function openApprovalInfoModal(id) {
+        approvalTargetId = id;
+        approvalUploadedDocs = [];
+        const body = document.getElementById('approvalInfoBody');
+        const approveBtn = document.getElementById('approvalInfoApproveBtn');
+        const proofView = document.getElementById('approvalProofView');
+        const pwdSection = document.getElementById('approvalPasswordSection');
+        const pwdInput = document.getElementById('approvalPassword');
+
+        body.innerHTML = '<em style="color:#718096;">Checking requirements...</em>';
+        approveBtn.style.display = 'none';
+        proofView.style.display = 'none';
+        proofView.innerHTML = '';
+        pwdSection.style.display = 'none';
+        if (pwdInput) pwdInput.value = '';
+        document.getElementById('approvalInfoModal').style.display = 'flex';
+
+        // Read-only view of the proof document (uploaded from the grid column).
+        try {
+            const dres = await fetch(`/api/module/MBCT01/proof_docs/${id}`);
+            const ddata = await dres.json();
+            if (ddata.docs && ddata.docs.length) {
+                for (const doc of ddata.docs) approvalUploadedDocs.push(doc);
+                const doc = ddata.docs[ddata.docs.length - 1];
+                proofView.style.display = 'block';
+                proofView.innerHTML = `Proof of Quantity: <a href="/api/module/MBCT01/proof_docs/file/${doc.id}" target="_blank" style="color:#2b6cb0;text-decoration:underline;">📄 ${doc.original_filename}</a>`;
+            }
+        } catch(e) { /* ignore */ }
+
+        const res = await fetch(`/api/module/MBCT01/approval_check/${id}`);
+        const data = await res.json();
+
+        if (data.eligible) {
+            body.innerHTML = '<div style="color:#276749;font-weight:600;margin-bottom:8px;">✅ All requirements met.</div>' +
+                (isApprover ? '<p style="color:#4a5568;font-size:12px;margin:0;">Review the proof documents, enter your password, then click Approve.</p>' :
+                 '<p style="color:#4a5568;font-size:12px;margin:0;">Waiting for approver to approve.</p>');
+            if (isApprover) {
+                approveBtn.style.display = 'inline-block';
+                pwdSection.style.display = 'block';
+            }
+        } else {
+            const items = data.missing.map(m => `<li style="margin:4px 0;">❌ ${m}</li>`).join('');
+            body.innerHTML = `<p style="margin:0 0 8px;font-weight:600;color:#744210;">The following must be completed before approval:</p><ul style="margin:0;padding-left:18px;">${items}</ul>`;
+            // If the only missing thing is proof docs, the approver can still upload here and re-run the check
+        }
+    }
+
+    function closeApprovalInfoModal() {
+        document.getElementById('approvalInfoModal').style.display = 'none';
+        approvalTargetId = null;
+        approvalUploadedDocs = [];
+    }
+
+    // Proof of Qty grid column upload (anyone can fill; one file per MBC, replaces old)
+    let proofUploadTargetId = null;
+
+    function triggerProofUpload(id, event) {
+        event.stopPropagation();
+        proofUploadTargetId = id;
+        const input = document.getElementById('proofColInput');
+        input.value = '';
+        input.click();
+    }
+
+    async function uploadProofColumn() {
+        const input = document.getElementById('proofColInput');
+        if (!input.files || !input.files.length || !proofUploadTargetId) return;
+        const fd = new FormData();
+        fd.append('mbc_id', proofUploadTargetId);
+        fd.append('files', input.files[0]);
+        try {
+            const res = await fetch('/api/module/MBCT01/proof_docs/upload', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+            const doc = data.docs[0];
+            const row = table.getRows().find(r => r.getData().id === proofUploadTargetId);
+            if (row) {
+                row.update({_proof_doc_id: doc.id, _proof_filename: doc.original_filename});
+                row.reformat();
+            }
+        } catch(e) {
+            alert('Upload failed. Please try again.');
+        } finally {
+            input.value = '';
+            proofUploadTargetId = null;
+        }
+    }
+
+    async function confirmApprove() {
+        if (approvalUploadedDocs.length === 0) {
+            alert('Please upload the Proof of Quantity document (Proof of Qty column) before approving.');
+            return;
+        }
+        const password = (document.getElementById('approvalPassword').value || '').trim();
+        if (!password) { alert('Please enter your password.'); return; }
+        const res = await fetch('/api/module/MBCT01/approve', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: approvalTargetId, password: password})
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        const row = table.getRows().find(r => r.getData().id === approvalTargetId);
+        if (row) { row.update({doc_status: 'Approved'}); row.reformat(); }
+        closeApprovalInfoModal();
+    }
+
+    function quickApprove(id, event) {
+        // Password + proof docs are mandatory now; route the user through the full modal.
+        event.stopPropagation();
+        openApprovalInfoModal(id);
+    }
+
+    function openSendBackModal(id) {
+        sendBackTargetId = id;
+        document.getElementById('sendBackComment').value = '';
+        document.getElementById('sendBackModal').style.display = 'flex';
+    }
+
+    function closeSendBackModal() {
+        document.getElementById('sendBackModal').style.display = 'none';
+        sendBackTargetId = null;
+    }
+
+    async function confirmSendBack() {
+        const comment = document.getElementById('sendBackComment').value.trim();
+        if (!comment) { alert('Please enter a reason.'); return; }
+        const res = await fetch('/api/module/MBCT01/send_back', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: sendBackTargetId, comment: comment})
+        });
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        const row = table.getRows().find(r => r.getData().id === sendBackTargetId);
+        if (row) { row.update({doc_status: 'Draft'}); row.reformat(); }
+        closeSendBackModal();
+    }
+
+    async function showApprovalLog(id, event) {
+        event.stopPropagation();
+        const res = await fetch(`/api/module/MBCT01/approval-log/${id}`);
+        const log = await res.json();
+        if (!log.length) { alert('No approval history yet.'); return; }
+        const lines = log.map(e => `${e.actioned_at}  ${e.action} by ${e.actioned_by}${e.comment ? '\n  Reason: ' + e.comment : ''}`);
+        alert('Approval History:\n\n' + lines.join('\n\n'));
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveAll(); }
+    });
+
+    // ── Filter panel ──────────────────────────────────────────────────────────
+    let currentFilters = [];
+    let FILTER_CONFIG = {};
+
+    function initFilterConfig() {
+        FILTER_CONFIG = {
+            operation_type: { label: 'Operation Type', type: 'multi',    values: ['Import', 'Export'] },
+            doc_num:        { label: 'MBC Doc',         type: 'contains' },
+            mbc_name:       { label: 'MBC Name',        type: 'contains' },
+            cargo_type:     { label: 'Cargo Type',      type: 'multi',    values: cargoTypes },
+            doc_date:       { label: 'Doc Date',        type: 'range' },
+            doc_status:     { label: 'Status',          type: 'multi',    values: ['Draft', 'Approved'] },
+        };
+    }
+
+    function toggleFilterPanel() {
+        const panel = document.getElementById('filterPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel.style.display === 'block') loadSavedFiltersBar();
+    }
+
+    function addFilterRow() {
+        const container = document.getElementById('filterRows');
+        const colOptions = Object.entries(FILTER_CONFIG)
+            .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'filter-row';
+        row.innerHTML = `
+            <select class="filter-col-select" onchange="onFilterColChange(this)">
+                <option value="">-- Column --</option>${colOptions}
+            </select>
+            <div class="filter-value-container"></div>
+            <button class="filter-remove" onclick="this.closest('.filter-row').remove();updateFilterBadge();">×</button>`;
+        container.appendChild(row);
+    }
+
+    function validateFilterDateRange(input) {
+        const val = input.value;
+        if (val) {
+            const parts = val.split('-');
+            if (parts.length === 3) {
+                const year = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10);
+                const day = parseInt(parts[2], 10);
+                if (month < 1 || month > 12) {
+                    alert('Invalid month. Month must be between 1 and 12.');
+                    input.value = '';
+                    return;
+                }
+                const daysInMonth = new Date(year, month, 0).getDate();
+                if (day < 1 || day > daysInMonth) {
+                    alert(`Invalid date. Day must be between 1 and ${daysInMonth} for the selected month and year.`);
+                    input.value = '';
+                    return;
+                }
+                if (year < 1900 || year > 2100) {
+                    alert('Invalid year. Year must be between 1900 and 2100.');
+                    input.value = '';
+                    return;
+                }
+            }
+        }
+
+        const container = input.closest('.filter-value-container');
+        const fromDate = container.querySelector('.filter-from').value;
+        const toDate = container.querySelector('.filter-to').value;
+        if (fromDate && toDate && fromDate > toDate) {
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Invalid Date Range',
+                    text: 'From Date cannot be after To Date.'
+                });
+            } else {
+                alert('From Date cannot be after To Date.');
+            }
+            input.value = '';
+        }
+    }
+
+    function onFilterColChange(sel) {
+        const container = sel.closest('.filter-row').querySelector('.filter-value-container');
+        const col = sel.value;
+        if (!col) { container.innerHTML = ''; return; }
+        const cfg = FILTER_CONFIG[col];
+        if (cfg.type === 'contains') {
+            container.innerHTML = `<input class="filter-text-input" type="text" placeholder="contains...">`;
+        } else if (cfg.type === 'multi') {
+            container.innerHTML = `<div class="filter-multi-list">${
+                cfg.values.map(v => `<label><input type="checkbox" class="filter-checkbox" value="${v}"> ${v}</label>`).join('')
+            }</div>`;
+        } else if (cfg.type === 'range') {
+            container.innerHTML = `<input class="filter-from" type="date" onchange="validateFilterDateRange(this)"> <span style="font-size:12px">to</span> <input class="filter-to" type="date" onchange="validateFilterDateRange(this)">`;
+        }
+    }
+
+    function collectFilters() {
+        const filters = [];
+        document.querySelectorAll('#filterRows .filter-row').forEach(row => {
+            const col = (row.querySelector('.filter-col-select') || {}).value;
+            if (!col) return;
+            const cfg = FILTER_CONFIG[col];
+            if (cfg.type === 'contains') {
+                const v = (row.querySelector('.filter-text-input') || {}).value || '';
+                if (v.trim()) filters.push({ field: col, type: 'contains', value: v.trim() });
+            } else if (cfg.type === 'multi') {
+                const checked = [...row.querySelectorAll('.filter-checkbox:checked')].map(cb => cb.value);
+                if (checked.length) filters.push({ field: col, type: 'multi', values: checked });
+            } else if (cfg.type === 'range') {
+                const from = (row.querySelector('.filter-from') || {}).value || '';
+                const to   = (row.querySelector('.filter-to')   || {}).value || '';
+                if (from || to) filters.push({ field: col, type: 'range', from, to });
+            }
+        });
+        return filters;
+    }
+
+    function applyFilters() {
+        currentFilters = collectFilters();
+        updateFilterBadge();
+        table.replaceData();
+    }
+
+    function clearFilters() {
+        document.getElementById('filterRows').innerHTML = '';
+        currentFilters = [];
+        updateFilterBadge();
+        table.replaceData();
+    }
+
+    function updateFilterBadge() {
+        const active = collectFilters().length;
+        const badge = document.getElementById('filterBadge');
+        if (badge) { badge.textContent = active; badge.style.display = active > 0 ? 'inline' : 'none'; }
+    }
+    // ── End filter panel ──────────────────────────────────────────────────────
+
+    // ── Saved Filters ─────────────────────────────────────────────────────────
+    const SAVED_FILTER_MODULE = 'MBCT01';
+    let savedFiltersCache = [];
+
+    async function loadSavedFiltersBar() {
+        try {
+            const res = await fetch(`/api/saved-filters/${SAVED_FILTER_MODULE}`);
+            savedFiltersCache = await res.json();
+            const bar = document.getElementById('savedFiltersBar');
+            const list = document.getElementById('savedFiltersList');
+            if (!savedFiltersCache.length) { bar.style.display = 'none'; return; }
+            bar.style.display = 'flex';
+            list.innerHTML = savedFiltersCache.map(f =>
+                `<span style="display:inline-flex;align-items:center;gap:4px;background:#ebf8ff;border:1px solid #bee3f8;border-radius:12px;padding:2px 10px;font-size:11px;">
+                    <span style="cursor:pointer;color:#2b6cb0;font-weight:600;" onclick="applySavedFilter(${f.id})">${f.name}</span>
+                    <button onclick="deleteSavedFilter(${f.id})" style="background:none;border:none;color:#e53e3e;cursor:pointer;font-size:14px;padding:0;line-height:1;margin-left:2px;">&times;</button>
+                </span>`
+            ).join('');
+        } catch(e) {}
+    }
+
+    function applySavedFilter(id) {
+        const f = savedFiltersCache.find(x => x.id === id);
+        if (!f) return;
+        const filters = JSON.parse(f.filters_json);
+        document.getElementById('filterRows').innerHTML = '';
+        filters.forEach(function(filter) {
+            addFilterRow();
+            const rows = document.querySelectorAll('#filterRows .filter-row');
+            const row = rows[rows.length - 1];
+            const sel = row.querySelector('.filter-col-select');
+            sel.value = filter.field;
+            onFilterColChange(sel);
+            if (filter.type === 'contains') {
+                const inp = row.querySelector('.filter-text-input');
+                if (inp) inp.value = filter.value;
+            } else if (filter.type === 'multi') {
+                row.querySelectorAll('.filter-checkbox').forEach(cb => {
+                    cb.checked = filter.values && filter.values.includes(cb.value);
+                });
+            } else if (filter.type === 'range') {
+                const from = row.querySelector('.filter-from');
+                const to = row.querySelector('.filter-to');
+                if (from) from.value = filter.from || '';
+                if (to) to.value = filter.to || '';
+            }
+        });
+        applyFilters();
+    }
+
+    async function saveCurrentFilter() {
+        const filters = collectFilters();
+        if (!filters.length) { alert('Add at least one filter condition before saving.'); return; }
+        const name = prompt('Name this saved filter:');
+        if (!name || !name.trim()) return;
+        try {
+            const res = await fetch('/api/saved-filters', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name.trim(), module_code: SAVED_FILTER_MODULE, filters})
+            });
+            if (res.ok) loadSavedFiltersBar();
+            else alert('Failed to save filter.');
+        } catch(e) { alert('Error saving filter.'); }
+    }
+
+    async function deleteSavedFilter(id) {
+        if (!confirm('Delete this saved filter?')) return;
+        try {
+            await fetch(`/api/saved-filters/${id}`, {method: 'DELETE'});
+            loadSavedFiltersBar();
+        } catch(e) {}
+    }
+    // ── End saved filters ──────────────────────────────────────────────────────
+
+    loadMasterData();
+</script>
+{% endblock %}
