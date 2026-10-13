@@ -8,6 +8,7 @@ from openpyxl.styles import PatternFill
 import json
 from ..daily_ops.views import _compute_fy_throughput
 from ..daily_ops.model import fy_label
+from ..port_overview.views import _cumulative_by_type, BASELINE_TILL_MAR_2026
 
 from flask import Response
 from openpyxl import Workbook
@@ -324,6 +325,12 @@ def daily_progress_report_data():
         ) first_anchor ON TRUE
 
         LEFT JOIN LATERAL (
+            SELECT MIN(start_time) AS min_start
+            FROM ldud_vessel_operations
+            WHERE ldud_id = lh.id
+        ) ops ON TRUE
+
+        LEFT JOIN LATERAL (
 
             SELECT
                 CASE
@@ -344,8 +351,12 @@ def daily_progress_report_data():
         ) last_anchor ON TRUE
 
         WHERE
-            first_anchor.discharge_started IS NOT NULL
-            AND first_anchor.discharge_started < %s
+            (first_anchor.discharge_started IS NOT NULL OR ops.min_start IS NOT NULL)
+            AND COALESCE(
+                LEAST(first_anchor.discharge_started, ops.min_start::timestamp),
+                first_anchor.discharge_started,
+                ops.min_start::timestamp
+            ) < %s
 
             AND (
                 last_anchor.discharge_completed IS NULL
@@ -436,6 +447,7 @@ def daily_progress_report_data():
             if discharge_start_raw and arrival_for_delay:
                 delay = discharge_start_raw - arrival_for_delay
                 total_hours = round(delay.total_seconds() / 3600, 2)
+                total_hours = max(total_hours, 0)
                 pre_berthing_delay = f"{total_hours} Hrs"
 
             # Discharge Completed — only show the timestamp if completion
@@ -533,7 +545,10 @@ def monthly_cargo_report():
                 lh.id,
                 lh.vcn_id,
                 lh.vessel_name,
-                first_anchor.discharge_started,
+                COALESCE(
+                    first_anchor.discharge_started,
+                    ops.min_start::timestamp
+                ) AS discharge_started,
                 last_anchor.discharge_completed,
 
                 CASE
@@ -544,7 +559,10 @@ def monthly_cargo_report():
 
                 ROW_NUMBER() OVER (
                     ORDER BY
-                        first_anchor.discharge_started,
+                        COALESCE(
+                            first_anchor.discharge_started,
+                            ops.min_start::timestamp
+                        ),
                         lh.id
                 ) AS vessel_seq
 
@@ -555,6 +573,12 @@ def monthly_cargo_report():
                 FROM ldud_anchorage
                 WHERE ldud_id = lh.id
             ) first_anchor ON TRUE
+
+            LEFT JOIN LATERAL (
+                SELECT MIN(start_time) AS min_start
+                FROM ldud_vessel_operations
+                WHERE ldud_id = lh.id
+            ) ops ON TRUE
 
             -- FIX: A vessel can have several ldud_anchorage rows (one per
             -- hold/leg). The old version took MAX(discharge_commenced)
@@ -588,8 +612,11 @@ def monthly_cargo_report():
             ) last_anchor ON TRUE
 
             WHERE
-                first_anchor.discharge_started IS NOT NULL
-                AND first_anchor.discharge_started < %s
+                (first_anchor.discharge_started IS NOT NULL OR ops.min_start IS NOT NULL)
+                AND COALESCE(
+                    first_anchor.discharge_started,
+                    ops.min_start::timestamp
+                ) < %s
                 AND (
                     last_anchor.discharge_completed IS NULL
                     OR last_anchor.discharge_completed >= %s
@@ -640,7 +667,7 @@ def monthly_cargo_report():
         LEFT JOIN ldud_vessel_operations lco
     ON lco.ldud_id = vl.id
    AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vl.cargo_name))
-   AND DATE(lco.start_time) BETWEEN DATE(vl.discharge_started) AND %s::date
+   AND DATE(lco.start_time) <= %s::date
    AND (
         vl.discharge_completed IS NULL
         OR DATE(lco.start_time) <= DATE(vl.discharge_completed)
@@ -2019,22 +2046,22 @@ def barge_discharge_report():
         historic_totals = {}
         for row in historic_rows:
             key = cat_key(row['cargo_type'], row['cargo_category'])
-            historic_totals[key] = int(row['historic_total'] or 0)
+            historic_totals[key] = float(row['historic_total'] or 0)
 
-        # ---- Live totals (May onward) merged with historic to form FY ----
+        # ---- Live totals (May onward) merged with historic to form raw FY ----
         month_totals = {}
-        fy_totals = {}
+        raw_fy_totals = {}
         for row in live_rows:
             key = cat_key(row['cargo_type'], row['cargo_category'])
             month_totals[key] = int(row['month_total'] or 0)
-            live_fy = int(row['live_fy_total'] or 0)
-            hist = historic_totals.get(key, 0)
-            fy_totals[key] = hist + live_fy
+            live_fy = float(row['live_fy_total'] or 0)
+            hist = float(historic_totals.get(key, 0))
+            raw_fy_totals[key] = hist + live_fy
 
         # Categories that ONLY had historic (April) activity, with nothing live yet
         for key, hist_val in historic_totals.items():
-            if key not in fy_totals:
-                fy_totals[key] = hist_val
+            if key not in raw_fy_totals:
+                raw_fy_totals[key] = float(hist_val)
                 month_totals.setdefault(key, 0)
 
         # ---- Prior-FY category weights (before live_start). Used ONLY to
@@ -2049,51 +2076,72 @@ def barge_discharge_report():
             weight_by_category[key] = qty
             weight_by_type[ctype] = weight_by_type.get(ctype, 0) + qty
 
-        # ---- HARDCODED baseline: cumulative throughput per cargo_type,
-        # FY2012-2013 (Half Year) through FY2025-2026 (i.e. everything up
-        # to and including March 31, 2026). Sourced from the FY summary
-        # table (Total row). Keyed case-insensitively so it matches
-        # whatever casing cargo_type actually has in vessel_cargo.
-        BASELINE_TILL_MAR_2026 = {
-            "IBRM": 116229319,
-            "FLUXES": 24038328,
-            "CBRM": 52438887,
-            "CLINKER": 3453541,
-            "SLAG": 1439086,
-            "FINISH GOODS": 157549,
-            "OTHER": 354512,
-            "OTHERS": 354512,   # in case master data defaults to 'Others'
-        }
+        # Anchor FY & Cumulative totals to Port Overview (_cumulative_by_type)
+        # so that Total Receipts FY and Total Cumulative match Port Overview exactly.
+        po_fy, po_cum = _cumulative_by_type(data_date)
 
-        # ---- Cumulative totals = hardcoded baseline (through Mar 2026)
-        # + current FY total (fy_totals, which is already historic-April
-        # + live-May-onward for the current FY, computed above). No call
-        # to _compute_fy_throughput, so no risk of it silently including
-        # rp01_historical_lueu data for prior years either — the baseline
-        # is a fixed, known-correct number instead. ----
+        def _find_po_match(d, ctype):
+            u = (ctype or '').strip().upper()
+            for k, v in d.items():
+                if (k or '').strip().upper() == u:
+                    return v
+            if u in ('OTHER', 'OTHERS'):
+                for k, v in d.items():
+                    if (k or '').strip().upper() in ('OTHER', 'OTHERS'):
+                        return v
+            return 0.0
+
+        fy_totals = {}
         cumulative_totals = {}
+
         for ctype, ccats in cargo_hierarchy.items():
-            baseline_type_total = BASELINE_TILL_MAR_2026.get(ctype.strip().upper())
+            target_fy_type = int(round(_find_po_match(po_fy, ctype)))
+            target_cum_type = int(round(_find_po_match(po_cum, ctype)))
+
+            # 1. FY distribution across categories
+            type_raw_fy = sum(raw_fy_totals.get(cat_key(ctype, c), 0.0) for c in ccats)
+            if type_raw_fy > 0:
+                assigned_fy = {
+                    cat_key(ctype, c): int(round(target_fy_type * (raw_fy_totals.get(cat_key(ctype, c), 0.0) / type_raw_fy)))
+                    for c in ccats
+                }
+                diff_fy = target_fy_type - sum(assigned_fy.values())
+                if diff_fy != 0 and assigned_fy:
+                    best_k = max(assigned_fy, key=assigned_fy.get)
+                    assigned_fy[best_k] += diff_fy
+                fy_totals.update(assigned_fy)
+            else:
+                for c in ccats:
+                    fy_totals[cat_key(ctype, c)] = 0
+
+            # 2. Cumulative distribution across categories
+            baseline_type_total = BASELINE_TILL_MAR_2026.get((ctype or '').strip().upper())
             type_weight = weight_by_type.get(ctype, 0)
-
-            for ccat in ccats:
-                key = cat_key(ctype, ccat)
-                current_fy_amt = fy_totals.get(key, 0)
-
+            raw_cum_by_cat = {}
+            for c in ccats:
+                k = cat_key(ctype, c)
                 if baseline_type_total and type_weight > 0:
-                    # Split baseline across this type's categories using
-                    # prior-FY live proportions.
-                    cat_weight = weight_by_category.get(key, 0)
-                    share = baseline_type_total * (cat_weight / type_weight)
+                    share = baseline_type_total * (weight_by_category.get(k, 0) / type_weight)
                 elif baseline_type_total:
-                    # No weight data to split by (e.g. brand-new category)
-                    # — split evenly across the type's categories instead.
                     share = baseline_type_total / len(ccats) if ccats else 0
                 else:
-                    # No baseline for this cargo_type at all.
                     share = 0
+                raw_cum_by_cat[k] = share + raw_fy_totals.get(k, 0.0)
 
-                cumulative_totals[key] = int(round(share)) + int(current_fy_amt)
+            type_raw_cum = sum(raw_cum_by_cat.values())
+            if type_raw_cum > 0:
+                assigned_cum = {
+                    cat_key(ctype, c): int(round(target_cum_type * (raw_cum_by_cat[cat_key(ctype, c)] / type_raw_cum)))
+                    for c in ccats
+                }
+                diff_cum = target_cum_type - sum(assigned_cum.values())
+                if diff_cum != 0 and assigned_cum:
+                    best_k = max(assigned_cum, key=assigned_cum.get)
+                    assigned_cum[best_k] += diff_cum
+                cumulative_totals.update(assigned_cum)
+            else:
+                for c in ccats:
+                    cumulative_totals[cat_key(ctype, c)] = 0
 
         # ---- Seed equipment_totals with full equipment list too ----
         equipment_totals = {row['equipment']: {"total_day": 0, "total_month": 0} for row in master_equipment_rows}
@@ -4928,16 +4976,22 @@ def daily_progress_report_excel():
             if span > 1:
                 ws.merge_cells(start_row=row, start_column=col,
                                 end_row=row, end_column=col + span - 1)
+            if isinstance(text, str) and text.strip():
+                clean_text = text.strip().replace(',', '')
+                try:
+                    num_val = float(clean_text)
+                    text = int(round(num_val))
+                except (ValueError, TypeError):
+                    pass
+            elif isinstance(text, (float, Decimal)) and not isinstance(text, bool):
+                text = int(round(float(text)))
             c = ws.cell(row, col, text if text not in (None, '') else '')
             c.font = font
             c.alignment = align
             c.fill = fill
             c.border = border
             if isinstance(text, (int, float, Decimal)) and not isinstance(text, bool):
-                if isinstance(text, float) and text % 1 != 0:
-                    c.number_format = '#,##0.00'
-                else:
-                    c.number_format = '#,##0'
+                c.number_format = '#,##0'
             if span > 1:
                 for extra in range(col + 1, col + span):
                     ec = ws.cell(row, extra)
@@ -4958,18 +5012,39 @@ def daily_progress_report_excel():
             return caption(row, col, text, span=span, font=header_font,
                             fill=yellow_fill, align=align)
 
-        def data(row, col, val, align=center, span=1):
+        def data(row, col, val, align=center, span=1, keep_decimal=False, num_format=None):
             if span > 1:
                 ws.merge_cells(start_row=row, start_column=col,
                                 end_row=row, end_column=col + span - 1)
+            if keep_decimal:
+                if isinstance(val, str) and val.strip():
+                    clean_val = val.strip().replace(',', '')
+                    try:
+                        val = round(float(clean_val), 2)
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(val, (float, Decimal)) and not isinstance(val, bool):
+                    val = round(float(val), 2)
+            else:
+                if isinstance(val, str) and val.strip():
+                    clean_val = val.strip().replace(',', '')
+                    try:
+                        num_val = float(clean_val)
+                        val = int(round(num_val))
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(val, (float, Decimal)) and not isinstance(val, bool):
+                    val = int(round(float(val)))
             c = ws.cell(row, col, val if val not in (None, '') else '')
             c.font = data_font
             c.alignment = align
             c.fill = white_fill
             c.border = border
             if isinstance(val, (int, float, Decimal)) and not isinstance(val, bool):
-                if isinstance(val, float) and val % 1 != 0:
-                    c.number_format = '#,##0.00'
+                if num_format:
+                    c.number_format = num_format
+                elif keep_decimal or isinstance(val, float):
+                    c.number_format = '0.00'
                 else:
                     c.number_format = '#,##0'
             if span > 1:
@@ -5272,6 +5347,7 @@ def daily_progress_report_excel():
             pre_delay = ''
             if v['discharge_started'] and arrival_for_delay:
                 hrs = round((v['discharge_started'] - arrival_for_delay).total_seconds() / 3600, 2)
+                hrs = max(hrs, 0)
                 pre_delay = f"{hrs} Hrs"
 
             discharge_completed_disp = ''
@@ -5324,16 +5400,27 @@ def daily_progress_report_excel():
         FROM ldud_header lh
         JOIN vcn_cargo_declaration vcd ON vcd.vcn_id = lh.vcn_id
         LEFT JOIN LATERAL (
-    SELECT MIN(discharge_started) AS discharge_started
-    FROM ldud_anchorage
-    WHERE ldud_id = lh.id
-) first_anchor ON TRUE
-
-LEFT JOIN ldud_vessel_operations lco
-    ON lco.ldud_id = lh.id
-    AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vcd.cargo_name))
-    AND DATE(lco.start_time)
-        BETWEEN DATE(first_anchor.discharge_started) AND %s::date
+            SELECT
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM ldud_anchorage x
+                        WHERE x.ldud_id = lh.id
+                        AND x.discharge_started IS NOT NULL
+                        AND x.discharge_commenced IS NULL
+                    ) THEN NULL
+                    ELSE MAX(discharge_commenced)
+                END AS discharge_completed
+            FROM ldud_anchorage
+            WHERE ldud_id = lh.id
+        ) last_anchor ON TRUE
+        LEFT JOIN ldud_vessel_operations lco
+            ON lco.ldud_id = lh.id
+            AND LOWER(TRIM(lco.cargo_name)) = LOWER(TRIM(vcd.cargo_name))
+            AND DATE(lco.start_time) <= %s::date
+            AND (
+                last_anchor.discharge_completed IS NULL
+                OR DATE(lco.start_time) <= DATE(last_anchor.discharge_completed)
+            )
         WHERE lh.id = ANY(%s)
         GROUP BY lh.id, TRIM(vcd.cargo_name), DATE(lco.start_time)
         ORDER BY DATE(lco.start_time)
@@ -5787,6 +5874,95 @@ LEFT JOIN ldud_vessel_operations lco
             'remarks',
         }
 
+        def _format_mbc_entry(r):
+            name = (r.get('mbc_name') or '').strip()
+            cargo = (r.get('cargo_name') or '').strip()
+            bal = max(0.0, float(r.get('balance_qty') or 0))
+            bal_str = str(int(round(bal))) if abs(bal - round(bal)) < 0.001 else f"{bal:.2f}"
+            if cargo:
+                return f"{name} [{cargo} - {bal_str}]"
+            return f"{name} [{bal_str}]"
+
+        # Fetch active MBCs for the blank column in Barge Status
+        cur.execute("""
+            WITH actual AS (
+                SELECT source_id, SUM(COALESCE(quantity,0)) AS actual_qty
+                FROM lueu_lines
+                WHERE source_type = 'MBC'
+                  AND is_deleted IS NOT TRUE
+                GROUP BY source_id
+            )
+            SELECT DISTINCT ON (UPPER(TRIM(h.mbc_name)))
+                h.id,
+                TRIM(h.mbc_name) AS mbc_name,
+                COALESCE(TRIM(h.cargo_name), '') AS cargo_name,
+                COALESCE(h.bl_quantity, 0) AS bl_quantity,
+                COALESCE(a.actual_qty, 0) AS actual_qty,
+                (COALESCE(h.bl_quantity, 0) - COALESCE(a.actual_qty, 0)) AS balance_qty,
+                d.vessel_arrival_port,
+                d.unloading_commenced,
+                d.unloading_completed,
+                d.vessel_cast_off
+            FROM mbc_discharge_port_lines d
+            JOIN mbc_header h ON h.id = d.mbc_id
+            LEFT JOIN actual a ON a.source_id = h.id
+            WHERE COALESCE(TRIM(h.mbc_name), '') <> ''
+              AND h.id <> 374
+            ORDER BY UPPER(TRIM(h.mbc_name)), d.id DESC
+        """)
+        mbc_trips = cur.fetchall()
+
+        # Under Discharge: Unloading commenced is PRESENT, unloading completed is ABSENT
+        mbc_under_discharge = [
+            _format_mbc_entry(r) for r in mbc_trips
+            if (r.get('unloading_commenced') or '').strip()
+            and not (r.get('unloading_completed') or '').strip()
+            and not (r.get('vessel_cast_off') or '').strip()
+        ]
+
+        # Waiting for Discharge: Arrived at jetty is PRESENT, unloading commenced is ABSENT
+        mbc_waiting_discharge = [
+            _format_mbc_entry(r) for r in mbc_trips
+            if (r.get('vessel_arrival_port') or '').strip()
+            and not (r.get('unloading_commenced') or '').strip()
+            and not (r.get('unloading_completed') or '').strip()
+            and not (r.get('vessel_cast_off') or '').strip()
+            and float(r.get('balance_qty') or 0) > 0
+        ]
+
+        # Also check export load port lines for loading commenced
+        cur.execute("""
+            WITH actual AS (
+                SELECT source_id, SUM(COALESCE(quantity,0)) AS actual_qty
+                FROM lueu_lines
+                WHERE source_type = 'MBC'
+                  AND is_deleted IS NOT TRUE
+                GROUP BY source_id
+            )
+            SELECT DISTINCT ON (UPPER(TRIM(h.mbc_name)))
+                h.id,
+                TRIM(h.mbc_name) AS mbc_name,
+                COALESCE(TRIM(h.cargo_name), '') AS cargo_name,
+                COALESCE(h.bl_quantity, 0) AS bl_quantity,
+                COALESCE(a.actual_qty, 0) AS actual_qty,
+                (COALESCE(h.bl_quantity, 0) - COALESCE(a.actual_qty, 0)) AS balance_qty,
+                e.arrived_at_port,
+                e.loading_commenced,
+                e.loading_completed,
+                e.cast_off_from_berth
+            FROM mbc_export_load_port_lines e
+            JOIN mbc_header h ON h.id = e.mbc_id
+            LEFT JOIN actual a ON a.source_id = h.id
+            WHERE COALESCE(TRIM(h.mbc_name), '') <> ''
+              AND h.id <> 374
+            ORDER BY UPPER(TRIM(h.mbc_name)), e.id DESC
+        """)
+        for r in cur.fetchall():
+            entry = _format_mbc_entry(r)
+            if (r.get('loading_commenced') or '').strip() and not (r.get('loading_completed') or '').strip() and not (r.get('cast_off_from_berth') or '').strip():
+                if entry not in mbc_under_discharge:
+                    mbc_under_discharge.append(entry)
+
         remarks_row_no = None
 
         for label, key in barge_status_rows:
@@ -5815,7 +5991,21 @@ LEFT JOIN ldud_vessel_operations lco
 
                 data(row_no, c, text if text else '', align=left, span=VESSEL_BLOCK_WIDTH)
 
-            data(row_no, empty_col, '', span=VESSEL_BLOCK_WIDTH)
+            mbc_val = ''
+            if key == 'at_jetty':
+                mbc_val = (
+                    barge_status_edits.get('mbc', {}).get(key)
+                    or ('\n'.join(mbc_under_discharge) if mbc_under_discharge else '')
+                )
+            elif key == 'waiting_discharge':
+                mbc_val = (
+                    barge_status_edits.get('mbc', {}).get(key)
+                    or ('\n'.join(mbc_waiting_discharge) if mbc_waiting_discharge else '')
+                )
+            elif key in EDITABLE_BARGE_KEYS and barge_status_edits.get('mbc', {}).get(key):
+                mbc_val = barge_status_edits.get('mbc', {}).get(key)
+
+            data(row_no, empty_col, mbc_val, align=left, span=VESSEL_BLOCK_WIDTH)
 
             if key == 'remarks':
                 remarks_row_no = row_no
@@ -6311,13 +6501,16 @@ LEFT JOIN ldud_vessel_operations lco
             caption(mbc_start_row + 2, 11, '', span=3)
         else:
             heights = [float(r['tide_meters'] or 0) for r in tide_rows]
-            current = 'HW' if len(heights) >= 2 and heights[0] > heights[1] else 'HW'
+            if len(heights) >= 2:
+                current = 'HW' if heights[0] > heights[1] else 'LW'
+            else:
+                current = 'HW'
             for t_idx, r in enumerate(tide_rows):
                 curr_row = mbc_start_row + 2 + t_idx
                 time_disp = _parse_flexible(r['tide_datetime'], '%H:%M')
                 data(curr_row, 11, current, align=left)
                 data(curr_row, 12, time_disp)
-                data(curr_row, 13, float(r['tide_meters'] or 0))
+                data(curr_row, 13, float(r['tide_meters'] or 0), keep_decimal=True, num_format='0.00')
                 current = 'LW' if current == 'HW' else 'HW'
 
         mbc_count = len(mbc_completed) if mbc_completed else 1
@@ -6593,6 +6786,19 @@ LEFT JOIN ldud_vessel_operations lco
         # fanout, so no more GROUP BY/SUM needed at the outer level.
         # =====================================================
 
+        if report_dt.day == 1:
+            prev_month_last_day = report_dt.replace(day=1) - timedelta(days=1)
+            vessel_month_start_date = prev_month_last_day.replace(day=1)
+        else:
+            vessel_month_start_date = report_dt.replace(day=1)
+
+        vessel_window_start = vessel_month_start_date.replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+        vessel_window_end = report_dt.replace(
+            hour=8, minute=0, second=0, microsecond=0
+        )
+
         cur.execute("""
             SELECT
                 lh.id,
@@ -6628,9 +6834,10 @@ LEFT JOIN ldud_vessel_operations lco
             ) anch ON TRUE
             WHERE
                 anch.discharge_completed IS NOT NULL
-                AND DATE(anch.discharge_completed) BETWEEN %s AND %s
+                AND anch.discharge_completed >= %s
+                AND anch.discharge_completed <  %s
             ORDER BY anch.discharge_completed
-        """, (month_start, report_date))
+        """, (vessel_window_start, vessel_window_end))
 
         completed_rows = [{
             "vessel_name": r["vessel_name"] or "",
@@ -6643,7 +6850,7 @@ LEFT JOIN ldud_vessel_operations lco
             "time_taken_hrs": float(r["time_taken_hrs"] or 0),
         } for r in cur.fetchall() if r["discharge_completed"]]
 
-        month_label = report_dt.strftime('%B')
+        month_label = vessel_month_start_date.strftime('%B')
 
         # section(row_no, 1, f'Vessel Completed for The Month {month_label}', span=9)
         # row_no += 1
@@ -6666,7 +6873,7 @@ LEFT JOIN ldud_vessel_operations lco
             data(row_no, 5, r['load_port'], align=left)
             data(row_no, 6, r['discharge_commenced'])
             data(row_no, 7, r['discharge_completed'])
-            data(row_no, 8, r['time_taken_hrs'])
+            data(row_no, 8, r['time_taken_hrs'], keep_decimal=True, num_format='0.00')
             row_no += 1
 
         # =====================================================
