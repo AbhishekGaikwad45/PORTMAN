@@ -1,106 +1,76 @@
-"""SAP Invoice_Amount is the customer's debit line: it must equal the face
-value of the invoice the customer was handed, i.e. the e-invoice TotInvVal.
+"""SAP Invoice_Amount = taxable + GST + TDS - TCS + round-off.
 
-SAP_Payload_Guide §4: Invoice_Amount = taxable + GST + TCS + round-off.
-Three traps this pins down:
-  * TCS is collected *from* the customer, so it is ADDED. It was subtracted
-    between 2026-05-15 and 2026-09-11, understating every TCS receivable by 2x.
-  * TDS does not move the total at all. It was added over the same window,
-    overstating every TDS receivable by 1x.
-  * total_amount already includes TCS, so rebuilding the base from it would
-    double-count — the builder derives the base from the components instead.
+This is what SAP's posting balances against, proven by SAP's own responses in
+integration_logs (every case below is a real payload + real SAP verdict).
+It is NOT the printed face value — the 2026-09-11 attempt to make it the face
+value (+TCS, TDS excluded) got "Total Debit and Credit amount is not matching"
+on every TDS/TCS invoice (e.g. DPPL/26-27/316).
+Also pins: total_amount already includes TCS, so the base must come from the
+components, never from total_amount.
 Run: python test_sap_invoice_amount.py"""
 from sap_builder import _total_invoice_amount
 
 
-# Prod BILL/101 shape, carried onto an invoice: 502000 basic, 18% GST, TCS 2%.
-LINES = [{'line_amount': 502000.00, 'cgst_amount': 45180.00,
-          'sgst_amount': 45180.00, 'igst_amount': 0.0,
-          'tds_amount': 0.0, 'tcs_amount': 11847.20}]
-
-HEADER = {'subtotal': 502000.00, 'cgst_amount': 45180.00, 'sgst_amount': 45180.00,
-          'igst_amount': 0.0, 'tds_amount': 0.0, 'tcs_amount': 11847.20,
-          'round_off': 0.0,
-          'total_amount': 604207.20}   # display total, TCS-inclusive
-
-
-def test_tcs_is_added_not_subtracted():
-    # 592360.00 + 11847.20 TCS = 604207.20. Subtracting it gave 580512.80 —
-    # 2x TCS short of what the items credit, so the document did not balance.
-    assert round(_total_invoice_amount(HEADER, LINES), 2) == 604207.20
+def _doc(taxable, cgst, sgst, tds=0.0, tcs=0.0, round_off=0.0):
+    lines = [{'line_amount': taxable, 'cgst_amount': cgst, 'sgst_amount': sgst,
+              'igst_amount': 0.0, 'tds_amount': tds, 'tcs_amount': tcs}]
+    header = {'subtotal': taxable, 'cgst_amount': cgst, 'sgst_amount': sgst,
+              'igst_amount': 0.0, 'tds_amount': tds, 'tcs_amount': tcs,
+              'round_off': round_off,
+              # display total, TCS-inclusive — must never be the base
+              'total_amount': round(taxable + cgst + sgst + tcs + round_off, 2)}
+    return header, lines
 
 
-def test_tcs_is_not_double_counted():
-    # Same answer, but it must come from the components: using total_amount as
-    # the base and then adding TCS would produce 616054.40.
-    assert round(_total_invoice_amount(HEADER, LINES), 2) != 616054.40
+def _amt(header, lines):
+    return round(_total_invoice_amount(header, lines), 2)
 
 
-def test_unchanged_for_a_bill_with_no_tcs():
-    header = dict(HEADER, tcs_amount=0.0, total_amount=592360.00)
-    lines = [dict(LINES[0], tcs_amount=0.0)]
-    assert round(_total_invoice_amount(header, lines), 2) == 592360.00
+def test_tcs_is_subtracted():
+    # DPPL/26-27/7: 240000 (+TCS) rejected (log 42), 232000 (-TCS) accepted (log 43).
+    assert _amt(*_doc(200000, 18000, 18000, tcs=4000)) == 232000.00
 
 
-def test_tds_does_not_move_the_receivable():
-    # The customer is invoiced gross and withholds TDS when they pay, so the
-    # receivable is unchanged by it. Adding it gave 602400.00, deducting it
-    # 582320.00 — both put SAP out of step with the printed invoice.
-    header = dict(HEADER, tds_amount=10040.00, tcs_amount=0.0,
-                  total_amount=592360.00)
-    lines = [dict(LINES[0], tds_amount=10040.00, tcs_amount=0.0)]
-    assert round(_total_invoice_amount(header, lines), 2) == 592360.00
+def test_tds_is_added():
+    # DPPL/26-27/2: 236000 rejected (log 31), 232000 rejected (log 35),
+    # 240000 accepted (log 36). Same for /66 (log 153).
+    assert _amt(*_doc(200000, 18000, 18000, tds=4000)) == 240000.00
 
 
-def test_invoice_dppl_26_27_66_with_tds():
-    """Real TDS invoice: 200000 taxable + 18000 + 18000 CGST/SGST, TDS 4000.
-    Header stores total_amount 236000.00 — gross — and that is what the printed
-    invoice and the e-invoice TotInvVal both show, so SAP gets 236000.00."""
-    lines = [{'line_amount': 200000.00, 'cgst_amount': 18000.00,
-              'sgst_amount': 18000.00, 'igst_amount': 0.0,
-              'tds_amount': 4000.00, 'tcs_amount': 0.0}]
-    header = {'subtotal': 200000.00, 'cgst_amount': 18000.00,
-              'sgst_amount': 18000.00, 'igst_amount': 0.0,
-              'tds_amount': 4000.00, 'tcs_amount': 0.0, 'round_off': 0.0,
-              'total_amount': 236000.00}
-    assert round(_total_invoice_amount(header, lines), 2) == 236000.00
+def test_prod_dppl_26_27_316_scrap_tcs():
+    # Rejected 2026-10-12 at 91606.00 (+TCS). SAP-balanced figure is base - TCS.
+    assert _amt(*_doc(76110.00, 6849.90, 6849.90, tcs=1796.20)) == 88013.60
 
 
-def test_prod_bill_dppl_26_27_265():
-    """Scrap sale posted 2026-09-11: 31200 taxable + 2808 + 2808 CGST/SGST,
-    TCS 736.32. The bill showed 37552.32; the payload went out as 36079.68.
-    This is the document that surfaced the inverted sign."""
-    lines = [{'line_amount': 31200.00, 'cgst_amount': 2808.00,
-              'sgst_amount': 2808.00, 'igst_amount': 0.0,
-              'tds_amount': 0.0, 'tcs_amount': 736.32}]
-    header = {'subtotal': 31200.00, 'cgst_amount': 2808.00, 'sgst_amount': 2808.00,
-              'igst_amount': 0.0, 'tds_amount': 0.0, 'tcs_amount': 736.32,
-              'round_off': 0.0, 'total_amount': 37552.32}
-    assert round(_total_invoice_amount(header, lines), 2) == 37552.32
+def test_prod_dppl_26_27_109_accepted():
+    # Accepted (log 177) at 1601935.70.
+    assert _amt(*_doc(1360962.46, 122486.62, 122486.62, tcs=4000)) == 1601935.70
 
 
-def test_prod_payload_dppl_26_27_164():
-    """Taxable 1360962.46 + 122486.62 + 122486.62 CGST/SGST, TCS 4000.00.
-    Posted as "1601935.70" under the inverted sign; the correct customer debit
-    is 1609935.70, which is also what the bill showed."""
-    lines = [{'line_amount': 1360962.46, 'cgst_amount': 122486.62,
-              'sgst_amount': 122486.62, 'igst_amount': 0.0,
-              'tds_amount': 0.0, 'tcs_amount': 4000.00}]
-    header = {'subtotal': 1360962.46, 'cgst_amount': 122486.62,
-              'sgst_amount': 122486.62, 'igst_amount': 0.0,
-              'tds_amount': 0.0, 'tcs_amount': 4000.00, 'round_off': 0.0,
-              'total_amount': 1609935.70}
-    assert round(_total_invoice_amount(header, lines), 2) == 1609935.70
+def test_no_tds_no_tcs_is_the_base():
+    assert _amt(*_doc(502000, 45180, 45180)) == 592360.00
 
 
 def test_round_off_carries():
-    header = dict(HEADER, round_off=0.20)
-    assert round(_total_invoice_amount(header, LINES), 2) == 604207.40
+    # DPPL/26-27/38: 476003.00 accepted (log 136) — two lines, TDS 4000, RO +3.
+    h, l = _doc(400000, 36000, 36000, tds=4000, round_off=3.0)
+    assert _amt(h, l) == 476003.00
 
 
 def test_falls_back_to_lines_when_header_has_no_components():
-    header = {'tds_amount': 0.0, 'tcs_amount': 11847.20, 'round_off': 0.0}
-    assert round(_total_invoice_amount(header, LINES), 2) == 604207.20
+    _, lines = _doc(200000, 18000, 18000, tcs=4000)
+    assert _amt({'tcs_amount': 0.0, 'round_off': 0.0}, lines) == 232000.00
+
+
+def test_sent_amount_balances_items_even_if_header_is_stale():
+    # Header says CGST 90.01, line says 90.00: the items carry 90.00, so SAP's
+    # check only passes if Invoice_Amount is derived from the items.
+    from sap_builder import _balance_invoice_amount
+    item = {'Amount': '1000.00', 'CGST_AMT': '90.00', 'SGST_AMT': '90.00',
+            'IGST_AMT': '', 'TDS_amount': '4.00', 'TCS_amount': '11.80',
+            'Round_off_Value': '-0.20'}
+    rec = _balance_invoice_amount({'Invoice_Amount': '1168.21', 'ITEM': [item]})
+    assert rec['Invoice_Amount'] == '1172.00'   # 1000+90+90+4-0.20-11.80
 
 
 if __name__ == '__main__':

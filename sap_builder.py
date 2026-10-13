@@ -13,7 +13,7 @@ Header fields (PORTBIRD spec):
   Reference              16 char — PMS doc number; for reversals: original SAP Document_Number
   Document_type          DR for Invoice / Debit Note, DG for Credit Note
   Customer_Code          10 char
-  Invoice_Amount         13 curr (taxable + GST + TCS + Round_off, always positive)
+  Invoice_Amount         13 curr (taxable + GST + TDS - TCS + Round_off, always positive)
   Business_place
   Section_code
   Text                   short narration (25 char)
@@ -58,9 +58,12 @@ Reversal rule: For reversals, the payload is identical to the original
 invoice with Cancellation_Flag set to 'X' and Reference set to the
 original SAP Document_Number.
 """
+import logging
 from datetime import datetime
 from database import get_db, get_cursor
 from modules.SAPCFG.model import get_active_config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -349,24 +352,21 @@ def _build_items(lines, reference, amount_field='line_amount',
 
 
 def _total_invoice_amount(header, lines, amount_field='line_amount'):
-    """Return the receivable: taxable + GST + TCS + Round_off.
+    """Return Invoice_Amount: taxable + GST + TDS - TCS + Round_off.
 
-    This is the customer's debit line, and it must equal the face value of the
-    invoice the customer was handed — the same number the IRP validates as
-    `TotInvVal` (see einvoice_builder).
-
-      * TCS is collected *from* the customer, so it is part of what they owe.
-        It is added. Subtracting it (sign inverted 2026-05-15 .. 2026-09-11)
-        understated every TCS receivable by 2x the TCS.
-      * TDS does not appear at all. It is the customer's own withholding at
-        payment time, not a reduction of the invoice — `total_amount` and the
-        e-invoice `TotInvVal` both exclude it, so netting it off here would put
-        SAP out of step with the printed document. `TDS_GL`/`TDS_amount` still
-        ride on the ITEM for SAP's withholding-tax records.
+    This is the figure SAP's posting balances against — NOT the printed face
+    value. SAP's ABAP (FIIF059, zfiii_si_invoice_ecc_ib) checks, for DR:
+        Invoice_Amount + sum(TCS) == sum(Amount + C/S/IGST + TDS + Round_off)
+    and the mirror image for DG. Confirmed by SAP's responses in integration_logs:
+      * base + TCS  -> "Total Debit and Credit amount is not matching"
+        (DPPL/26-27/7 log 42, DPPL/26-27/316); base - TCS -> accepted (log 43, 177).
+      * base / base - TDS -> rejected (log 31, 35); base + TDS -> accepted (36, 153).
+    The 2026-09-11 switch to "+TCS, TDS excluded" followed the written spec
+    and broke every TDS/TCS posting. Do not change the signs without a
+    successful SAP response to back it.
 
     The taxable + GST base is rebuilt from the header's own components — never
-    from `total_amount`, which is a display total that already includes TCS and
-    would double-count it here.
+    from `total_amount`, which is a display total that already includes TCS.
     """
     total = (float(header.get('subtotal') or 0)
              + float(header.get('cgst_amount') or 0)
@@ -378,17 +378,42 @@ def _total_invoice_amount(header, lines, amount_field='line_amount'):
         total += sum(float(l.get('sgst_amount') or 0) for l in lines)
         total += sum(float(l.get('igst_amount') or 0) for l in lines)
 
+    tds = float(header.get('tds_amount') or 0)
+    if not tds:
+        tds = sum(float(l.get('tds_amount') or 0) for l in lines)
     tcs = float(header.get('tcs_amount') or 0)
     if not tcs:
         tcs = sum(float(l.get('tcs_amount') or 0) for l in lines)
     round_off = float(header.get('round_off') or 0)
 
-    return total + tcs + round_off
+    return total + tds - tcs + round_off
 
 
 # ---------------------------------------------------------------------------
 # Common header builder
 # ---------------------------------------------------------------------------
+
+
+def _balance_invoice_amount(record):
+    """Set Invoice_Amount from the ITEM rows actually sent, so SAP's FIIF059
+    check  Invoice_Amount + sum(TCS) == sum(Amount + GST + TDS + Round_off)
+    holds by construction. A header that disagrees with its lines is logged,
+    not sent — SAP would reject it with "Total Debit and Credit ... not matching".
+    """
+    items = record.get('ITEM') or []
+    if not items:
+        return record
+    f = lambda v: round(float(v or 0) * 100)          # paise, exact
+    credit = sum(f(it[k]) for it in items
+                 for k in ('Amount', 'CGST_AMT', 'SGST_AMT', 'IGST_AMT', 'TDS_amount', 'Round_off_Value'))
+    tcs = sum(f(it['TCS_amount']) for it in items)
+    amount = _fmt_amount_required((credit - tcs) / 100)
+    if amount != record['Invoice_Amount']:
+        logger.warning('SAP %s: header total %s disagrees with lines %s; sending %s',
+                       record.get('Reference'), record['Invoice_Amount'], amount, amount)
+    record['Invoice_Amount'] = amount
+    return record
+
 
 def _build_header_base(config, customer_code, company, inv_date,
                        reference, header_text, short_text, currency,
@@ -467,7 +492,7 @@ def build_invoice_payload(invoice_header, invoice_lines):
         config_defaults=config, svc_map=svc_map, doc_type='DR',
         round_off=float(invoice_header.get('round_off') or 0),
     )
-    return {'Record_Header': [record]}
+    return {'Record_Header': [_balance_invoice_amount(record)]}
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +564,7 @@ def build_fdcn_payload(fdcn_header, fdcn_lines):
         config_defaults=config, svc_map=svc_map, doc_type=doc_type,
         round_off=float(fdcn_header.get('round_off') or 0),
     )
-    return {'Record_Header': [record]}
+    return {'Record_Header': [_balance_invoice_amount(record)]}
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +618,7 @@ def build_invoice_reversal_payload(invoice_header, invoice_lines):
         config_defaults=config, svc_map=svc_map, doc_type='DR',
         round_off=float(invoice_header.get('round_off') or 0),
     )
-    return {'Record_Header': [record]}
+    return {'Record_Header': [_balance_invoice_amount(record)]}
 
 
 # ---------------------------------------------------------------------------
@@ -645,4 +670,4 @@ def build_invoice_credit_note_payload(invoice_header, invoice_lines):
         config_defaults=config, svc_map=svc_map, doc_type='DG',
         round_off=float(invoice_header.get('round_off') or 0),
     )
-    return {'Record_Header': [record]}
+    return {'Record_Header': [_balance_invoice_amount(record)]}
