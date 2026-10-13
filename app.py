@@ -107,6 +107,7 @@ from modules.MBCDS01 import bp as mbcds01_bp, MODULE_INFO as mbcds01_info
 from modules.INVDS01 import bp as invds01_bp, MODULE_INFO as invds01_info
 from modules.CNDS01 import bp as cnds01_bp, MODULE_INFO as cnds01_info
 from modules.MBC01 import bp as mbc01_bp, MODULE_INFO as mbc01_info
+from modules.MBCT01 import bp as mbct01_bp, MODULE_INFO as mbct01_info
 from modules.PPL01 import bp as ppl01_bp, MODULE_INFO as ppl01_info
 from modules.LUEU01 import bp as eu01_bp, MODULE_INFO as eu01_info
 from modules.CRM01 import bp as crm01_bp, MODULE_INFO as crm01_info
@@ -178,6 +179,7 @@ register_module(mbcds01_info['code'], mbcds01_info['name'], mbcds01_bp)
 register_module(invds01_info['code'], invds01_info['name'], invds01_bp)
 register_module(cnds01_info['code'], cnds01_info['name'], cnds01_bp)
 register_module(mbc01_info['code'], mbc01_info['name'], mbc01_bp)
+register_module(mbct01_info['code'], mbct01_info['name'], mbct01_bp)
 register_module(ppl01_info['code'], ppl01_info['name'], ppl01_bp)
 register_module(eu01_info['code'], eu01_info['name'], eu01_bp)
 register_module(crm01_info['code'], crm01_info['name'], crm01_bp)
