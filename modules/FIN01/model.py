@@ -236,7 +236,7 @@ _SOURCE_DECLARATIONS = {
 _DEAD_BILL_STATUSES = ('Cancelled', 'Rejected')
 
 
-def source_lock_state(cur, source_kind, source_id):
+def source_lock_state(cur, source_kind, source_id, line_id=None):
     """Billing lock on an operational document (MBC doc or VCN call).
 
     Returns:
@@ -249,10 +249,15 @@ def source_lock_state(cur, source_kind, source_id):
     invoiced off this cargo, the operational record behind it is evidence and
     must never move, even if the bill is later cancelled.
 
-    source_kind: 'MBC' or 'VCN'."""
+    source_kind: 'MBC' or 'VCN'.
+    line_id: narrow the check to one declaration row of the document. Only
+      for single-table kinds (MBC) — VCN's two tables share an id space."""
     tables = _SOURCE_DECLARATIONS.get(source_kind)
     if not tables or not source_id:
         return ''
+    assert line_id is None or len(tables) == 1, 'line_id needs a single-table source kind'
+    line_sql = ' AND d.id = %s' if line_id else ''
+    line_args = [line_id] if line_id else []
 
     # Table/column names come from the _SOURCE_DECLARATIONS constant, never input.
     for table, owner_col, cargo_source_type in tables:
@@ -260,8 +265,8 @@ def source_lock_state(cur, source_kind, source_id):
             SELECT 1 FROM {table} d
             JOIN bill_lines bl ON bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
             JOIN invoice_bill_mapping ibm ON ibm.bill_id = bl.bill_id
-            WHERE d.{owner_col} = %s LIMIT 1
-        ''', [cargo_source_type, source_id])
+            WHERE d.{owner_col} = %s{line_sql} LIMIT 1
+        ''', [cargo_source_type, source_id] + line_args)
         if cur.fetchone():
             return 'invoiced'
 
@@ -270,7 +275,7 @@ def source_lock_state(cur, source_kind, source_id):
             SELECT 1 FROM {table} d
             LEFT JOIN bill_lines bl ON bl.cargo_source_type = %s AND bl.cargo_source_id = d.id
             LEFT JOIN bill_header bh ON bh.id = bl.bill_id
-            WHERE d.{owner_col} = %s
+            WHERE d.{owner_col} = %s{line_sql}
               AND (
                     (bl.id IS NOT NULL AND COALESCE(bh.bill_status, '') <> ALL(%s))
                     -- cutover-marked cargo carries no bill row but is still billed
@@ -278,7 +283,7 @@ def source_lock_state(cur, source_kind, source_id):
                     OR COALESCE(d.billed_quantity, 0) > 0
                   )
             LIMIT 1
-        ''', [cargo_source_type, source_id, list(_DEAD_BILL_STATUSES)])
+        ''', [cargo_source_type, source_id] + line_args + [list(_DEAD_BILL_STATUSES)])
         if cur.fetchone():
             return 'billed'
 

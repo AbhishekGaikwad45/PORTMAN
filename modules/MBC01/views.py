@@ -2,6 +2,7 @@ import io
 import json as _json
 import mimetypes
 import os
+import psycopg2.errors
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, send_file
 from werkzeug.security import check_password_hash
 from functools import wraps
@@ -357,6 +358,29 @@ def delete_customer_detail():
     if blocked:
         return blocked
     model.delete_customer_detail(request.json['id'])
+    return jsonify({'success': True})
+
+
+@bp.route('/api/module/MBC01/customer_details/change_customer', methods=['POST'])
+@login_required
+def change_customer():
+    """Fix the customer on an unbilled line after approval / partial billing.
+    Bypasses the whole-MBC lock on purpose; the per-line billing lock and a
+    mandatory, logged reason stand in for it."""
+    if not get_perms().get('can_edit'):
+        return jsonify({'error': 'No permission'}), 403
+    data = request.json or {}
+    row_id = data.get('id')
+    new_customer = (data.get('customer_name') or '').strip()
+    reason = (data.get('reason') or '').strip()
+    if not row_id or not new_customer or not reason:
+        return jsonify({'error': 'Customer line, new customer and reason are required'}), 400
+    try:
+        ok, err = model.change_customer(row_id, new_customer, reason, session.get('username'))
+    except psycopg2.errors.ForeignKeyViolation:
+        return jsonify({'error': f'Unknown customer: {new_customer}'}), 400
+    if not ok:
+        return jsonify({'error': err}), 403
     return jsonify({'success': True})
 
 

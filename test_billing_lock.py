@@ -11,10 +11,12 @@ class FakeCursor:
     def __init__(self, answers):
         self.answers = list(answers)
         self.sql = []
+        self.params = []
         self._row = None
 
     def execute(self, sql, params=None):
         self.sql.append(' '.join(sql.split()))
+        self.params.append(params)
         self._row = self.answers.pop(0) if self.answers else None
 
     def fetchone(self):
@@ -69,6 +71,25 @@ def test_export_only_billing_still_locks():
 def test_unknown_kind_and_missing_id_are_open():
     assert source_lock_state(FakeCursor([]), 'BARGE', 1) == ''
     assert source_lock_state(FakeCursor([]), 'MBC', None) == ''
+
+
+def test_line_scope_narrows_to_one_row():
+    # MBC01 Change Customer: a billed sibling must not lock this line, so both
+    # probes filter on the line id and bind it right after the mbc_id.
+    cur = FakeCursor([None, None])
+    assert source_lock_state(cur, 'MBC', 42, line_id=9) == ''
+    for sql, params in zip(cur.sql, cur.params):
+        assert 'd.id = %s' in sql
+        assert params[1:3] == [42, 9]
+    assert sql.count('%s') == len(params)
+
+
+def test_line_scope_refused_for_vcn():
+    try:
+        source_lock_state(FakeCursor([]), 'VCN', 7, line_id=1)
+    except AssertionError:
+        return
+    raise AssertionError('VCN line scope should be refused')
 
 
 if __name__ == '__main__':

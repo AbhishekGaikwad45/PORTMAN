@@ -326,12 +326,16 @@ def delete_export_load_port_line(row_id):
 
 # Customer Details sub-table operations
 def get_customer_details(mbc_id):
+    from modules.FIN01 import model as fin_model
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute('SELECT * FROM mbc_customer_details WHERE mbc_id=%s ORDER BY id DESC', (mbc_id,))
-    rows = cur.fetchall()
+    rows = [dict(r) for r in cur.fetchall()]
+    # ponytail: 2 queries per line; MBCs carry a handful of customer lines
+    for r in rows:
+        r['_lock'] = fin_model.source_lock_state(cur, 'MBC', mbc_id, line_id=r['id'])
     conn.close()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def save_customer_detail(data):
@@ -357,6 +361,40 @@ def save_customer_detail(data):
     conn.commit()
     conn.close()
     return row_id
+
+
+def change_customer(row_id, new_customer, reason, username):
+    """Re-point one unbilled customer line at another customer, even on an
+    Approved MBC or one whose other lines are billed. Only customer_name moves;
+    the old/new pair and the reason go to approval_log.
+
+    Returns (ok, error_message)."""
+    from modules.FIN01 import model as fin_model
+    conn = get_db()
+    cur = get_cursor(conn)
+    try:
+        cur.execute('SELECT mbc_id, customer_name FROM mbc_customer_details WHERE id=%s FOR UPDATE',
+                    (row_id,))
+        line = cur.fetchone()
+        if not line:
+            return False, 'Customer line not found'
+        state = fin_model.source_lock_state(cur, 'MBC', line['mbc_id'], line_id=row_id)
+        if state:
+            return False, fin_model.lock_message(state, 'customer line')
+        if line['customer_name'] == new_customer:
+            return False, 'New customer is the same as the current one'
+        # FK to vessel_customers.name rejects unknown names.
+        cur.execute('UPDATE mbc_customer_details SET customer_name=%s WHERE id=%s',
+                    (new_customer, row_id))
+        cur.execute("""INSERT INTO approval_log (module_code, record_id, action, comment, actioned_by)
+                       VALUES ('MBC01', %s, 'Customer Changed', %s, %s)""",
+                    (line['mbc_id'],
+                     f"Line #{row_id}: {line['customer_name'] or '-'} → {new_customer}. Reason: {reason}",
+                     username))
+        conn.commit()
+        return True, None
+    finally:
+        conn.close()
 
 
 def delete_customer_detail(row_id):
