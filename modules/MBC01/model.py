@@ -325,15 +325,28 @@ def delete_export_load_port_line(row_id):
 
 
 # Customer Details sub-table operations
-def get_customer_details(mbc_id):
+def _line_lock(cur, line):
+    """Billing lock on one customer line: '', 'billed' or 'invoiced'.
+
+    The line's own billed counters decide, because they are what FIN01 reads to
+    offer cargo for billing. Cargo freed by Admin → Release Cargo keeps its old
+    bill/invoice rows (the money is corrected by credit note) but its counters
+    are zeroed — it is billable again, so its customer must be correctable too."""
     from modules.FIN01 import model as fin_model
+    if not (line.get('is_billed') or float(line.get('billed_quantity') or 0) > 0
+            or line.get('bill_id')):
+        return ''
+    return fin_model.source_lock_state(cur, 'MBC', line['mbc_id'], line_id=line['id']) or 'billed'
+
+
+def get_customer_details(mbc_id):
     conn = get_db()
     cur = get_cursor(conn)
     cur.execute('SELECT * FROM mbc_customer_details WHERE mbc_id=%s ORDER BY id DESC', (mbc_id,))
     rows = [dict(r) for r in cur.fetchall()]
-    # ponytail: 2 queries per line; MBCs carry a handful of customer lines
+    # ponytail: up to 2 queries per billed line; MBCs carry a handful of lines
     for r in rows:
-        r['_lock'] = fin_model.source_lock_state(cur, 'MBC', mbc_id, line_id=r['id'])
+        r['_lock'] = _line_lock(cur, r)
     conn.close()
     return rows
 
@@ -373,12 +386,12 @@ def change_customer(row_id, new_customer, reason, username):
     conn = get_db()
     cur = get_cursor(conn)
     try:
-        cur.execute('SELECT mbc_id, customer_name FROM mbc_customer_details WHERE id=%s FOR UPDATE',
-                    (row_id,))
+        cur.execute('''SELECT id, mbc_id, customer_name, is_billed, billed_quantity, bill_id
+                       FROM mbc_customer_details WHERE id=%s FOR UPDATE''', (row_id,))
         line = cur.fetchone()
         if not line:
             return False, 'Customer line not found'
-        state = fin_model.source_lock_state(cur, 'MBC', line['mbc_id'], line_id=row_id)
+        state = _line_lock(cur, dict(line))
         if state:
             return False, fin_model.lock_message(state, 'customer line')
         if line['customer_name'] == new_customer:

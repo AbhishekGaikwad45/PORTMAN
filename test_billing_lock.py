@@ -84,6 +84,19 @@ def test_line_scope_narrows_to_one_row():
     assert sql.count('%s') == len(params)
 
 
+def test_released_line_is_open_despite_old_invoice():
+    # Admin → Release Cargo zeroes the counters but leaves the old invoice rows;
+    # FIN01 offers it for billing again, so MBC01 must not call it invoiced.
+    from modules.MBC01.model import _line_lock
+    cur = FakeCursor([{'?column?': 1}])     # the old invoice link still exists
+    released = {'id': 9, 'mbc_id': 42, 'is_billed': 0, 'billed_quantity': 0, 'bill_id': None}
+    assert _line_lock(cur, released) == ''
+    assert cur.sql == []                    # counters decide; no probe runs
+    held = dict(released, is_billed=1, billed_quantity=7816, bill_id=5)
+    assert _line_lock(FakeCursor([{'?column?': 1}]), held) == 'invoiced'
+    assert _line_lock(FakeCursor([None, None]), held) == 'billed'   # cutover mark
+
+
 def test_line_scope_refused_for_vcn():
     try:
         source_lock_state(FakeCursor([]), 'VCN', 7, line_id=1)
