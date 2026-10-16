@@ -4899,6 +4899,428 @@ def vessel_discharge_summary():
 #         cur.close()
 #         conn.close()
 
+def _build_vessel_discharge_progress_sheet(wb, cur, report_date):
+    """
+    Build 2nd worksheet: Vessel Discharge Progress Report.
+    Matches layout, styling, and logic from the daily progress report reference image.
+    """
+    import calendar
+    from datetime import datetime, date, timedelta
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    report_dt = datetime.strptime(report_date, "%Y-%m-%d")
+
+    # Date range logic:
+    # If 1st date of month is selected: report the entire previous month.
+    # If day > 1 is selected: report the current month up to the day before report_date.
+    if report_dt.day == 1:
+        prev_month_last_day = report_dt.replace(day=1) - timedelta(days=1)
+        target_year = prev_month_last_day.year
+        target_month = prev_month_last_day.month
+        month_start_date = date(target_year, target_month, 1)
+        _, last_day_num = calendar.monthrange(target_year, target_month)
+        month_end_date = date(target_year, target_month, last_day_num)
+
+        eval_start = datetime(target_year, target_month, 1, 8, 0, 0)
+        eval_end = datetime(report_dt.year, report_dt.month, report_dt.day, 8, 0, 0)
+
+        prior_month_date = month_start_date - timedelta(days=1)
+        prior_month_label = prior_month_date.strftime('%b-%y')
+
+        data_cutoff_date = month_end_date
+        top_timestamp = (report_dt - timedelta(days=1)).strftime('%d-%m-%Y 06:00')
+    else:
+        target_year = report_dt.year
+        target_month = report_dt.month
+        month_start_date = date(target_year, target_month, 1)
+        _, last_day_num = calendar.monthrange(target_year, target_month)
+        month_end_date = date(target_year, target_month, last_day_num)
+
+        eval_start = datetime(target_year, target_month, 1, 8, 0, 0)
+        eval_end = datetime(report_dt.year, report_dt.month, report_dt.day, 8, 0, 0)
+
+        prior_month_date = month_start_date - timedelta(days=1)
+        prior_month_label = prior_month_date.strftime('%b-%y')
+
+        data_cutoff_date = report_dt.date() - timedelta(days=1)
+        top_timestamp = report_dt.strftime('%d-%m-%Y 06:00')
+
+    ws2 = wb.create_sheet(title="Discharge Progress")
+    ws2.views.sheetView[0].showGridLines = True
+
+    thin_side = Side(style='thin', color='A6A6A6')
+    thin_bdr = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    header_fill = PatternFill('solid', fgColor='D4F4FA')
+
+    font_reg = Font(name='Calibri', size=11, bold=False)
+    font_bold = Font(name='Calibri', size=11, bold=True)
+    font_banner = Font(name='Calibri', size=14, bold=True)
+
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    align_right = Alignment(horizontal='right', vertical='center', wrap_text=True)
+
+    # 1. Query vessels active during evaluation window
+    vessel_query = """
+    SELECT
+        lh.id,
+        lh.vessel_name,
+        vcd.cargo_name,
+        vcd.bl_quantity,
+        first_anchor.arrived_mfl,
+        first_anchor.arrived_mbpt,
+        first_anchor.discharge_started,
+        last_anchor.discharge_completed
+    FROM ldud_header lh
+    LEFT JOIN LATERAL (
+        SELECT
+            STRING_AGG(cargo_name, ' + ' ORDER BY cargo_name) AS cargo_name,
+            SUM(bl_qty) AS bl_quantity
+        FROM (
+            SELECT TRIM(cargo_name) AS cargo_name,
+                   SUM(COALESCE(bl_quantity, 0)) AS bl_qty
+            FROM vcn_cargo_declaration
+            WHERE vcn_id = lh.vcn_id
+            GROUP BY TRIM(cargo_name)
+        ) cargo
+    ) vcd ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            MIN(CASE WHEN anchorage_name ILIKE '%%PLA%%' THEN anchored END) AS arrived_mfl,
+            MIN(CASE WHEN anchorage_name NOT ILIKE '%%PLA%%' THEN anchored END) AS arrived_mbpt,
+            MIN(discharge_started) AS discharge_started
+        FROM ldud_anchorage
+        WHERE ldud_id = lh.id
+    ) first_anchor ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM ldud_anchorage x
+                    WHERE x.ldud_id = lh.id
+                    AND x.discharge_started IS NOT NULL
+                    AND x.discharge_commenced IS NULL
+                ) THEN NULL
+                ELSE MAX(discharge_commenced)
+            END AS discharge_completed
+        FROM ldud_anchorage
+        WHERE ldud_id = lh.id
+    ) last_anchor ON TRUE
+    WHERE
+        first_anchor.discharge_started IS NOT NULL
+        AND first_anchor.discharge_started < %s
+        AND (
+            last_anchor.discharge_completed IS NULL
+            OR last_anchor.discharge_completed >= %s
+        )
+    ORDER BY first_anchor.discharge_started, lh.id
+    """
+    cur.execute(vessel_query, (eval_end, eval_start))
+    vessels = cur.fetchall()
+    vessel_ids = [v['id'] for v in vessels]
+    num_vessels = len(vessels)
+
+    # 2. Prior month discharged quantities per vessel
+    prior_qty_map = {}
+    if vessel_ids:
+        cur.execute("""
+            SELECT ldud_id, COALESCE(SUM(quantity), 0) AS prior_qty
+            FROM ldud_vessel_operations
+            WHERE ldud_id = ANY(%s) AND DATE(start_time) < %s::date
+            GROUP BY ldud_id
+        """, (vessel_ids, month_start_date))
+        for r in cur.fetchall():
+            prior_qty_map[r['ldud_id']] = float(r['prior_qty'] or 0)
+
+    # 3. Daily operations quantities per vessel
+    daily_ops_map = {}
+    if vessel_ids:
+        cur.execute("""
+            SELECT
+                ldud_id,
+                TO_CHAR(DATE(start_time), 'YYYY-MM-DD') AS op_day,
+                COALESCE(SUM(quantity), 0) AS daily_qty
+            FROM ldud_vessel_operations
+            WHERE ldud_id = ANY(%s)
+              AND DATE(start_time) >= %s::date
+              AND DATE(start_time) <= %s::date
+            GROUP BY ldud_id, DATE(start_time)
+        """, (vessel_ids, month_start_date, data_cutoff_date))
+        for r in cur.fetchall():
+            daily_ops_map[(r['ldud_id'], r['op_day'])] = float(r['daily_qty'] or 0)
+
+    # 4. Want of Barge (WOB) delay hours
+    wob_map = {}
+    if vessel_ids:
+        cur.execute("""
+            SELECT
+                SUBSTRING(TRIM(start_datetime) FROM 1 FOR 10) AS delay_day,
+                COALESCE(SUM(total_time_hrs), 0) AS wob_hrs
+            FROM ldud_delays
+            WHERE delay_name ILIKE '%%Want of Barge%%'
+              AND ldud_id = ANY(%s)
+              AND SUBSTRING(TRIM(start_datetime) FROM 1 FOR 10) >= %s
+              AND SUBSTRING(TRIM(start_datetime) FROM 1 FOR 10) <= %s
+            GROUP BY delay_day
+        """, (vessel_ids, month_start_date.strftime('%Y-%m-%d'), data_cutoff_date.strftime('%Y-%m-%d')))
+        for r in cur.fetchall():
+            if r['delay_day']:
+                wob_map[r['delay_day']] = float(r['wob_hrs'] or 0)
+
+    wob_col = 3 + num_vessels
+    act_col = 4 + num_vessels
+
+    # Row 2: Top Timestamp
+    ts_cell = ws2.cell(row=2, column=act_col, value=top_timestamp)
+    ts_cell.font = font_bold
+    ts_cell.alignment = align_right
+
+    # Row 3: Vessel Name
+    c_b3 = ws2.cell(row=3, column=2, value='Vessel Name')
+    c_b3.font = font_bold
+    c_b3.fill = header_fill
+    c_b3.alignment = align_center
+    c_b3.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        c = ws2.cell(row=3, column=3 + idx, value=v['vessel_name'] or '')
+        c.font = font_bold
+        c.fill = header_fill
+        c.alignment = align_center
+        c.border = thin_bdr
+
+    # Total Quantity Banner (Merged across WOB and Actual, Rows 3 to 7)
+    ws2.merge_cells(start_row=3, start_column=wob_col, end_row=7, end_column=act_col)
+    banner_cell = ws2.cell(row=3, column=wob_col, value="Total Quantity\n( in MTs )")
+    banner_cell.font = font_banner
+    banner_cell.fill = header_fill
+    banner_cell.alignment = align_center
+    for r in range(3, 8):
+        for col_idx in (wob_col, act_col):
+            cell = ws2.cell(row=r, column=col_idx)
+            cell.fill = header_fill
+            cell.border = thin_bdr
+
+    # Row 4: Material
+    c_b4 = ws2.cell(row=4, column=2, value='Material')
+    c_b4.font = font_bold
+    c_b4.alignment = align_left
+    c_b4.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        c = ws2.cell(row=4, column=3 + idx, value=v['cargo_name'] or '')
+        c.font = font_reg
+        c.alignment = align_center
+        c.border = thin_bdr
+
+    # Row 5: Total Qty (MT)
+    c_b5 = ws2.cell(row=5, column=2, value='Total Qty (MT)')
+    c_b5.font = font_bold
+    c_b5.alignment = align_left
+    c_b5.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        bl_val = float(v['bl_quantity']) if v['bl_quantity'] is not None else ''
+        c = ws2.cell(row=5, column=3 + idx, value=bl_val)
+        c.font = font_bold
+        c.alignment = align_center
+        c.border = thin_bdr
+        if isinstance(bl_val, (int, float)):
+            c.number_format = '#,##0'
+
+    # Row 6: Arrived Time
+    c_b6 = ws2.cell(row=6, column=2, value='Arrived Time')
+    c_b6.font = font_bold
+    c_b6.alignment = align_left
+    c_b6.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        arr_dt = v['arrived_mfl'] or v['arrived_mbpt']
+        arr_str = arr_dt.strftime('%d-%m-%Y %H:%M') if arr_dt else ''
+        c = ws2.cell(row=6, column=3 + idx, value=arr_str)
+        c.font = font_reg
+        c.alignment = align_center
+        c.border = thin_bdr
+
+    # Row 7: Disch Comm
+    c_b7 = ws2.cell(row=7, column=2, value='Disch Comm')
+    c_b7.font = font_bold
+    c_b7.alignment = align_left
+    c_b7.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        comm_dt = v['discharge_started']
+        comm_str = comm_dt.strftime('%d-%m-%Y %H:%M') if comm_dt else ''
+        c = ws2.cell(row=7, column=3 + idx, value=comm_str)
+        c.font = font_reg
+        c.alignment = align_center
+        c.border = thin_bdr
+
+    # Row 8: Pre-Berthing Delay
+    c_b8 = ws2.cell(row=8, column=2, value='Pre-Berthing Delay')
+    c_b8.font = font_bold
+    c_b8.alignment = align_left
+    c_b8.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        arr_dt = v['arrived_mfl'] or v['arrived_mbpt']
+        comm_dt = v['discharge_started']
+        p_str = ''
+        if arr_dt and comm_dt:
+            diff_h = max((comm_dt - arr_dt).total_seconds() / 3600.0, 0)
+            p_str = f'{diff_h:.2f} Hrs'
+        c = ws2.cell(row=8, column=3 + idx, value=p_str)
+        c.font = font_reg
+        c.alignment = align_center
+        c.border = thin_bdr
+    c_wob8 = ws2.cell(row=8, column=wob_col, value='-')
+    c_wob8.font = font_reg
+    c_wob8.alignment = align_center
+    c_wob8.border = thin_bdr
+    c_act8 = ws2.cell(row=8, column=act_col, value='0 Hrs')
+    c_act8.font = font_bold
+    c_act8.alignment = align_center
+    c_act8.border = thin_bdr
+
+    # Row 9: Disch Compl.
+    c_b9 = ws2.cell(row=9, column=2, value='Disch Compl.')
+    c_b9.font = font_bold
+    c_b9.alignment = align_left
+    c_b9.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        comp_dt = v['discharge_completed']
+        comp_str = ''
+        if comp_dt and comp_dt <= eval_end:
+            comp_str = comp_dt.strftime('%d-%m-%Y %H:%M')
+        c = ws2.cell(row=9, column=3 + idx, value=comp_str)
+        c.font = font_reg
+        c.alignment = align_center
+        c.border = thin_bdr
+    c_wob9 = ws2.cell(row=9, column=wob_col, value='WOB')
+    c_wob9.font = font_bold
+    c_wob9.alignment = align_center
+    c_wob9.border = thin_bdr
+    c_act9 = ws2.cell(row=9, column=act_col, value='Actual')
+    c_act9.font = font_bold
+    c_act9.alignment = align_center
+    c_act9.border = thin_bdr
+
+    # Row 10: Prior Month
+    c_b10 = ws2.cell(row=10, column=2, value=prior_month_label)
+    c_b10.font = font_bold
+    c_b10.alignment = align_center
+    c_b10.border = thin_bdr
+    for idx, v in enumerate(vessels):
+        p_qty = prior_qty_map.get(v['id'], 0)
+        c = ws2.cell(row=10, column=3 + idx, value=p_qty if p_qty > 0 else '')
+        c.font = font_reg
+        c.alignment = align_right
+        c.border = thin_bdr
+        if p_qty > 0:
+            c.number_format = '#,##0'
+    c_wob10 = ws2.cell(row=10, column=wob_col, value='-')
+    c_wob10.font = font_reg
+    c_wob10.alignment = align_center
+    c_wob10.border = thin_bdr
+    c_act10 = ws2.cell(row=10, column=act_col, value='')
+    c_act10.font = font_reg
+    c_act10.alignment = align_center
+    c_act10.border = thin_bdr
+
+    # Rows 11 to 10 + last_day_num: Days of Month
+    for day_num in range(1, last_day_num + 1):
+        row_idx = 10 + day_num
+        curr_d = date(target_year, target_month, day_num)
+        curr_d_str = curr_d.strftime('%Y-%m-%d')
+        day_disp = curr_d.strftime('%d-%b-%y')
+
+        c_d = ws2.cell(row=row_idx, column=2, value=day_disp)
+        c_d.font = font_reg
+        c_d.alignment = align_center
+        c_d.border = thin_bdr
+
+        row_actual_sum = 0.0
+        has_vessel_qty = False
+        for idx, v in enumerate(vessels):
+            c = ws2.cell(row=row_idx, column=3 + idx)
+            c.font = font_reg
+            c.alignment = align_right
+            c.border = thin_bdr
+            if curr_d <= data_cutoff_date:
+                q = daily_ops_map.get((v['id'], curr_d_str), 0.0)
+                if q > 0:
+                    c.value = q
+                    c.number_format = '#,##0'
+                    row_actual_sum += q
+                    has_vessel_qty = True
+                else:
+                    c.value = ''
+            else:
+                c.value = ''
+
+        # WOB
+        wob_val = wob_map.get(curr_d_str, 0.0) if curr_d <= data_cutoff_date else 0.0
+        c_w = ws2.cell(row=row_idx, column=wob_col)
+        c_w.border = thin_bdr
+        if wob_val > 0:
+            c_w.value = round(wob_val, 2)
+            c_w.font = font_reg
+            c_w.alignment = align_center
+            c_w.number_format = '0.00'
+        else:
+            c_w.value = '-'
+            c_w.font = font_reg
+            c_w.alignment = align_center
+
+        # Actual
+        c_a = ws2.cell(row=row_idx, column=act_col)
+        c_a.border = thin_bdr
+        if has_vessel_qty:
+            c_a.value = row_actual_sum
+            c_a.font = font_reg
+            c_a.alignment = align_right
+            c_a.number_format = '#,##0'
+        else:
+            c_a.value = '-'
+            c_a.font = font_reg
+            c_a.alignment = align_center
+
+    # Total Row
+    tot_row = 11 + last_day_num
+    c_tot_label = ws2.cell(row=tot_row, column=2, value='Total')
+    c_tot_label.font = font_bold
+    c_tot_label.alignment = align_center
+    c_tot_label.border = thin_bdr
+
+    for idx, v in enumerate(vessels):
+        col_letter = get_column_letter(3 + idx)
+        c = ws2.cell(row=tot_row, column=3 + idx)
+        c.value = f'=SUM({col_letter}10:{col_letter}{tot_row - 1})'
+        c.font = font_bold
+        c.alignment = align_right
+        c.border = thin_bdr
+        c.number_format = '#,##0'
+
+    wob_col_letter = get_column_letter(wob_col)
+    c_w_tot = ws2.cell(row=tot_row, column=wob_col)
+    c_w_tot.value = f'=SUM({wob_col_letter}11:{wob_col_letter}{tot_row - 1})'
+    c_w_tot.font = font_bold
+    c_w_tot.alignment = align_center
+    c_w_tot.border = thin_bdr
+    c_w_tot.number_format = '0.00'
+
+    act_col_letter = get_column_letter(act_col)
+    c_a_tot = ws2.cell(row=tot_row, column=act_col)
+    c_a_tot.value = f'=SUM({act_col_letter}11:{act_col_letter}{tot_row - 1})'
+    c_a_tot.font = font_bold
+    c_a_tot.alignment = align_right
+    c_a_tot.border = thin_bdr
+    c_a_tot.number_format = '#,##0'
+
+    # Column Widths
+    ws2.column_dimensions['A'].width = 3
+    ws2.column_dimensions['B'].width = 20
+    for idx in range(num_vessels):
+        ws2.column_dimensions[get_column_letter(3 + idx)].width = 25
+    ws2.column_dimensions[wob_col_letter].width = 12
+    ws2.column_dimensions[act_col_letter].width = 16
+
+
 @bp.route(
     '/api/module/RP01/daily_progress_report_excel',
     methods=['GET', 'POST']
@@ -6888,6 +7310,12 @@ def daily_progress_report_excel():
             ws.column_dimensions[letter].width = w
         for c in range(10, 60):
             ws.column_dimensions[get_column_letter(c)].width = 20
+
+        # =====================================================
+        # SHEET 2: VESSEL DISCHARGE PROGRESS REPORT
+        # =====================================================
+
+        _build_vessel_discharge_progress_sheet(wb, cur, report_date)
 
         # =====================================================
         # GENERATE FILE
