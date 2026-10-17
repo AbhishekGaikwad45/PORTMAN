@@ -96,6 +96,29 @@ TDS_PERCENT = {
     '4101076020': 2.0,
 }
 
+# Invoices hidden from PortBird live data (invoice_header), so they only fetch
+# from the uploaded backdated register (rp02_revenue_backdated).
+EXCLUDED_PORTBIRD_INVOICES = [
+    'DPPL/26-27/97',
+    'DPPL/26-27/98',
+    'DPPL/26-27/99',
+    'DPPL/26-27/100',
+    'DPPL/26-27/101',
+    'DPPL/26-27/102',
+    'DPPL/26-27/103',
+    'DPPL/26-27/135',
+]
+
+
+def is_excluded_portbird_invoice(invoice_no):
+    """Return True if invoice_no is configured to be hidden from PortBird live data."""
+    if not invoice_no:
+        return False
+    return str(invoice_no).strip().upper() in {
+        inv.upper() for inv in EXCLUDED_PORTBIRD_INVOICES
+    }
+
+
 _AGE_BUCKETS = ((30, '0-30 days'), (60, '31-60 days'), (90, '61-90 days'),
                 (180, '91-180 days'), (365, '181-365 days'),
                 (730, '1-2 years'), (1095, '2-3 years'))

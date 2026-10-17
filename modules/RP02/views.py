@@ -437,6 +437,11 @@ def revenue_report_data():
         where.append("EXTRACT(YEAR FROM ih.invoice_date::date) = %s")
         params.append(int(year))
 
+    # Invoices that must only be fetched from backdated data are hidden from PortBird data
+    if getattr(revenue, 'EXCLUDED_PORTBIRD_INVOICES', None):
+        where.append("TRIM(UPPER(ih.invoice_number)) NOT IN %s")
+        params.append(tuple(inv.upper() for inv in revenue.EXCLUDED_PORTBIRD_INVOICES))
+
     where_sql = "WHERE " + " AND ".join(where) if where else ""
 
     cur.execute(f"""
@@ -517,6 +522,9 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
     today = datetime.today().date()
 
     for r in rows:
+        if getattr(revenue, 'is_excluded_portbird_invoice', None) and revenue.is_excluded_portbird_invoice(r.get('invoice_number')):
+            continue
+
         inv_date = r.get('invoice_date')
 
         basic = float(r.get('basic_value') or 0)
