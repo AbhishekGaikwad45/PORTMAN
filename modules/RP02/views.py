@@ -516,6 +516,34 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
 """, params)
 
     rows = [dict(r) for r in cur.fetchall()]
+
+    # Fetch Credit Notes from FDCN01. The amounts are stored as positive
+    # values in fdcn_header; the Revenue Register will display them as
+    # negative values to reverse the original invoice.
+    cur.execute("""
+        SELECT
+            id,
+            doc_number,
+            doc_type,
+            doc_date,
+            original_invoice_id,
+            original_invoice_number,
+            subtotal,
+            cgst_amount,
+            sgst_amount,
+            igst_amount,
+            total_amount,
+            doc_status,
+            sap_document_number,
+            gst_irn,
+            gst_ack_number,
+            gst_ack_date
+        FROM fdcn_header
+        WHERE UPPER(TRIM(COALESCE(doc_type, ''))) = 'CN'
+          AND NULLIF(TRIM(original_invoice_number), '') IS NOT NULL
+        ORDER BY created_date, id
+    """)
+    cn_rows = [dict(r) for r in cur.fetchall()]
     conn.close()
 
     out = []
@@ -639,6 +667,60 @@ ORDER BY ih.invoice_date::date DESC NULLS LAST, ih.id DESC
             'bucket': bucket,
             'source': 'Live',
         })
+
+    # Append a reversing row for each Credit Note linked to a live invoice.
+    # The display number follows the register convention requested by Finance
+    # (e.g. DPPL/26-27/174CN), while the actual CN number remains in fdcn_header.
+    live_by_invoice = {
+        str(row.get('invoice_no') or '').strip(): row
+        for row in out
+        if row.get('source') == 'Live' and row.get('invoice_no')
+    }
+
+    def _amount(value):
+        try:
+            return abs(float(value or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _date_string(value):
+        if not value:
+            return ''
+        return value.strftime('%Y-%m-%d') if hasattr(value, 'strftime') else str(value)[:10]
+
+    for cn in cn_rows:
+        original_no = str(cn.get('original_invoice_number') or '').strip()
+        original = live_by_invoice.get(original_no)
+        if not original:
+            # Do not create a CN-only row if its original invoice is not in
+            # the current live result set or is excluded from PortBird data.
+            continue
+
+        cn_row = dict(original)
+        cn_row['invoice_no'] = original_no + 'CN'
+        cn_row['basic_value'] = -_amount(cn.get('subtotal'))
+        cn_row['sgst'] = -_amount(cn.get('sgst_amount'))
+        cn_row['cgst'] = -_amount(cn.get('cgst_amount'))
+        cn_row['igst'] = -_amount(cn.get('igst_amount'))
+        cn_row['invoice_value'] = -_amount(cn.get('total_amount'))
+
+        # TDS/TCS is also reversed, so net receivable is the reversed invoice
+        # total less the reversed TDS/TCS amount.
+        cn_row['tds_tcs'] = -_amount(original.get('tds_tcs'))
+        cn_row['net_receivable'] = round(
+            float(cn_row['invoice_value']) - float(cn_row['tds_tcs']), 2
+        )
+
+        # Keep the original invoice date and descriptive fields, but use the
+        # Credit Note's own SAP/GST references where available.
+        cn_row['date'] = original.get('date') or _date_string(cn.get('doc_date'))
+        cn_row['sap_doc_no'] = cn.get('sap_document_number') or ''
+        cn_row['irn'] = cn.get('gst_irn') or ''
+        cn_row['ack_no'] = cn.get('gst_ack_number') or ''
+        cn_row['ack_date'] = _date_string(cn.get('gst_ack_date'))
+        cn_row['irn_date'] = cn_row['ack_date']
+        cn_row['source'] = 'Credit Note'
+        out.append(cn_row)
 
     # Rows invoiced before go-live live in the backdated upload, not in
     # invoice_header — the register is the two put together.
