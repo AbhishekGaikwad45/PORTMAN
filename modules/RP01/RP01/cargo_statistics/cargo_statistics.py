@@ -783,7 +783,7 @@ def _fetch_daily_port_operations(selected_date):
         }
 
         # ------------------------------------------------------------
-        # 3) MBC discharge — daily quantities from lueu_lines.
+        # 3) MBC discharge — fetched directly for each report date.
         # ------------------------------------------------------------
         cur.execute(
             """

@@ -96,6 +96,50 @@ TDS_PERCENT = {
     '4101076020': 2.0,
 }
 
+# Invoices hidden from PortBird live data (invoice_header), so they only fetch
+# from the uploaded backdated register (rp02_revenue_backdated).
+EXCLUDED_PORTBIRD_INVOICES = [
+    'DPPL/26-27/97',
+    'DPPL/26-27/98',
+    'DPPL/26-27/99',
+    'DPPL/26-27/100',
+    'DPPL/26-27/101',
+    'DPPL/26-27/102',
+    'DPPL/26-27/103',
+    'DPPL/26-27/135',
+]
+
+
+def is_excluded_portbird_invoice(invoice_no):
+    """Return True if invoice_no is configured to be hidden from PortBird live data."""
+    if not invoice_no:
+        return False
+    return str(invoice_no).strip().upper() in {
+        inv.upper() for inv in EXCLUDED_PORTBIRD_INVOICES
+    }
+
+
+def clean_service_text(val):
+    """Normalize service descriptions / grouping labels.
+    If the text has extra details appended with a dash separator
+    (e.g., 'Cargo Handling Unloading — BRBF Fines — MBC...'),
+    extract just the service name (e.g., 'Cargo Handling Unloading').
+    """
+    if not val:
+        return ''
+    s = str(val).strip()
+    s_lower = s.lower()
+    if 'cargo handling unloading' in s_lower:
+        return 'Cargo Handling Unloading'
+    if 'cargo handling loading' in s_lower:
+        return 'Cargo Handling Loading'
+    for sep in ('\u00e2\u20ac\u201d', 'â€”', '—', '–', ' - '):
+        if sep in s:
+            s = s.split(sep)[0].strip()
+            break
+    return s
+
+
 _AGE_BUCKETS = ((30, '0-30 days'), (60, '31-60 days'), (90, '61-90 days'),
                 (180, '91-180 days'), (365, '181-365 days'),
                 (730, '1-2 years'), (1095, '2-3 years'))
@@ -184,6 +228,9 @@ def parse_rows(headers, raw_rows):
         rec = {key: (_date_text(cell(r, key)) if key == 'invoice_date'
                      else _text(cell(r, key)))
                for key in COLUMNS}
+        for f in ('grouping_label', 'revenue_type_1', 'revenue_type_2'):
+            if rec.get(f):
+                rec[f] = clean_service_text(rec[f])
         if rec.get('invoice_no'):
             rows.append(rec)
         else:
@@ -290,6 +337,9 @@ def _row_out(d):
     out = dict(d)
     if out.get('uploaded_at') is not None:
         out['uploaded_at'] = str(out['uploaded_at'])
+    for f in ('grouping_label', 'revenue_type_1', 'revenue_type_2'):
+        if out.get(f):
+            out[f] = clean_service_text(out[f])
     out['days'], out['bucket'] = derive_ageing(out.get('invoice_date'))
     return out
 
@@ -384,7 +434,9 @@ def get_register_rows(month=None, year=None):
     for r in rows:
         d = _row_out(r)
         rec = {k: (d[k] if d[k] is not None else '') for k in COLUMNS}
-        rec['grouping'] = rec.pop('grouping_label')
+        rec['grouping'] = clean_service_text(rec.pop('grouping_label'))
+        rec['revenue_type_1'] = clean_service_text(rec.get('revenue_type_1'))
+        rec['revenue_type_2'] = clean_service_text(rec.get('revenue_type_2'))
         rec['date'] = rec.pop('invoice_date')
         rec['irn_date'] = rec['ack_date']
         rec['days'], rec['bucket'] = d['days'], d['bucket']
