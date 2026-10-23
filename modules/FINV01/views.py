@@ -1101,7 +1101,7 @@ def _build_sample_payload(invoice, lines, cancel=False):
                 'TDS_GL':           (svc.get('sap_tds_gl') or '') if (int(l.get('tds_applicable') or 0) or float(l.get('tds_amount') or 0) > 0) else '',
                 'TDS_amount':       f'{float(l.get("tds_amount") or 0):.2f}' if l.get('tds_amount') else '',
                 'TCS_GL':           (svc.get('sap_tcs_gl') or '') if (int(l.get('tcs_applicable') or 0) or float(l.get('tcs_amount') or 0) > 0) else '',
-                'TCS_amount':       f'{float(l.get("tcs_amount") or 0):.2f}' if l.get('tcs_amount') else '',
+                'TCS_amount':       f'{-float(l.get("tcs_amount") or 0):.2f}' if l.get('tcs_amount') else '',
                 'Round_off_GL':     '',
                 'Round_off_Value':  '',
             })

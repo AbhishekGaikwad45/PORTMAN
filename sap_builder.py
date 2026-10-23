@@ -13,7 +13,7 @@ Header fields (PORTBIRD spec):
   Reference              16 char — PMS doc number; for reversals: original SAP Document_Number
   Document_type          DR for Invoice / Debit Note, DG for Credit Note
   Customer_Code          10 char
-  Invoice_Amount         13 curr (taxable + GST + TDS - TCS + Round_off, always positive)
+  Invoice_Amount         13 curr (taxable + GST + TDS + TCS + Round_off, always positive)
   Business_place
   Section_code
   Text                   short narration (25 char)
@@ -49,7 +49,7 @@ Line Item fields (per spec — ITEM array; omitted entirely for reversals):
   TDS_GL
   TDS_amount          blank if zero
   TCS_GL
-  TCS_amount          blank if zero
+  TCS_amount          NEGATIVE (so SAP posts TCS as credit); blank if zero
   Round_off_GL        from sap_api_config.round_off_gl (blank if zero)
   Round_off_Value     header-level round_off applied to the first line item;
                       positive when invoice gross is rounded up (SAP-validated)
@@ -335,7 +335,10 @@ def _build_items(lines, reference, amount_field='line_amount',
             'TDS_GL':           tds_gl,
             'TDS_amount':       _fmt_amount(line.get('tds_amount')),
             'TCS_GL':           tcs_gl,
-            'TCS_amount':       _fmt_amount(line.get('tcs_amount')),
+            # Negative on purpose: FIIF059 puts TCS on the customer's side
+            # (DR: debit), so a positive value posts "TCS Debit". Negative
+            # posts TCS as a credit and lifts Invoice_Amount to base + TCS.
+            'TCS_amount':       _fmt_amount(-tcs_amount_val),
             'Round_off_GL':     '',
             'Round_off_Value':  '',
         })
@@ -352,18 +355,20 @@ def _build_items(lines, reference, amount_field='line_amount',
 
 
 def _total_invoice_amount(header, lines, amount_field='line_amount'):
-    """Return Invoice_Amount: taxable + GST + TDS - TCS + Round_off.
+    """Return Invoice_Amount: taxable + GST + TDS + TCS + Round_off.
 
-    This is the figure SAP's posting balances against — NOT the printed face
-    value. SAP's ABAP (FIIF059, zfiii_si_invoice_ecc_ib) checks, for DR:
-        Invoice_Amount + sum(TCS) == sum(Amount + C/S/IGST + TDS + Round_off)
+    SAP's ABAP (FIIF059, zfiii_si_invoice_ecc_ib) checks, for DR:
+        Invoice_Amount + sum(TCS_amount) == sum(Amount + C/S/IGST + TDS + Round_off)
     and the mirror image for DG. Confirmed by SAP's responses in integration_logs:
-      * base + TCS  -> "Total Debit and Credit amount is not matching"
-        (DPPL/26-27/7 log 42, DPPL/26-27/316); base - TCS -> accepted (log 43, 177).
+      * positive TCS: base + TCS rejected (DPPL/26-27/7 log 42, /316),
+        base - TCS accepted (log 43, 177) — but that posts TCS as a DEBIT,
+        which Finance flagged as wrong (2026-10, EURO CORPORATION scrap sale).
       * base / base - TDS -> rejected (log 31, 35); base + TDS -> accepted (36, 153).
-    The 2026-09-11 switch to "+TCS, TDS excluded" followed the written spec
-    and broke every TDS/TCS posting. Do not change the signs without a
-    successful SAP response to back it.
+    So TCS_amount is now sent NEGATIVE (_build_items): the check then holds
+    at base + TCS and SAP posts customer Dr base+TCS / TCS Cr.
+
+    The taxable + GST base is rebuilt from the header's own components — never
+    from `total_amount`, which is a display total that already includes TCS.
 
     The taxable + GST base is rebuilt from the header's own components — never
     from `total_amount`, which is a display total that already includes TCS.
@@ -386,7 +391,7 @@ def _total_invoice_amount(header, lines, amount_field='line_amount'):
         tcs = sum(float(l.get('tcs_amount') or 0) for l in lines)
     round_off = float(header.get('round_off') or 0)
 
-    return total + tds - tcs + round_off
+    return total + tds + tcs + round_off
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +402,7 @@ def _total_invoice_amount(header, lines, amount_field='line_amount'):
 def _balance_invoice_amount(record):
     """Set Invoice_Amount from the ITEM rows actually sent, so SAP's FIIF059
     check  Invoice_Amount + sum(TCS) == sum(Amount + GST + TDS + Round_off)
-    holds by construction. A header that disagrees with its lines is logged,
+    holds by construction (TCS_amount is sent negative, so this adds it). A header that disagrees with its lines is logged,
     not sent — SAP would reject it with "Total Debit and Credit ... not matching".
     """
     items = record.get('ITEM') or []

@@ -56,7 +56,7 @@ Every request/response is logged in `integration_logs` (viewable in FSAP01/FLOG0
 | `Reference` | 16 | `DPPL/26-27/166` | **PMS document number.** SAP matches everything back on this — see §7 |
 | `Document_type` | 2 | `DR` / `DG` | `DR` = Invoice & Debit Note, `DG` = Credit Note |
 | `Customer_Code` | 10 | `I510257` | SAP customer code from the party master |
-| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TDS − TCS + round-off**, always positive — the figure SAP's posting balances against (verified against SAP responses; `+TCS` is rejected with "Total Debit and Credit amount is not matching"). Built from the header's `subtotal`/`cgst`/`sgst`/`igst`, never from `total_amount`. |
+| `Invoice_Amount` | 13 | `3276306.46` | **taxable + GST + TDS + TCS + round-off**, always positive — the figure SAP's posting balances against. Requires `TCS_amount` to be sent negative (§5.5); with a positive `TCS_amount`, `+TCS` is rejected with "Total Debit and Credit amount is not matching". Built from the header's `subtotal`/`cgst`/`sgst`/`igst`, never from `total_amount`. |
 | `Business_place` | 4 | `5130` | SAP config; defaults to company code |
 | `Section_code` | 4 | `5130` | SAP config; defaults to company code |
 | `Text` | 25 | invoice number | Short narration |
@@ -245,11 +245,11 @@ Typically on sale-type transactions (e.g. scrap — header `Service_Sale: "A"`).
   "TDS_GL": "",
   "TDS_amount": "",
   "TCS_GL": "2206560025",
-  "TCS_amount": "2360.00"
+  "TCS_amount": "-2360.00"
 }
 ```
 
-Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 **− 2,360** = `"233640.00"` (TCS is **subtracted** — SAP rejects the `+TCS` figure with "Total Debit and Credit amount is not matching").
+Header `Invoice_Amount` = 200,000 + 18,000 + 18,000 **+ 2,360** = `"238360.00"`. `TCS_amount` is sent **negative**: SAP's FIIF059 check is `Invoice_Amount + TCS_amount = Amount + GST + TDS + Round-off`, and with a positive TCS the only balancing figure (base − TCS) posted TCS as a **debit**. Finance require customer Dr base + TCS / TCS Cr, which the negative sign produces.
 
 ### 5.6 Round-off
 
