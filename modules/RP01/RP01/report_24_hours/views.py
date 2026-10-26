@@ -401,10 +401,21 @@ def get_24_hours_report():
                                 AND x.discharge_commenced IS NULL
                             )
                             THEN NULL
-                            ELSE MAX(a2.discharge_commenced)
+                            ELSE (
+                                SELECT a2.discharge_commenced
+                                FROM ldud_anchorage a2
+                                WHERE a2.ldud_id = h.id
+                                  AND a2.discharge_started IS NOT NULL
+                                  AND a2.discharge_commenced IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM ldud_anchorage x2
+                                      WHERE x2.ldud_id = h.id
+                                        AND x2.discharge_started > a2.discharge_started
+                                  )
+                                ORDER BY a2.discharge_started DESC, a2.id DESC
+                                LIMIT 1
+                            )
                         END AS discharge_completed
-                    FROM ldud_anchorage a2
-                    WHERE a2.ldud_id = h.id
                 ) last_anchor ON TRUE
 
                 WHERE
@@ -416,6 +427,11 @@ def get_24_hours_report():
                     AND (
                         last_anchor.discharge_completed IS NULL
                         OR last_anchor.discharge_completed >= %s
+                        OR EXISTS (
+                            SELECT 1 FROM ldud_vessel_operations vo
+                            WHERE vo.ldud_id = h.id
+                            AND TO_DATE(vo.start_time, 'YYYY-MM-DD') = %s
+                        )
                     )
 
                 ORDER BY
@@ -424,7 +440,8 @@ def get_24_hours_report():
 
             """, (
                 window_end,
-                window_start
+                window_start,
+                target_date
             ))
 
             rows = cur.fetchall()
@@ -577,18 +594,33 @@ def get_24_hours_report():
                     SELECT
                         MIN(discharge_started) AS discharge_start,
                         CASE
-                            WHEN MAX(discharge_commenced) >= MIN(discharge_started)
-                            THEN MAX(discharge_commenced)
-                            ELSE NULL
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM ldud_anchorage x
+                                WHERE x.ldud_id = %s
+                                AND x.discharge_started IS NOT NULL
+                                AND x.discharge_commenced IS NULL
+                            )
+                            THEN NULL
+                            ELSE (
+                                SELECT a2.discharge_commenced
+                                FROM ldud_anchorage a2
+                                WHERE a2.ldud_id = %s
+                                  AND a2.discharge_started IS NOT NULL
+                                  AND a2.discharge_commenced IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM ldud_anchorage x2
+                                      WHERE x2.ldud_id = %s
+                                        AND x2.discharge_started > a2.discharge_started
+                                  )
+                                ORDER BY a2.discharge_started DESC, a2.id DESC
+                                LIMIT 1
+                            )
                         END AS discharge_end
                     FROM ldud_anchorage
                     WHERE ldud_id = %s
                     AND discharge_started IS NOT NULL
-                    AND (
-                        discharge_commenced IS NULL
-                        OR discharge_commenced >= discharge_started
-                    )
-                """, (ldud_id,))
+                """, (ldud_id, ldud_id, ldud_id, ldud_id))
 
                 anchorage_row = cur.fetchone()
 
@@ -598,8 +630,8 @@ def get_24_hours_report():
 
                 days_factor = 1.00
 
-                raw_start = anchorage_row['discharge_start']
-                raw_end = anchorage_row['discharge_end']
+                raw_start = anchorage_row['discharge_start'] if anchorage_row else None
+                raw_end = anchorage_row['discharge_end'] if anchorage_row else None
 
                 # Vessel completed within report window
                 if raw_end and window_start <= raw_end < window_end:
@@ -1042,10 +1074,21 @@ def get_24_hours_report():
                                 AND x.discharge_commenced IS NULL
                             )
                             THEN NULL
-                            ELSE MAX(a2.discharge_commenced)
+                            ELSE (
+                                SELECT a2.discharge_commenced
+                                FROM ldud_anchorage a2
+                                WHERE a2.ldud_id = h.id
+                                  AND a2.discharge_started IS NOT NULL
+                                  AND a2.discharge_commenced IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM ldud_anchorage x2
+                                      WHERE x2.ldud_id = h.id
+                                        AND x2.discharge_started > a2.discharge_started
+                                  )
+                                ORDER BY a2.discharge_started DESC, a2.id DESC
+                                LIMIT 1
+                            )
                         END AS discharge_completed
-                    FROM ldud_anchorage a2
-                    WHERE a2.ldud_id = h.id
                 ) last_anchor ON TRUE
 
                 WHERE
