@@ -432,6 +432,12 @@
     .btn-filter-apply { background: #3182ce; color: white; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
     .btn-filter-clear { background: #e2e8f0; color: #2d3748; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
     .sub-save-status { font-size: 11px; color: #38a169; margin-left: 8px; }
+    .tabulator-edit-list {
+        min-width: 220px !important;
+        max-width: 340px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
+        border-radius: 4px !important;
+    }
 </style>
 {% endblock %}
 
@@ -551,9 +557,19 @@ async function loadAvailableDocs() {
     try {
         const res = await fetch('/api/module/MBCT01/available_docs');
         const data = await res.json();
-        availableDocs = data.map(d => ({label: d.doc_num, value: d.id}));
+        availableDocs.length = 0;
+        availableDocsMap = {};
         data.forEach(d => {
+            availableDocs.push({
+                label: d.doc_num,
+                value: d.id,
+                doc_num: d.doc_num,
+                mbc_name: d.mbc_name || ''
+            });
             availableDocsMap[d.id] = d;
+            if (d.doc_num) {
+                availableDocsMap[d.doc_num] = d;
+            }
         });
     } catch(e) {
         console.error("Error loading available docs:", e);
@@ -837,17 +853,40 @@ async function loadAvailableDocs() {
                 editorParams: {values: {'Import': 'Import', 'Export': 'Export'}}},
             {title: "Doc Num", field: "doc_num", width: 140, 
                 editor: canEdit ? "list" : false, 
-                editorParams: {
-                    values: availableDocs,
-                    autocomplete: true,
-                    listOnEmpty: true,
-                    clearable: true
+                editorParams: function(cell) {
+                    return {
+                        values: availableDocs,
+                        autocomplete: true,
+                        listOnEmpty: true,
+                        clearable: true,
+                        itemFormatter: function(label, value, item, element) {
+                            const mbc = item?.mbc_name || (availableDocsMap[value] ? availableDocsMap[value].mbc_name : '') || '';
+                            if (mbc) {
+                                return `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;">` +
+                                       `<span style="font-weight:600;">${label}</span>` +
+                                       `<span style="opacity:0.75;font-size:11.5px;white-space:nowrap;">(${mbc})</span>` +
+                                       `</div>`;
+                            }
+                            return `<span style="font-weight:600;">${label}</span>`;
+                        },
+                        filterFunc: function(term, label, value, item) {
+                            if (!term) return true;
+                            const t = String(term).toLowerCase().trim();
+                            const docStr = String(label || '').toLowerCase();
+                            const mbc = String(item?.mbc_name || (availableDocsMap[value] ? availableDocsMap[value].mbc_name : '') || '').toLowerCase();
+                            return docStr.includes(t) || mbc.includes(t) || `${docStr} (${mbc})`.includes(t) || `${docStr} ( ${mbc} )`.includes(t);
+                        }
+                    };
                 },
                 cellEdited: function(cell) {
                     const row = cell.getRow();
-                    const docId = cell.getValue();
-                    if (docId && availableDocsMap[docId]) {
-                        const doc = availableDocsMap[docId];
+                    const docVal = cell.getValue();
+                    const doc = availableDocsMap[docVal] || Object.values(availableDocsMap).find(d => 
+                        d.doc_num === docVal || 
+                        String(d.id) === String(docVal) ||
+                        (d.mbc_name && d.mbc_name.toLowerCase() === String(docVal).toLowerCase())
+                    );
+                    if (doc) {
                         row.update({
                             mbc_id: doc.id,
                             doc_num: doc.doc_num,
@@ -2410,6 +2449,7 @@ if (type === 'cleaning') {
                 const editBanner = document.getElementById('editModeBanner');
                 if (editBanner) editBanner.style.display = 'none';
                 await table.setData("/api/module/MBCT01/data");
+                await loadAvailableDocs();
             }
         } finally {
             _isSaving = false;
