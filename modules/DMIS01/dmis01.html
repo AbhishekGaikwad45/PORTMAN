@@ -1,0 +1,931 @@
+{% extends "base.html" %}
+
+{% block title %}Diesel MIS - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+    /* ── 3D Pushable Pill Buttons (Matching TGU01 / LUEU01) ─────────── */
+    .dmis-btn-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 20px;
+        padding: 24px 0;
+    }
+    .eq-pushable {
+        position: relative;
+        border: none;
+        background: transparent;
+        padding: 0;
+        cursor: pointer;
+        outline-offset: 4px;
+        transition: filter 250ms;
+        user-select: none;
+        width: 100%;
+    }
+    .eq-shadow {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.25);
+        will-change: transform;
+        transform: translateY(3px);
+        transition: transform 600ms cubic-bezier(.3, .7, .4, 1);
+    }
+    .eq-edge {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border-radius: 12px;
+        background: linear-gradient(to left, #991b1b 0%, #dc2626 8%, #dc2626 92%, #991b1b 100%);
+    }
+    .eq-front {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        padding: 18px 16px;
+        border-radius: 12px;
+        font-size: 15px;
+        font-weight: 700;
+        color: white;
+        background: #e11d48;
+        will-change: transform;
+        transform: translateY(-4px);
+        transition: transform 600ms cubic-bezier(.3, .7, .4, 1);
+        text-align: center;
+        min-height: 60px;
+    }
+    .eq-pushable:hover .eq-front {
+        transform: translateY(-6px);
+        transition: transform 250ms cubic-bezier(.3, .7, .4, 1.5);
+    }
+    .eq-pushable:active .eq-front {
+        transform: translateY(-2px);
+        transition: transform 34ms;
+    }
+    .eq-pushable:hover .eq-shadow {
+        transform: translateY(4px);
+        transition: transform 250ms cubic-bezier(.3, .7, .4, 1.5);
+    }
+    .eq-pushable:active .eq-shadow {
+        transform: translateY(1px);
+        transition: transform 34ms;
+    }
+    .eq-sub {
+        font-size: 11px;
+        font-weight: 400;
+        opacity: 0.92;
+        margin-top: 4px;
+    }
+
+    /* ── Filter panel (Exact LUEU01 pattern) ───────────────────── */
+    .filter-panel {
+        background: #f7fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+    }
+    .dark-theme .filter-panel { background: #1e293b; border-color: #334155; }
+    .filter-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .filter-col-select, .filter-text-input, .filter-from, .filter-to {
+        padding: 4px 8px;
+        border: 1px solid #cbd5e0;
+        border-radius: 4px;
+        font-size: 12px;
+        background: white;
+    }
+    .dark-theme .filter-col-select,
+    .dark-theme .filter-text-input,
+    .dark-theme .filter-from,
+    .dark-theme .filter-to { background: #0f172a; color: #e2e8f0; border-color: #334155; }
+    .filter-multi-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .filter-multi-list label { display: flex; gap: 4px; align-items: center; font-size: 12px; cursor: pointer; }
+    .filter-remove { background: none; border: none; color: #e53e3e; cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
+    .filter-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .btn-filter-add { background: #edf2f7; color: #2d3748; border: 1px solid #cbd5e0; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-apply { background: #3182ce; color: white; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-filter-clear { background: #e2e8f0; color: #2d3748; border: none; padding: 5px 14px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+
+    /* ── Tabulator Headers (Uniform Dark Slate Theme) ──────────── */
+    .tabulator {
+        font-size: 11px;
+        border: 1px solid #e2e8f0;
+    }
+    .tabulator .tabulator-header {
+        background: #1e3a5f !important;
+        border-bottom: 1px solid #0f243d !important;
+    }
+    .tabulator .tabulator-header .tabulator-col {
+        background: transparent !important;
+        height: auto !important;
+        min-height: 38px !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.15) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+        padding: 8px 6px !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-sizing: border-box !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 12px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        text-align: center !important;
+        line-height: 1.25 !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-arrow {
+        border-bottom-color: #ffffff !important;
+        border-top-color: #ffffff !important;
+    }
+
+    /* ── Shaded Auto-calc Body Cells ONLY (Headers remain untouched) ── */
+    .tabulator-cell.cell-autocalc {
+        background-color: #f1f5f9 !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+    }
+    .dark-theme .tabulator-cell.cell-autocalc {
+        background-color: #1e293b !important;
+        color: #38bdf8 !important;
+    }
+
+    /* ── Cell text alignment and padding ────────────────────────── */
+    .tabulator .tabulator-cell {
+        white-space: normal !important;
+        word-break: break-word !important;
+        text-align: center;
+        padding: 5px 6px !important;
+        line-height: 1.3 !important;
+        font-size: 11px;
+    }
+
+    /* ── Toolbar styling matching LUEU01 ───────────────────────── */
+    .dmis-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #fff;
+        border-bottom: 1px solid #e2e8f0;
+        flex-wrap: wrap;
+    }
+    .dark-theme .dmis-toolbar {
+        background: #1e293b;
+        border-bottom-color: #334155;
+    }
+
+    .save-status {
+        font-size: 12px;
+        font-weight: 600;
+        color: #38a169;
+        margin-left: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>Diesel MIS</h2>
+    <span class="module-code">DMIS01</span>
+    <button onclick="exportExcel()" title="Download Diesel MIS as multi-sheet Excel" style="background:#1e7a45;color:#e2e8f0;border:none;padding:4px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.5px;margin-left:8px;">&#11015; Export Excel</button>
+    <span id="saveStatus" class="save-status"></span>
+</div>
+
+<!-- View 1: 3D Pushable Pill Buttons Grid -->
+<div id="buttonView">
+    <div style="margin-bottom:14px;color:#64748b;font-size:13px;font-weight:600;">
+        Select an operation below to view and enter diesel records:
+    </div>
+    <div class="dmis-btn-grid">
+        <button class="eq-pushable" onclick="openSection('consumption', 'Diesel Consumption')">
+            <span class="eq-shadow"></span>
+            <span class="eq-edge"></span>
+            <span class="eq-front">
+                <span>Diesel Consumption</span>
+                <span class="eq-sub">Equipment Meter Readings & Fuel Filled</span>
+            </span>
+        </button>
+
+        <button class="eq-pushable" onclick="openSection('received', 'Diesel Received')">
+            <span class="eq-shadow"></span>
+            <span class="eq-edge"></span>
+            <span class="eq-front">
+                <span>Diesel Received</span>
+                <span class="eq-sub">Inward Bulk Diesel Delivery</span>
+            </span>
+        </button>
+
+        <button class="eq-pushable" onclick="openSection('stock', 'Tank Stock')">
+            <span class="eq-shadow"></span>
+            <span class="eq-edge"></span>
+            <span class="eq-front">
+                <span>Tank Stock</span>
+                <span class="eq-sub">Month-start Equipment Tank Balance</span>
+            </span>
+        </button>
+    </div>
+</div>
+
+<!-- View 2: Detailed Data Entry Grid (Exact LUEU01 Layout) -->
+<div id="tableView" style="display:none;">
+    <div class="dmis-toolbar">
+        <button class="btn" onclick="goBack()" style="background:#6c757d;color:#fff;">Back</button>
+        <span id="currentSectionLabel" style="font-weight:bold;font-size:1.1rem;margin:0 12px;color:var(--text-primary,#1e293b);"></span>
+        
+        {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+        {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+        
+        <button class="btn" style="font-size:12px;padding:4px 12px;" onclick="toggleFilterPanel()">&#9881; Filters <span id="filterBadge" style="display:none;background:#3182ce;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+        
+        {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()" style="font-size:12px;padding:4px 12px;">Delete Selected</button>{% endif %}
+        
+        <div class="row-info" style="margin-left:auto;">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+    </div>
+
+    <!-- Collapsible Filter Panel (Matching LUEU01) -->
+    <div id="filterPanel" class="filter-panel" style="display:none;">
+        <div id="filterRows"></div>
+        <div class="filter-actions">
+            <button class="btn-filter-add" onclick="addFilterRow()">+ Add Filter</button>
+            <button class="btn-filter-apply" onclick="applyFilters()">Apply</button>
+            <button class="btn-filter-clear" onclick="clearFilters()">Clear All</button>
+        </div>
+    </div>
+
+    <div id="unsavedBanner" style="display:none;background:#feebc8;border-left:4px solid #dd6b20;color:#7b341e;padding:8px 14px;font-size:12px;margin-bottom:8px;">
+        &#9888; You have unsaved changes &mdash; <button class="btn btn-save" onclick="saveAll()" style="margin:0;padding:2px 8px;font-size:11px;">Save Now</button>
+    </div>
+
+    <!-- Active Table Grid -->
+    <div id="table"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('DMIS01', 'Diesel MIS');
+
+    const permissions = {{ permissions | tojson }};
+    const canEdit = permissions.can_edit || permissions.can_add;
+
+    let currentSection = null;
+    let table = null;
+    let isDirty = false;
+    let dirtyRowIds = new Set();
+    let equipmentList = [];
+    let currentFilters = [];
+
+    // Filter configuration per section
+    const FILTER_CONFIG = {
+        consumption: {
+            entry_date:    { label: 'Date',          type: 'range' },
+            equipment:     { label: 'Equipment',     type: 'multi', get values() { return equipmentList; } },
+            difference:    { label: 'Difference',    type: 'contains' },
+            diesel_filled: { label: 'Diesel Filled', type: 'contains' },
+            rate:          { label: 'Rate',          type: 'contains' },
+            remarks:       { label: 'Remarks',       type: 'contains' },
+            created_by:    { label: 'Created By',    type: 'contains' }
+        },
+        received: {
+            received_date:   { label: 'Date',            type: 'range' },
+            diesel_received: { label: 'Diesel Received', type: 'contains' },
+            created_by:      { label: 'Created By',      type: 'contains' }
+        },
+        stock: {
+            stock_date:             { label: 'Date',                        type: 'range' },
+            equipment:              { label: 'Equipment',                   type: 'multi', get values() { return equipmentList; } },
+            month_start_tank_stock: { label: 'Month-start Tank Stock',      type: 'contains' },
+            created_by:             { label: 'Created By',                  type: 'contains' }
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        await loadEquipments();
+    });
+
+    async function loadEquipments() {
+        try {
+            const res = await fetch('/api/module/DMIS01/equipments');
+            if (res.ok) {
+                equipmentList = await res.json();
+            }
+        } catch (e) {
+            console.error('Failed to load equipments:', e);
+        }
+    }
+
+    function openSection(sectionKey, sectionTitle) {
+        currentSection = sectionKey;
+        dirtyRowIds.clear();
+        isDirty = false;
+        currentFilters = [];
+        updateFilterBadge();
+        document.getElementById('filterRows').innerHTML = '';
+        document.getElementById('filterPanel').style.display = 'none';
+        document.getElementById('unsavedBanner').style.display = 'none';
+
+        document.getElementById('buttonView').style.display = 'none';
+        document.getElementById('tableView').style.display = 'block';
+        document.getElementById('currentSectionLabel').textContent = `${sectionTitle}`;
+
+        initTableForSection(sectionKey);
+    }
+
+    function goBack() {
+        if (isDirty && !confirm('You have unsaved changes. Leave without saving?')) return;
+        currentSection = null;
+        if (table) { table.destroy(); table = null; }
+        document.getElementById('tableView').style.display = 'none';
+        document.getElementById('buttonView').style.display = 'block';
+        const status = document.getElementById('saveStatus');
+        if (status) status.textContent = '';
+    }
+
+    function markDirty(row) {
+        isDirty = true;
+        document.getElementById('unsavedBanner').style.display = 'block';
+        if (row && row.getData().id) {
+            dirtyRowIds.add(String(row.getData().id));
+        }
+        const status = document.getElementById('saveStatus');
+        status.textContent = '● Unsaved changes';
+        status.style.color = '#dd6b20';
+    }
+
+    // ── Filter Panel Logic (Matching LUEU01) ────────────────────────────────────
+    function toggleFilterPanel() {
+        const panel = document.getElementById('filterPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function getActiveFilterConfig() {
+        return FILTER_CONFIG[currentSection] || {};
+    }
+
+    function addFilterRow() {
+        const cfg = getActiveFilterConfig();
+        const container = document.getElementById('filterRows');
+        const colOptions = Object.entries(cfg)
+            .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+        const row = document.createElement('div');
+        row.className = 'filter-row';
+        row.innerHTML = `
+            <select class="filter-col-select" onchange="onFilterColChange(this)">
+                <option value="">-- Column --</option>${colOptions}
+            </select>
+            <div class="filter-value-container"></div>
+            <button class="filter-remove" onclick="this.closest('.filter-row').remove();updateFilterBadge();">&times;</button>`;
+        container.appendChild(row);
+    }
+
+    function onFilterColChange(sel) {
+        const container = sel.closest('.filter-row').querySelector('.filter-value-container');
+        const col = sel.value;
+        if (!col) { container.innerHTML = ''; return; }
+        const cfg = getActiveFilterConfig()[col];
+        if (!cfg) return;
+
+        if (cfg.type === 'contains') {
+            container.innerHTML = `<input class="filter-text-input" type="text" placeholder="contains...">`;
+        } else if (cfg.type === 'multi') {
+            const vals = cfg.values || [];
+            container.innerHTML = `<div class="filter-multi-list">${
+                vals.map(v => `<label><input type="checkbox" class="filter-checkbox" value="${v}"> ${v}</label>`).join('')
+            }</div>`;
+        } else if (cfg.type === 'range') {
+            container.innerHTML = `<input class="filter-from" type="date"> <span style="font-size:12px;color:#64748b;">to</span> <input class="filter-to" type="date">`;
+        }
+    }
+
+    function collectFilters() {
+        const filters = [];
+        const cfg = getActiveFilterConfig();
+        document.querySelectorAll('#filterRows .filter-row').forEach(function(row) {
+            const col = (row.querySelector('.filter-col-select') || {}).value;
+            if (!col || !cfg[col]) return;
+            const c = cfg[col];
+            if (c.type === 'contains') {
+                const v = (row.querySelector('.filter-text-input') || {}).value || '';
+                if (v.trim()) filters.push({ field: col, type: 'contains', value: v.trim() });
+            } else if (c.type === 'multi') {
+                const checked = [...row.querySelectorAll('.filter-checkbox:checked')].map(cb => cb.value);
+                if (checked.length) filters.push({ field: col, type: 'multi', values: checked });
+            } else if (c.type === 'range') {
+                const from = (row.querySelector('.filter-from') || {}).value || '';
+                const to = (row.querySelector('.filter-to') || {}).value || '';
+                if (from || to) filters.push({ field: col, type: 'range', from, to });
+            }
+        });
+        return filters;
+    }
+
+    function applyFilters() {
+        currentFilters = collectFilters();
+        updateFilterBadge();
+        if (table) table.replaceData();
+    }
+
+    function clearFilters() {
+        document.getElementById('filterRows').innerHTML = '';
+        currentFilters = [];
+        updateFilterBadge();
+        if (table) table.replaceData();
+    }
+
+    function updateFilterBadge() {
+        const active = currentFilters.length;
+        const badge = document.getElementById('filterBadge');
+        if (badge) {
+            badge.textContent = active;
+            badge.style.display = active > 0 ? 'inline' : 'none';
+        }
+    }
+
+    // ── Table Initialization By Section ─────────────────────────────────────────
+    function formatLitre(cell) {
+        const val = cell.getValue();
+        if (val === null || val === undefined || String(val).trim() === '') return '';
+        const str = String(val).trim();
+        if (/lit/i.test(str)) return str;
+        return `${str} Litres`;
+    }
+
+    function formatDateDisplay(val) {
+        if (!val) return '';
+        return parseAndFormatDateTime(val);
+    }
+
+    function parseAndFormatDateTime(raw) {
+        if (!raw) return '';
+        let s = String(raw).trim();
+        if (!s) return '';
+        if (s.includes('T')) {
+            const parts = s.split('T');
+            const d = parts[0].split('-');
+            const t = (parts[1] || '00:00').slice(0, 5);
+            if (d.length === 3) {
+                const yy = d[0].slice(-2);
+                return `${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}-${yy} ${t}`;
+            }
+        }
+        if (/^\d{2}-\d{2}-\d{2}\s+\d{2}:\d{2}$/.test(s)) return s;
+
+        // DD-MM-YYYY [HH:mm] or DD/MM/YYYY [HH:mm]
+        let m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:\s+(\d{1,2})(?::(\d{1,2}))?)?/);
+        if (m) {
+            const dd = m[1].padStart(2, '0');
+            const mm = m[2].padStart(2, '0');
+            const yy = m[3].slice(-2);
+            const hh = (m[4] || '00').padStart(2, '0');
+            const mi = (m[5] || '00').padStart(2, '0');
+            return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+        }
+        // DD-MM-YY [HH:mm] or DD/MM/YY [HH:mm]
+        m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})(?:\s+(\d{1,2})(?::(\d{1,2}))?)?/);
+        if (m) {
+            const dd = m[1].padStart(2, '0');
+            const mm = m[2].padStart(2, '0');
+            const yy = m[3];
+            const hh = (m[4] || '00').padStart(2, '0');
+            const mi = (m[5] || '00').padStart(2, '0');
+            return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+        }
+        // YYYY-MM-DD [HH:mm]
+        m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2})(?::(\d{1,2}))?)?/);
+        if (m) {
+            const yy = m[1].slice(-2);
+            const mm = m[2].padStart(2, '0');
+            const dd = m[3].padStart(2, '0');
+            const hh = (m[4] || '00').padStart(2, '0');
+            const mi = (m[5] || '00').padStart(2, '0');
+            return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+        }
+        return s;
+    }
+
+    function toIsoForPicker(val) {
+        const formatted = parseAndFormatDateTime(val);
+        if (!formatted || !formatted.includes(' ')) {
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            const h = String(now.getHours()).padStart(2, '0');
+            const min = String(now.getMinutes()).padStart(2, '0');
+            return `${y}-${m}-${d}T${h}:${min}`;
+        }
+        const parts = formatted.split(' ');
+        const d = parts[0].split('-');
+        const yr = (d[2].length === 2 ? '20' : '') + d[2];
+        const mo = d[1].padStart(2, '0');
+        const day = d[0].padStart(2, '0');
+        const time = (parts[1] || '00:00').slice(0, 5);
+        return `${yr}-${mo}-${day}T${time}`;
+    }
+
+    var datetimePickerEditor = function(cell, onRendered, success, cancel) {
+        var raw = cell.getValue() || '';
+        var initialFormatted = parseAndFormatDateTime(raw);
+
+        var container = document.createElement("div");
+        container.style.display = "flex";
+        container.style.alignItems = "center";
+        container.style.width = "100%";
+        container.style.height = "100%";
+        container.style.position = "relative";
+        container.style.boxSizing = "border-box";
+
+        var textInput = document.createElement("input");
+        textInput.type = "text";
+        textInput.value = initialFormatted;
+        textInput.placeholder = "DD-MM-YY HH:mm";
+        textInput.style.flex = "1";
+        textInput.style.minWidth = "0";
+        textInput.style.height = "100%";
+        textInput.style.padding = "2px 4px";
+        textInput.style.fontSize = "11px";
+        textInput.style.border = "1px solid #3182ce";
+        textInput.style.borderRadius = "3px 0 0 3px";
+        textInput.style.fontFamily = "inherit";
+        textInput.style.boxSizing = "border-box";
+
+        var pickerBtn = document.createElement("button");
+        pickerBtn.type = "button";
+        pickerBtn.innerHTML = "📅";
+        pickerBtn.title = "Select date & time";
+        pickerBtn.style.border = "1px solid #3182ce";
+        pickerBtn.style.borderLeft = "none";
+        pickerBtn.style.background = "#edf2f7";
+        pickerBtn.style.cursor = "pointer";
+        pickerBtn.style.padding = "0 6px";
+        pickerBtn.style.fontSize = "12px";
+        pickerBtn.style.height = "100%";
+        pickerBtn.style.borderRadius = "0 3px 3px 0";
+        pickerBtn.style.display = "flex";
+        pickerBtn.style.alignItems = "center";
+        pickerBtn.style.justifyContent = "center";
+        pickerBtn.style.boxSizing = "border-box";
+
+        var hiddenPicker = document.createElement("input");
+        hiddenPicker.type = "datetime-local";
+        hiddenPicker.style.position = "absolute";
+        hiddenPicker.style.opacity = "0";
+        hiddenPicker.style.pointerEvents = "none";
+        hiddenPicker.style.width = "0";
+        hiddenPicker.style.height = "0";
+
+        container.appendChild(textInput);
+        container.appendChild(pickerBtn);
+        container.appendChild(hiddenPicker);
+
+        var resolved = false;
+        function finish(val) {
+            if (resolved) return;
+            resolved = true;
+            var formatted = parseAndFormatDateTime(val);
+            success(formatted);
+        }
+
+        onRendered(function() {
+            textInput.focus();
+            textInput.select();
+        });
+
+        // Prevent textInput blur when clicking picker button
+        pickerBtn.addEventListener("mousedown", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        pickerBtn.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            hiddenPicker.value = toIsoForPicker(textInput.value);
+            if (typeof hiddenPicker.showPicker === 'function') {
+                try {
+                    hiddenPicker.showPicker();
+                } catch(err) {
+                    hiddenPicker.focus();
+                }
+            } else {
+                hiddenPicker.focus();
+            }
+        });
+
+        hiddenPicker.addEventListener("change", function() {
+            if (hiddenPicker.value) {
+                var f = parseAndFormatDateTime(hiddenPicker.value);
+                textInput.value = f;
+                finish(f);
+            }
+        });
+
+        textInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+                finish(textInput.value);
+            } else if (e.key === "Escape") {
+                resolved = true;
+                cancel();
+            }
+        });
+
+        textInput.addEventListener("blur", function() {
+            setTimeout(function() {
+                if (!resolved) {
+                    finish(textInput.value);
+                }
+            }, 150);
+        });
+
+        return container;
+    };
+
+    function getCurrentDateTimeDisplay() {
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear()).slice(-2);
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        return `${dd}-${mm}-${yy} ${hh}:${min}`;
+    }
+
+    function initTableForSection(section) {
+        if (table) { table.destroy(); table = null; }
+        const numEditor = canEdit ? "input" : false;
+        const dateEditor = canEdit ? datetimePickerEditor : false;
+
+        let columns = [];
+        let ajaxURL = '';
+
+        if (section === 'consumption') {
+            ajaxURL = '/api/module/DMIS01/consumption';
+            columns = [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40, frozen: true},
+                {title: "Date", field: "entry_date", width: 160, frozen: true, editor: dateEditor, formatter: (cell) => formatDateDisplay(cell.getValue()), cellEdited: (cell) => markDirty(cell.getRow())},
+                {title: "Equipment", field: "equipment", width: 170, editor: canEdit ? "list" : false, editorParams: {values: equipmentList, autocomplete: true}, cellEdited: async (cell) => {
+                    const eq = cell.getValue();
+                    const r = cell.getRow();
+                    if (eq) {
+                        try {
+                            const res = await fetch(`/api/module/DMIS01/latest_reading?equipment=${encodeURIComponent(eq)}`);
+                            if (res.ok) {
+                                const d = await res.json();
+                                if (d.end_reading) {
+                                    r.update({ start_reading: d.end_reading });
+                                    recalculateConsumption(r);
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                    markDirty(r);
+                }},
+                {title: "Start Reading", field: "start_reading", width: 120, editor: numEditor, cellEdited: (cell) => recalculateConsumption(cell.getRow())},
+                {title: "End Reading", field: "end_reading", width: 120, editor: numEditor, cellEdited: (cell) => recalculateConsumption(cell.getRow())},
+                {title: "Difference", field: "difference", width: 110, cssClass: "cell-autocalc", editor: false},
+                {title: "Diesel Filled (Litres)", field: "diesel_filled", width: 140, editor: numEditor, formatter: formatLitre, cellEdited: (cell) => {
+                    const raw = String(cell.getValue() || '').replace(/[^0-9.]/g, '');
+                    cell.setValue(raw, false);
+                    recalculateConsumption(cell.getRow());
+                }},
+                {title: "Rate", field: "rate", width: 110, cssClass: "cell-autocalc", editor: false, formatter: function(cell) {
+                    const row = cell.getRow().getData();
+                    const filled = String(row.diesel_filled || '').replace(/[^0-9.]/g, '').trim();
+                    if (!filled || parseFloat(filled) === 0) return '';
+                    const v = cell.getValue();
+                    if (v === null || v === undefined || v === '0.00' || v === '0' || String(v).trim() === '') return '';
+                    return v;
+                }},
+                {title: "Remarks", field: "remarks", width: 180, editor: canEdit ? "input" : false, cellEdited: (cell) => markDirty(cell.getRow())},
+                {title: "Created By", field: "created_by", width: 110, editor: false}
+            ];
+        } else if (section === 'received') {
+            ajaxURL = '/api/module/DMIS01/received';
+            columns = [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40, frozen: true},
+                {title: "Date", field: "received_date", width: 160, frozen: true, editor: dateEditor, formatter: (cell) => formatDateDisplay(cell.getValue()), cellEdited: (cell) => markDirty(cell.getRow())},
+                {title: "Diesel Received (Litres)", field: "diesel_received", width: 220, editor: numEditor, formatter: formatLitre, cellEdited: (cell) => {
+                    const raw = String(cell.getValue() || '').replace(/[^0-9.]/g, '');
+                    cell.setValue(raw, false);
+                    markDirty(cell.getRow());
+                }},
+                {title: "Created By", field: "created_by", width: 130, editor: false}
+            ];
+        } else if (section === 'stock') {
+            ajaxURL = '/api/module/DMIS01/tank_stock';
+            columns = [
+                {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40, frozen: true},
+                {title: "Date", field: "stock_date", width: 160, frozen: true, editor: dateEditor, formatter: (cell) => formatDateDisplay(cell.getValue()), cellEdited: (cell) => markDirty(cell.getRow())},
+                {title: "Equipment", field: "equipment", width: 200, editor: canEdit ? "list" : false, editorParams: {values: equipmentList, autocomplete: true}, cellEdited: (cell) => markDirty(cell.getRow())},
+                {title: "Month-start Tank Stock (Litres)", field: "month_start_tank_stock", width: 240, editor: numEditor, formatter: formatLitre, cellEdited: (cell) => {
+                    const raw = String(cell.getValue() || '').replace(/[^0-9.]/g, '');
+                    cell.setValue(raw, false);
+                    markDirty(cell.getRow());
+                }},
+                {title: "Created By", field: "created_by", width: 130, editor: false}
+            ];
+        }
+
+        table = new Tabulator("#table", {
+            height: "calc(100vh - 200px)",
+            layout: "fitDataFill",
+            columnDefaults: { headerSort: false },
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 20,
+            paginationSizeSelector: [20, 50, 75, 100, true],
+            paginationButtonCount: 5,
+            ajaxURL: ajaxURL,
+            ajaxParams: function() {
+                const p = {};
+                if (currentFilters.length) {
+                    p.filters = JSON.stringify(currentFilters);
+                }
+                return p;
+            },
+            ajaxResponse: function(url, params, response) {
+                const data = response.data || [];
+                const total = response.total !== undefined ? response.total : data.length;
+                document.getElementById('rowCount').textContent = data.length;
+                document.getElementById('totalCount').textContent = total;
+                return response;
+            },
+            selectable: true,
+            columns: columns
+        });
+    }
+
+    function recalculateConsumption(row) {
+        const d = row.getData();
+        const startStr = String(d.start_reading || '').trim();
+        const endStr = String(d.end_reading || '').trim();
+        let diff = '';
+        if (startStr !== '' && endStr !== '') {
+            const start = parseFloat(startStr) || 0;
+            const end = parseFloat(endStr) || 0;
+            diff = (end >= start ? end - start : 0).toFixed(2);
+        }
+        
+        const filledStr = String(d.diesel_filled || '').replace(/[^0-9.]/g, '').trim();
+        let rate = '';
+        if (diff !== '' && parseFloat(diff) > 0 && filledStr !== '' && parseFloat(filledStr) > 0) {
+            const filled = parseFloat(filledStr) || 0;
+            rate = (filled / parseFloat(diff)).toFixed(2);
+        }
+
+        row.update({
+            difference: diff,
+            rate: rate
+        });
+        markDirty(row);
+    }
+
+    function addRow() {
+        if (!currentSection || !table) return;
+        const nowStr = getCurrentDateTimeDisplay();
+
+        if (currentSection === 'consumption') {
+            table.addRow({
+                entry_date: nowStr,
+                equipment: '',
+                start_reading: '',
+                end_reading: '',
+                difference: '',
+                diesel_filled: '',
+                rate: '',
+                remarks: '',
+                created_by: '{{ session.get("username", "admin") }}'
+            }, true);
+        } else if (currentSection === 'received') {
+            table.addRow({
+                received_date: nowStr,
+                diesel_received: '',
+                created_by: '{{ session.get("username", "admin") }}'
+            }, true);
+        } else if (currentSection === 'stock') {
+            table.addRow({
+                stock_date: nowStr,
+                equipment: '',
+                month_start_tank_stock: '',
+                created_by: '{{ session.get("username", "admin") }}'
+            }, true);
+        }
+        markDirty();
+    }
+
+    async function saveAll() {
+        if (!currentSection || !table) return;
+
+        // Force active editor to commit value
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+
+        const rows = table.getRows();
+        let savedCount = 0;
+        let lastError = null;
+
+        for (const row of rows) {
+            const data = row.getData();
+
+            // Client-side validation: equipment required for consumption and stock
+            if ((currentSection === 'consumption' || currentSection === 'stock') && !data.equipment) {
+                // If the row is completely empty, skip it
+                if (currentSection === 'consumption' && !data.start_reading && !data.end_reading && !data.diesel_filled) {
+                    continue;
+                }
+                if (currentSection === 'stock' && !data.month_start_tank_stock) {
+                    continue;
+                }
+                alert('Please select an Equipment before saving.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/module/DMIS01/${currentSection}/save`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const resData = await res.json();
+                if (res.ok && resData.success) {
+                    row.update({ id: resData.id });
+                    savedCount++;
+                } else {
+                    lastError = resData.error || `Save failed (status ${res.status})`;
+                }
+            } catch (e) {
+                console.error(`Save error in ${currentSection}:`, e);
+                lastError = e.message;
+            }
+        }
+
+        const status = document.getElementById('saveStatus');
+        if (lastError && savedCount === 0) {
+            status.textContent = '❌ ' + lastError;
+            status.style.color = '#e53e3e';
+            alert('Save failed: ' + lastError);
+            return;
+        }
+
+        dirtyRowIds.clear();
+        isDirty = false;
+        document.getElementById('unsavedBanner').style.display = 'none';
+
+        status.textContent = `✓ Saved ${savedCount} row(s)` + (lastError ? ` (Note: ${lastError})` : '');
+        status.style.color = lastError ? '#dd6b20' : '#38a169';
+        setTimeout(() => { status.textContent = ''; }, 3500);
+    }
+
+    async function deleteSelected() {
+        if (!currentSection || !table) return;
+        const selected = table.getSelectedRows();
+        if (selected.length === 0) { alert('Select rows to delete.'); return; }
+        if (!confirm(`Delete ${selected.length} row(s)?`)) return;
+
+        const ids = selected.map(r => r.getData().id).filter(Boolean);
+        if (ids.length > 0) {
+            try {
+                await fetch(`/api/module/DMIS01/${currentSection}/delete`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: ids })
+                });
+            } catch (e) {
+                console.error(`Delete error in ${currentSection}:`, e);
+            }
+        }
+        selected.forEach(r => r.delete());
+    }
+
+    function exportExcel() {
+        window.location.href = `/api/module/DMIS01/export`;
+    }
+
+    // Keyboard shortcut Ctrl+S
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            saveAll();
+        }
+    });
+</script>
+{% endblock %}

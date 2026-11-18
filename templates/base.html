@@ -264,6 +264,10 @@
                         <span class="code">CU</span>
                         <span class="name">Cargo Utilization</span>
                     </div>
+                    <div class="module-item" onclick="goToModule('DMIS01', 'Diesel MIS')">
+                        <span class="code">DMIS01</span>
+                        <span class="name">Diesel MIS</span>
+                    </div>
                 </div>
             </div>
 
@@ -428,6 +432,10 @@
                     <div class="module-item" onclick="goToModule('VEM01', 'Equipment Master')">
                         <span class="code">VEM01</span>
                         <span class="name">Equipment Master</span>
+                    </div>
+                    <div class="module-item" onclick="goToModule('HEM01', 'HEME Master')">
+                        <span class="code">HEM01</span>
+                        <span class="name">HEME Master</span>
                     </div>
                     <div class="module-item" onclick="goToModule('VBM01', 'Barge Master')">
                         <span class="code">VBM01</span>
@@ -628,12 +636,26 @@
 
         // Recent modules
         function getRecent() {
-            return JSON.parse(localStorage.getItem('recentModules') || '[]');
+            let list = JSON.parse(localStorage.getItem('recentModules') || '[]');
+            let cleaned = [];
+            let seen = new Set();
+            for (let item of list) {
+                let code = (item.code === 'HEME01') ? 'HEM01' : item.code;
+                if (!seen.has(code)) {
+                    seen.add(code);
+                    cleaned.push({code: code, name: item.name});
+                }
+            }
+            if (cleaned.length !== list.length) {
+                localStorage.setItem('recentModules', JSON.stringify(cleaned));
+            }
+            return cleaned;
         }
 
         function addToRecent(code, name) {
-            let items = getRecent().filter(i => i.code !== code);
-            items.unshift({code, name});
+            let targetCode = (code === 'HEME01') ? 'HEM01' : code;
+            let items = getRecent().filter(i => i.code !== targetCode && i.code !== 'HEME01');
+            items.unshift({code: targetCode, name});
             if (items.length > 5) items.pop();
             localStorage.setItem('recentModules', JSON.stringify(items));
             renderRecent();

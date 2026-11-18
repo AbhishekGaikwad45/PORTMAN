@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}HEME Master - PORTMAN{% endblock %}
+
+{% block head %}
+<style>
+    /* Uniform dark slate headers */
+    .tabulator {
+        font-size: 12px;
+        border: 1px solid #e2e8f0;
+    }
+    .tabulator .tabulator-header {
+        background: #1e3a5f !important;
+        border-bottom: 1px solid #0f243d !important;
+    }
+    .tabulator .tabulator-header .tabulator-col {
+        background: transparent !important;
+        height: auto !important;
+        min-height: 38px !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.15) !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+        padding: 8px 6px !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-sizing: border-box !important;
+    }
+    .tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        font-size: 12px !important;
+        text-align: center !important;
+    }
+    .tabulator .tabulator-cell {
+        padding: 6px 8px !important;
+        font-size: 12px;
+        text-align: center;
+    }
+    .hem-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #fff;
+        border-bottom: 1px solid #e2e8f0;
+        flex-wrap: wrap;
+    }
+    .dark-theme .hem-toolbar {
+        background: #1e293b;
+        border-bottom-color: #334155;
+    }
+    .save-status {
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="module-header">
+    <h2>HEME Master</h2>
+    <span class="module-code">HEM01</span>
+    <button onclick="exportExcel()" title="Export HEME Master to Excel" style="background:#1e7a45;color:#e2e8f0;border:none;padding:4px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.5px;margin-left:8px;">&#11015; Export Excel</button>
+    <span id="saveStatus" class="save-status"></span>
+</div>
+
+<div class="hem-toolbar">
+    {% if permissions.can_add %}<button class="btn btn-add" onclick="addRow()">+ Add Row</button>{% endif %}
+    {% if permissions.can_add or permissions.can_edit %}<button class="btn btn-save" onclick="saveAll()">Save (Ctrl+S)</button>{% endif %}
+    {% if permissions.can_delete %}<button class="btn btn-delete" onclick="deleteSelected()" style="font-size:12px;padding:4px 12px;">Delete Selected</button>{% endif %}
+    <input type="text" id="searchInput" placeholder="Search Type, Model, Number..." oninput="onSearchChange()" style="padding:4px 8px;border:1px solid #cbd5e0;border-radius:4px;font-size:12px;width:220px;margin-left:8px;">
+    <div class="row-info" style="margin-left:auto;">Rows: <span id="rowCount">0</span> / <span id="totalCount">0</span></div>
+</div>
+
+<div id="unsavedBanner" style="display:none;background:#feebc8;border-left:4px solid #dd6b20;color:#7b341e;padding:8px 14px;font-size:12px;margin-bottom:8px;">
+    &#9888; You have unsaved changes &mdash; <button class="btn btn-save" onclick="saveAll()" style="margin:0;padding:2px 8px;font-size:11px;">Save Now</button>
+</div>
+
+<div id="table"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    addToRecent('HEM01', 'HEME Master');
+
+    const permissions = {
+        can_edit: {{ permissions.can_edit|default(0) }},
+        can_add: {{ permissions.can_add|default(0) }},
+        can_delete: {{ permissions.can_delete|default(0) }}
+    };
+    const canEdit = permissions.can_edit || permissions.can_add;
+
+    let isDirty = false;
+    let dirtyRowIds = new Set();
+    let searchDebounce = null;
+
+    function markDirty(row) {
+        isDirty = true;
+        document.getElementById('unsavedBanner').style.display = 'block';
+        if (row && row.getData().id) {
+            dirtyRowIds.add(String(row.getData().id));
+        }
+        const status = document.getElementById('saveStatus');
+        status.textContent = '● Unsaved changes';
+        status.style.color = '#dd6b20';
+    }
+
+    const table = new Tabulator("#table", {
+        height: "calc(100vh - 190px)",
+        layout: "fitColumns",
+        columnDefaults: { headerSort: false },
+        pagination: true,
+        paginationMode: "remote",
+        paginationSize: 20,
+        paginationSizeSelector: [20, 50, 75, 100, true],
+        ajaxURL: "/api/module/HEM01/data",
+        ajaxParams: function() {
+            const q = (document.getElementById('searchInput') || {}).value || '';
+            return q ? { search: q.trim() } : {};
+        },
+        ajaxResponse: function(url, params, response) {
+            const data = response.data || [];
+            const total = response.total !== undefined ? response.total : data.length;
+            document.getElementById('rowCount').textContent = data.length;
+            document.getElementById('totalCount').textContent = total;
+            return response;
+        },
+        columns: [
+            {formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center", headerSort: false, width: 40},
+            {title: "Type", field: "type", editor: canEdit ? "input" : false, widthGrow: 2, cellEdited: (cell) => markDirty(cell.getRow())},
+            {title: "Model", field: "model", editor: canEdit ? "input" : false, widthGrow: 2, cellEdited: (cell) => markDirty(cell.getRow())},
+            {title: "Number", field: "number", editor: canEdit ? "input" : false, widthGrow: 2, cellEdited: (cell) => markDirty(cell.getRow())},
+            {title: "Created By", field: "created_by", editor: false, widthGrow: 1}
+        ],
+        selectable: true
+    });
+
+    if (localStorage.getItem('theme') === 'dark') {
+        document.getElementById('table').classList.add('tabulator-dark');
+    }
+
+    function onSearchChange() {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+            table.replaceData();
+        }, 300);
+    }
+
+    function addRow() {
+        table.addRow({
+            type: '',
+            model: '',
+            number: '',
+            created_by: '{{ session.get("username", "admin") }}'
+        }, true);
+        markDirty();
+    }
+
+    async function deleteSelected() {
+        const rows = table.getSelectedRows();
+        if (!rows.length) { alert('Select rows to delete'); return; }
+        if (!confirm(`Delete ${rows.length} row(s)?`)) return;
+
+        const idsToDelete = [];
+        rows.forEach(r => {
+            const d = r.getData();
+            if (d.id) idsToDelete.push(d.id);
+        });
+
+        if (idsToDelete.length) {
+            try {
+                const res = await fetch('/api/module/HEM01/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: idsToDelete })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert('Delete failed: ' + (err.error || 'Server error'));
+                    return;
+                }
+            } catch (e) {
+                alert('Delete failed: ' + e.message);
+                return;
+            }
+        }
+        rows.forEach(r => r.delete());
+    }
+
+    async function saveAll() {
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+
+        const rows = table.getRows();
+        let savedCount = 0;
+        let errors = [];
+
+        for (const row of rows) {
+            const data = row.getData();
+            const isNew = !data.id;
+            const wasDirty = data.id && dirtyRowIds.has(String(data.id));
+
+            if (!isNew && !wasDirty) continue;
+
+            const t = (data.type || '').trim();
+            const n = (data.number || '').trim();
+
+            // Skip completely empty new rows
+            if (isNew && !t && !n && !(data.model || '').trim()) continue;
+
+            if (!t) {
+                errors.push(`Type is required for row with Number "${n || '(empty)'}"`);
+                continue;
+            }
+            if (!n) {
+                errors.push(`Number is required for row with Type "${t}"`);
+                continue;
+            }
+
+            try {
+                const res = await fetch('/api/module/HEM01/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (res.ok && result.id) {
+                    row.update({ id: result.id });
+                    if (data.id) dirtyRowIds.delete(String(data.id));
+                    savedCount++;
+                } else {
+                    errors.push(result.error || `Failed to save ${n}`);
+                }
+            } catch (e) {
+                errors.push(e.message);
+            }
+        }
+
+        if (errors.length) {
+            alert('Some rows could not be saved:\n• ' + errors.join('\n• '));
+        }
+
+        if (savedCount > 0) {
+            isDirty = dirtyRowIds.size > 0;
+            if (!isDirty) {
+                document.getElementById('unsavedBanner').style.display = 'none';
+            }
+            const status = document.getElementById('saveStatus');
+            status.textContent = `✓ Saved ${savedCount} row(s)`;
+            status.style.color = '#38a169';
+            setTimeout(() => {
+                if (!isDirty) status.textContent = '';
+            }, 3000);
+        }
+    }
+
+    function exportExcel() {
+        window.location.href = '/api/module/HEM01/export';
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+            e.preventDefault();
+            saveAll();
+        }
+    });
+
+    window.addEventListener('beforeunload', function(e) {
+        if (isDirty) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+</script>
+{% endblock %}
